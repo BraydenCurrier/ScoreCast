@@ -13,14 +13,21 @@ CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 
 def get_team_abbr(team):
-    # ESPN provides the string abbreviation natively (e.g., "ALA", "TEX", "OSU")
+    # Fetch the team's unique ESPN ID
+    team_id = str(team.get("id", ""))
+    
+    # 🛠 Unique ID Check for the two USCs
+    if team_id == "2579":
+        return "USCG"  # South Carolina Gamecocks
+    if team_id == "30":
+        return "USC"   # Southern California Trojans
+
+    # Fallback to standard abbreviation if it's not one of those IDs
     raw_abbr = team.get("abbreviation", team.get("name", "")[:3].upper())
     
-    # 🛠 Manual Mapping Dict to override specific team abbreviations
+    # Your existing manual mapping overrides (like Texas A&M)
     OVERRIDES = {
         "TA&M": "TAMU",
-        # You can add other corrections here if needed, like:
-        # "WSHM": "WASH", 
     }
     
     return OVERRIDES.get(raw_abbr, raw_abbr)
