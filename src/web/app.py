@@ -1,4 +1,5 @@
 from functools import wraps
+from html import escape
 
 from flask import Flask, request, redirect, session
 
@@ -29,6 +30,7 @@ def login_required(f):
 
 def page_header(active_page="games"):
     games_active = "active" if active_page == "games" else ""
+    alerts_active = "active" if active_page == "alerts" else ""
     settings_active = "active" if active_page == "settings" else ""
 
     return f"""
@@ -148,6 +150,23 @@ def page_styles():
             color: #777;
         }
 
+        .filter-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 14px;
+            align-items: center;
+        }
+
+        .select-input {
+            flex: 1;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid #444;
+            background: #0f0f14;
+            color: white;
+            font-size: 15px;
+        }
+
         .control {
             margin-bottom: 20px;
         }
@@ -178,12 +197,6 @@ def page_styles():
         input[type=range] {
             width: 100%;
             accent-color: #0a84ff;
-        }
-
-        .game-buttons {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 12px;
         }
 
         .secondary-button {
@@ -309,8 +322,87 @@ def page_styles():
             margin-bottom: 12px;
             font-size: 14px;
         }
+
+        .team-alert-row {
+            padding: 14px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .team-alert-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .alert-options {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .alert-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            padding: 8px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .alert-option input {
+            transform: scale(1.1);
+        }
+
+        @media (max-width: 600px) {
+            .filter-row {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .alert-options {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
     """
+
+
+def get_game_league(game):
+    class_name = game.__class__.__name__
+
+    if class_name == "CollegeFootballGame":
+        return "cfb", "CFB"
+
+    if class_name == "FootballGame":
+        return "nfl", "NFL"
+
+    if class_name == "SoccerGame":
+        return "soccer", "Soccer"
+    
+    if class_name == "BasketballGame":
+        return "nba", "NBA"
+    
+    if class_name == "HockeyGame":
+        return "nhl", "NHL"
+    
+    return "mlb", "MLB"
+
+
+def get_display_status(game, league_key):
+    status = getattr(game, "status", "")
+
+    if status == "STATUS_SCHEDULED":
+        if league_key in ("nfl", "cfb"):
+            return f"Week {getattr(game, 'week', 1)}"
+
+        if league_key == "soccer":
+            return getattr(game, "stage", "Scheduled")
+
+        return "Scheduled"
+
+    return status
 
 
 @app.route("/")
@@ -381,43 +473,29 @@ def games():
     for game in latest_games:
         game_id = f"{game.away}@{game.home}"
         checked = "" if game_id in hidden else "checked"
+        league_key, league_label = get_game_league(game)
+        display_status = get_display_status(game, league_key)
 
-        if hasattr(game, "quarter"):
-            league = "NFL"
-
-            if game.status == "STATUS_SCHEDULED":
-                display_status = f"Week {getattr(game, 'week', 1)}"
-            else:
-                display_status = game.status
-        else:
-            if hasattr(game, "minute"):
-                league = "Soccer"
-
-                if game.status == "STATUS_SCHEDULED":
-                    display_status = game.stage
-                else:
-                    display_status = game.status
-            else:
-                league = "MLB"
-
-                if game.status == "STATUS_SCHEDULED":
-                    display_status = "Scheduled"
-                else:
-                    display_status = game.status
+        safe_game_id = escape(game_id, quote=True)
+        safe_away = escape(str(game.away))
+        safe_home = escape(str(game.home))
+        safe_status = escape(str(display_status))
+        away_score = escape(str(getattr(game, "away_score", 0)))
+        home_score = escape(str(getattr(game, "home_score", 0)))
 
         game_rows += f"""
-        <div class="game-row-container" draggable="true" data-id="{game_id}">
+        <div class="game-row-container" draggable="true" data-id="{safe_game_id}" data-league="{league_key}">
             <label class="game-row">
-                <input type="checkbox" name="game" value="{game_id}" data-league="{league.lower()}" {checked}>
+                <input type="checkbox" name="game" value="{safe_game_id}" {checked}>
                 <div class="game-info">
-                    <div class="matchup">{game.away} @ {game.home}</div>
+                    <div class="matchup">{safe_away} @ {safe_home}</div>
                     <div class="details">
-                        {game.away_score} - {game.home_score} · {display_status}
+                        {away_score} - {home_score} · {safe_status}
                     </div>
                 </div>
 
                 <div class="league-badge">
-                    {league}
+                    {league_label}
                 </div>
             </label>
         </div>
@@ -444,7 +522,7 @@ def games():
         {page_header("games")}
 
         <form method="POST" action="/save_games">
-            <div class="card">
+            <div class="card" id="games_card">
                 <div class="card-title">Games</div>
 
                 <input
@@ -455,12 +533,19 @@ def games():
                     oninput="filterGames()"
                 >
 
-                <div class="game-buttons">
-                    <button type="button" class="secondary-button" onclick="selectAllGames()">All</button>
-                    <button type="button" class="secondary-button" onclick="selectLeague('mlb')">MLB</button>
-                    <button type="button" class="secondary-button" onclick="selectLeague('nfl')">NFL</button>
-                    <button type="button" class="secondary-button" onclick="selectLeague('soccer')">Soccer</button>
-                    <button type="button" class="secondary-button" onclick="deselectAllGames()">None</button>
+                <div class="filter-row">
+                    <select id="league_filter" class="select-input" onchange="filterGames()">
+                        <option value="all">All Sports</option>
+                        <option value="mlb">MLB</option>
+                        <option value="nfl">NFL</option>
+                        <option value="cfb">CFB</option>
+                        <option value="soccer">Soccer</option>
+                        <option value="nba">NBA</option>
+                        <option value="nhl">NHL</option>
+                    </select>
+
+                    <button type="button" class="secondary-button" onclick="selectVisibleGames()">All</button>
+                    <button type="button" class="secondary-button" onclick="deselectVisibleGames()">None</button>
                 </div>
 
                 {game_rows}
@@ -473,72 +558,80 @@ def games():
     </div>
 
     <script>
+        function getCurrentLeagueFilter() {{
+            const filter = document.getElementById("league_filter");
+            return filter ? filter.value : "all";
+        }}
+
         function filterGames() {{
             const search = document.getElementById("game_search").value.toLowerCase();
+            const selectedLeague = getCurrentLeagueFilter();
 
             document.querySelectorAll(".game-row-container").forEach(function(row) {{
                 const text = row.innerText.toLowerCase();
-                row.style.display = text.includes(search) ? "" : "none";
+                const rowLeague = row.dataset.league;
+
+                const matchesSearch = text.includes(search);
+                const matchesLeague = selectedLeague === "all" || rowLeague === selectedLeague;
+
+                row.style.display = matchesSearch && matchesLeague ? "" : "none";
             }});
         }}
 
-        function selectAllGames() {{
-            document.querySelectorAll('input[type="checkbox"][name="game"]').forEach(function(cb) {{
-                cb.checked = true;
+        function rowIsVisible(row) {{
+            return row.style.display !== "none";
+        }}
+
+        function selectVisibleGames() {{
+            document.querySelectorAll(".game-row-container").forEach(function(row) {{
+                if (!rowIsVisible(row)) return;
+
+                const checkbox = row.querySelector('input[type="checkbox"][name="game"]');
+                if (checkbox) checkbox.checked = true;
             }});
         }}
 
-        function deselectAllGames() {{
-            document.querySelectorAll('input[type="checkbox"][name="game"]').forEach(function(cb) {{
-                cb.checked = false;
+        function deselectVisibleGames() {{
+            document.querySelectorAll(".game-row-container").forEach(function(row) {{
+                if (!rowIsVisible(row)) return;
+
+                const checkbox = row.querySelector('input[type="checkbox"][name="game"]');
+                if (checkbox) checkbox.checked = false;
             }});
         }}
 
-        function selectLeague(league) {{
-            let anyChecked = false;
+        const container = document.getElementById("games_card");
 
-            document.querySelectorAll('input[type="checkbox"][name="game"]').forEach(function(cb) {{
-                if (cb.getAttribute('data-league') === league && cb.checked) {{
-                    anyChecked = true;
-                }}
-            }});
-
-            document.querySelectorAll('input[type="checkbox"][name="game"]').forEach(function(cb) {{
-                if (cb.getAttribute('data-league') === league) {{
-                    cb.checked = !anyChecked;
-                }}
-            }});
-        }}
-
-        const container = document.querySelector('.card');
-
-        container.addEventListener('dragstart', function(e) {{
-            const row = e.target.closest('.game-row-container');
+        container.addEventListener("dragstart", function(e) {{
+            const row = e.target.closest(".game-row-container");
 
             if (row) {{
-                row.classList.add('dragging');
+                row.classList.add("dragging");
 
                 if (e.dataTransfer) {{
-                    e.dataTransfer.setData('text/plain', '');
+                    e.dataTransfer.setData("text/plain", "");
                 }}
             }}
         }});
 
-        container.addEventListener('dragend', function(e) {{
-            const row = e.target.closest('.game-row-container');
+        container.addEventListener("dragend", function(e) {{
+            const row = e.target.closest(".game-row-container");
 
             if (row) {{
-                row.classList.remove('dragging');
+                row.classList.remove("dragging");
             }}
         }});
 
-        container.addEventListener('dragover', function(e) {{
+        container.addEventListener("dragover", function(e) {{
             e.preventDefault();
 
-            const draggingItem = document.querySelector('.dragging');
+            const draggingItem = document.querySelector(".dragging");
             if (!draggingItem) return;
 
-            const siblings = [...container.querySelectorAll('.game-row-container:not(.dragging)')];
+            const siblings = [...container.querySelectorAll(".game-row-container:not(.dragging)")]
+                .filter(function(row) {{
+                    return row.style.display !== "none";
+                }});
 
             const nextSibling = siblings.find(sibling => {{
                 const box = sibling.getBoundingClientRect();
@@ -551,6 +644,275 @@ def games():
                 container.appendChild(draggingItem);
             }}
         }});
+
+        document.addEventListener("DOMContentLoaded", filterGames);
+    </script>
+</body>
+</html>
+    """
+
+
+@app.route("/alerts", methods=["GET", "POST"])
+@login_required
+def alerts_page():
+    from alerts.rules import ALERT_TYPES, LEAGUE_ALERT_TYPES, get_league
+
+    settings = get_settings()
+    alerts = settings.get("alerts", {})
+
+    if request.method == "POST":
+        team_rules = {}
+
+        for key in request.form:
+            if key.startswith("team_rule:"):
+                team = key.split(":", 1)[1]
+                selected_alert_types = request.form.getlist(key)
+
+                if selected_alert_types:
+                    team_rules[team] = selected_alert_types
+
+        selected_players = request.form.get("players", "")
+        selected_fantasy_players = request.form.get("fantasy_players", "")
+
+        alerts["enabled"] = request.form.get("enabled") == "on"
+        alerts["team_rules"] = team_rules
+        alerts["teams"] = sorted(team_rules.keys())
+        alerts["players"] = [
+            p.strip()
+            for p in selected_players.splitlines()
+            if p.strip()
+        ]
+        alerts["fantasy_players"] = [
+            p.strip()
+            for p in selected_fantasy_players.splitlines()
+            if p.strip()
+        ]
+        alerts["cooldown"] = int(request.form.get("cooldown", 60))
+        alerts["duration"] = int(request.form.get("duration", 5))
+
+        update_settings({"alerts": alerts})
+        return redirect("/alerts")
+
+    team_rules = alerts.get("team_rules", {})
+    known_teams = {}
+
+    for game in latest_games:
+        league = get_league(game)
+
+        known_teams[f"{league}:{game.away}"] = {
+            "team": game.away,
+            "league": league,
+        }
+
+        known_teams[f"{league}:{game.home}"] = {
+            "team": game.home,
+            "league": league,
+        }
+
+    selected_players = "\n".join(alerts.get("players", []))
+    selected_fantasy_players = "\n".join(alerts.get("fantasy_players", []))
+
+    team_rows = ""
+
+    for team_key, team_data in sorted(known_teams.items()):
+        team = team_data["team"]
+        league = team_data["league"]
+
+        selected_types = set(team_rules.get(team, []))
+
+        # Backward compatibility with old alerts["teams"] list.
+        if not selected_types and team in alerts.get("teams", []):
+            selected_types = {"score_change"}
+
+        allowed_types = LEAGUE_ALERT_TYPES.get(league, ["score_change"])
+        safe_team = escape(str(team), quote=True)
+        safe_league = escape(str(league), quote=True)
+
+        checkboxes = ""
+
+        for alert_type in allowed_types:
+            label = ALERT_TYPES.get(alert_type, alert_type)
+            checked = "checked" if alert_type in selected_types else ""
+            safe_alert_type = escape(str(alert_type), quote=True)
+            safe_label = escape(str(label))
+
+            checkboxes += f"""
+            <label class="alert-option">
+                <input
+                    type="checkbox"
+                    name="team_rule:{safe_team}"
+                    value="{safe_alert_type}"
+                    {checked}
+                >
+                <span>{safe_label}</span>
+            </label>
+            """
+
+        team_rows += f"""
+        <div class="team-alert-row" data-league="{safe_league}">
+            <div class="team-alert-header">
+                <div class="matchup">{safe_team}</div>
+                <div class="details">{safe_league.upper()}</div>
+            </div>
+
+            <div class="alert-options">
+                {checkboxes}
+            </div>
+        </div>
+        """
+
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Scoreboard Alerts</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    {page_styles()}
+</head>
+
+<body>
+    <div class="page">
+        {page_header("alerts")}
+
+        <form method="POST">
+            <div class="card">
+                <div class="card-title">Alert Settings</div>
+
+                <label class="game-row">
+                    <input type="checkbox" name="enabled" {"checked" if alerts.get("enabled", True) else ""}>
+                    <div class="game-info">
+                        <div class="matchup">Enable alerts</div>
+                        <div class="details">Show selected scoring alerts on the ticker</div>
+                    </div>
+                </label>
+
+                <div class="control">
+                    <div class="control-top">
+                        <label>Cooldown</label>
+                        <input class="number-input" type="number" name="cooldown"
+                            min="5" max="600" step="5"
+                            value="{alerts.get("cooldown", 60)}">
+                    </div>
+                    <div class="hint">Minimum seconds before the same alert can show again.</div>
+                </div>
+
+                <div class="control">
+                    <div class="control-top">
+                        <label>Duration</label>
+                        <input class="number-input" type="number" name="duration"
+                            min="2" max="20" step="1"
+                            value="{alerts.get("duration", 5)}">
+                    </div>
+                    <div class="hint">How many seconds each alert stays on screen.</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Team Alerts</div>
+
+                <input
+                    class="search-input"
+                    type="text"
+                    id="team_search"
+                    placeholder="Search teams..."
+                    oninput="filterAlertTeams()"
+                >
+
+                <div class="filter-row">
+                    <select id="alert_league_filter" class="select-input" onchange="filterAlertTeams()">
+                        <option value="all">All Sports</option>
+                        <option value="mlb">MLB</option>
+                        <option value="nfl">NFL</option>
+                        <option value="cfb">CFB</option>
+                        <option value="soccer">Soccer</option>
+                        <option value="nhl">NHL</option>
+                    </select>
+
+                    <button type="button" class="secondary-button" onclick="selectVisibleAlertTypes()">All</button>
+                    <button type="button" class="secondary-button" onclick="deselectVisibleAlertTypes()">None</button>
+                </div>
+
+                {team_rows if team_rows else '<div class="empty">No teams loaded yet.</div>'}
+            </div>
+
+            <div class="card">
+                <div class="card-title">Player Alerts</div>
+
+                <textarea
+                    class="search-input"
+                    name="players"
+                    rows="8"
+                    placeholder="One player per line"
+                >{escape(selected_players)}</textarea>
+
+                <div class="hint">
+                    Reserved for future player-based alerts.
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Fantasy Alerts</div>
+
+                <textarea
+                    class="search-input"
+                    name="fantasy_players"
+                    rows="8"
+                    placeholder="One fantasy player per line"
+                >{escape(selected_fantasy_players)}</textarea>
+
+                <div class="hint">
+                    Reserved for Sleeper fantasy integration later.
+                </div>
+            </div>
+
+            <button class="save-button" type="submit">
+                Save Alerts
+            </button>
+        </form>
+    </div>
+
+    <script>
+        function getCurrentAlertLeagueFilter() {{
+            const filter = document.getElementById("alert_league_filter");
+            return filter ? filter.value : "all";
+        }}
+
+        function filterAlertTeams() {{
+            const search = document.getElementById("team_search").value.toLowerCase();
+            const selectedLeague = getCurrentAlertLeagueFilter();
+
+            document.querySelectorAll(".team-alert-row").forEach(function(row) {{
+                const rowLeague = row.dataset.league;
+                const text = row.innerText.toLowerCase();
+
+                const matchesLeague = selectedLeague === "all" || rowLeague === selectedLeague;
+                const matchesSearch = text.includes(search);
+
+                row.style.display = matchesLeague && matchesSearch ? "" : "none";
+            }});
+        }}
+
+        function selectVisibleAlertTypes() {{
+            document.querySelectorAll(".team-alert-row").forEach(function(row) {{
+                if (row.style.display === "none") return;
+
+                row.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {{
+                    cb.checked = true;
+                }});
+            }});
+        }}
+
+        function deselectVisibleAlertTypes() {{
+            document.querySelectorAll(".team-alert-row").forEach(function(row) {{
+                if (row.style.display === "none") return;
+
+                row.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {{
+                    cb.checked = false;
+                }});
+            }});
+        }}
+
+        document.addEventListener("DOMContentLoaded", filterAlertTeams);
     </script>
 </body>
 </html>
