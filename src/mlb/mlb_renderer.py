@@ -64,17 +64,7 @@ def draw_team_logo(draw, team_abbreviation, x_start, y_start):
 def render_baseball_game_onto(draw, game, offset_x):
     print_gfx_5x7(draw, game.away, 3 + offset_x, 2, team_color(game.away))
 
-    if game.away_score < 10:
-        print_gfx_5x7(draw, str(game.away_score), 9 + offset_x, 13, YELLOW)
-    else:
-        print_gfx_5x7(draw, str(game.away_score), 5 + offset_x, 13, YELLOW)
-
     print_gfx_5x7(draw, game.home, 44 + offset_x, 2, team_color(game.home))
-
-    if game.home_score < 10:
-        draw_text_right(draw, game.home_score, 55 + offset_x, 13, YELLOW)
-    else:
-        draw_text_right(draw, game.home_score, 60 + offset_x, 13, YELLOW)
 
     if game.status == "Preview":
         width = get_3x5_width(game.start_time)
@@ -86,6 +76,16 @@ def render_baseball_game_onto(draw, game, offset_x):
         draw_base_diamond(draw, 24 + offset_x, 14, game.third)
         draw_base_diamond(draw, 38 + offset_x, 14, game.first)
         draw_base_diamond(draw, 31 + offset_x, 7, game.second)
+
+        if game.away_score < 10:
+            print_gfx_5x7(draw, str(game.away_score), 9 + offset_x, 13, YELLOW)
+        else:
+            print_gfx_5x7(draw, str(game.away_score), 5 + offset_x, 13, YELLOW)
+
+        if game.home_score < 10:
+            draw_text_right(draw, game.home_score, 55 + offset_x, 13, YELLOW)
+        else:
+            draw_text_right(draw, game.home_score, 60 + offset_x, 13, YELLOW)
 
     draw_outs(draw, 25 + offset_x, 26, game.outs)
 

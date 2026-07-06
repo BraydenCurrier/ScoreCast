@@ -41,18 +41,8 @@ def render_soccer_game_onto(draw, game, offset_x):
     # Team Away
     print_gfx_5x7(draw, game.away, 3 + offset_x, 2, WHITE)
 
-    if game.away_score < 10:
-        print_gfx_5x7(draw, str(game.away_score), 9 + offset_x, 13, YELLOW)
-    else:
-        print_gfx_5x7(draw, str(game.away_score), 5 + offset_x, 13, YELLOW)
-
     # Team Home
     print_gfx_5x7(draw, game.home, 44 + offset_x, 2, WHITE)
-
-    if game.home_score < 10:
-        draw_text_right(draw, game.home_score, 55 + offset_x, 13, YELLOW)
-    else:
-        draw_text_right(draw, game.home_score, 60 + offset_x, 13, YELLOW)
 
     # Preview or Live/Final
     if game.status == "SCHEDULED":
@@ -62,6 +52,16 @@ def render_soccer_game_onto(draw, game, offset_x):
         print_4x5_centered(draw, game.date, 32 + offset_x, 14, WHITE)
     else:
         print_4x5_centered(draw, game.status, 32 + offset_x, 2, YELLOW)
+
+        if game.home_score < 10:
+            draw_text_right(draw, game.home_score, 55 + offset_x, 13, YELLOW)
+        else:
+            draw_text_right(draw, game.home_score, 60 + offset_x, 13, YELLOW)
+
+        if game.away_score < 10:
+            print_gfx_5x7(draw, str(game.away_score), 9 + offset_x, 13, YELLOW)
+        else:
+            print_gfx_5x7(draw, str(game.away_score), 5 + offset_x, 13, YELLOW)
 
     stage_name = game.stage.replace("-", " ").upper()
     print_4x5_centered(draw, stage_name, 32 + offset_x, 24, WHITE)
