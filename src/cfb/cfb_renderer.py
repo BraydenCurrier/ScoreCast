@@ -1,7 +1,7 @@
 from PIL import Image, ImageDraw
 
 from common.config import PANEL_WIDTH, PANEL_HEIGHT
-from common.fonts import print_3x5, get_3x5_width, print_4x5, get_4x5_width, print_4x5_centered, print_clock, print_gfx_5x7, gfx_5x7_width, draw_text_right
+from common.fonts import print_3x5, get_3x5_width, print_3x5_right, print_4x5, get_4x5_width, print_4x5_centered, print_4x5_right, print_clock, print_gfx_5x7, gfx_5x7_width, draw_text_right
 from cfb.colors import RED, WHITE, GREY, YELLOW, GRASS_GREEN, BALL_BROWN, team_color
 from cfb import cfb_logos
 
@@ -241,7 +241,13 @@ def render_football_game_onto(draw, game, offset_x):
     # 1. Teams: Expanded canvas lets us pull Away further left (2px) 
     # and push Home further right (52px) to clear 4-letter abbreviations
     print_gfx_5x7(draw, game.away, 2 + offset_x, 2, away_color)
-    print_gfx_5x7(draw, game.home, 52 + offset_x, 2, home_color)
+    draw_text_right(draw, game.home, 73 + offset_x, 2, home_color)
+
+    # Ranks
+    if(game.away_rank != None):
+        print_4x5(draw, "#" + str(game.away_rank), 2 + offset_x, 10, YELLOW)
+    if(game.home_rank != None):
+        print_4x5_right(draw, "#" + str(game.home_rank), 73 + offset_x, 10, YELLOW)
 
     # The absolute horizontal center of our 76px card is now 38
     if(game.status == "STATUS_SCHEDULED"):
@@ -263,7 +269,7 @@ def render_football_game_onto(draw, game, offset_x):
 
         # Possession Mini-Football: Positioned symmetrically around the top quarter text
         if game.possession == game.away:
-            draw_possession_football(draw, 26 + offset_x, 3)
+            draw_possession_football(draw, 25 + offset_x, 3)
         else:
             draw_possession_football(draw, 46 + offset_x, 3)
         
@@ -274,15 +280,15 @@ def render_football_game_onto(draw, game, offset_x):
     # 2. Score Alignment
     # Away score stays aligned left next to the away abbreviation
     if game.away_score < 10:
-        print_gfx_5x7(draw, str(game.away_score), 8 + offset_x, 14, YELLOW)
+        print_gfx_5x7(draw, str(game.away_score), 8 + offset_x, 16, YELLOW)
     else:
-        print_gfx_5x7(draw, str(game.away_score), 5 + offset_x, 14, YELLOW)
+        print_gfx_5x7(draw, str(game.away_score), 5 + offset_x, 16, YELLOW)
 
     # Home score utilizes right-alignment anchor points shifted out to match the new 76px boundary
     if game.home_score < 10:
-        draw_text_right(draw, game.home_score, 67 + offset_x, 14, YELLOW)
+        draw_text_right(draw, game.home_score, 67 + offset_x, 16, YELLOW)
     else:
-        draw_text_right(draw, game.home_score, 71 + offset_x, 14, YELLOW)
+        draw_text_right(draw, game.home_score, 71 + offset_x, 16, YELLOW)
 
     # 3. Football Field Tracker placement (Centered on the bottom row)
     # Stretches across the core of the canvas from pixel 10 to pixel 66

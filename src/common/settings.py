@@ -5,11 +5,18 @@ import threading
 SETTINGS_FILE = "/tmp/ticker_settings.json"
 
 DEFAULT_SETTINGS = {
-    "scroll_speed": 1,
+    "scroll_speed": 0.5,
     "brightness": 70,
     "refresh_interval": 30,
     "hidden_games": [],
-    "game_order": []
+    "game_order": [],
+
+    "music": {
+        "enabled": False,
+        "provider": "spotify",
+        "poll_interval": 5,
+        "display_mode": "auto"
+    }
 }
 
 _settings_lock = threading.RLock()

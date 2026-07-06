@@ -1,0 +1,210 @@
+from nhl.models import HockeyGame
+
+
+TEST_GAMES_NHL = [
+
+    #
+    # Scheduled
+    #
+
+    HockeyGame(
+        away="BOS",
+        home="NYR",
+        status="Scheduled",
+        start_time="6:00",
+        date="Oct 7",
+        away_score=0,
+        home_score=0,
+        away_wins=0,
+        away_losses=0,
+        away_ot_losses=0,
+        home_wins=0,
+        home_losses=0,
+        home_ot_losses=0,
+    ),
+
+    HockeyGame(
+        away="TOR",
+        home="MTL",
+        status="Scheduled",
+        start_time="6:30",
+        date="Oct 7",
+        away_score=0,
+        home_score=0,
+        away_wins=0,
+        away_losses=0,
+        away_ot_losses=0,
+        home_wins=0,
+        home_losses=0,
+        home_ot_losses=0,
+    ),
+
+    #
+    # First Period
+    #
+
+    HockeyGame(
+        away="DAL",
+        home="COL",
+        status="Live",
+        start_time="",
+        date="",
+        away_score=1,
+        home_score=0,
+        away_wins=48,
+        away_losses=22,
+        away_ot_losses=12,
+        home_wins=50,
+        home_losses=21,
+        home_ot_losses=11,
+        period=1,
+        clock="12:41",
+    ),
+
+    #
+    # Second Period
+    #
+
+    HockeyGame(
+        away="VGK",
+        home="LA",
+        status="Live",
+        start_time="",
+        date="",
+        away_score=2,
+        home_score=2,
+        away_wins=46,
+        away_losses=24,
+        away_ot_losses=12,
+        home_wins=44,
+        home_losses=27,
+        home_ot_losses=11,
+        period=2,
+        clock="8:53",
+    ),
+
+    #
+    # Intermission
+    #
+
+    HockeyGame(
+        away="EDM",
+        home="CGY",
+        status="Intermission",
+        start_time="",
+        date="",
+        away_score=3,
+        home_score=2,
+        away_wins=49,
+        away_losses=23,
+        away_ot_losses=10,
+        home_wins=40,
+        home_losses=30,
+        home_ot_losses=12,
+        period=2,
+        clock="0:00",
+        intermission=True,
+    ),
+
+    #
+    # Third Period
+    #
+
+    HockeyGame(
+        away="TB",
+        home="FLA",
+        status="Live",
+        start_time="",
+        date="",
+        away_score=4,
+        home_score=3,
+        away_wins=45,
+        away_losses=26,
+        away_ot_losses=11,
+        home_wins=47,
+        home_losses=24,
+        home_ot_losses=11,
+        period=3,
+        clock="2:15",
+    ),
+
+    #
+    # Overtime
+    #
+
+    HockeyGame(
+        away="MIN",
+        home="WPG",
+        status="Overtime",
+        start_time="",
+        date="",
+        away_score=2,
+        home_score=2,
+        away_wins=42,
+        away_losses=28,
+        away_ot_losses=12,
+        home_wins=49,
+        home_losses=21,
+        home_ot_losses=12,
+        period=4,
+        clock="3:08",
+        overtime=True,
+    ),
+
+    #
+    # Shootout
+    #
+
+    HockeyGame(
+        away="VAN",
+        home="SEA",
+        status="Shootout",
+        start_time="",
+        date="",
+        away_score=3,
+        home_score=3,
+        away_wins=44,
+        away_losses=27,
+        away_ot_losses=11,
+        home_wins=37,
+        home_losses=34,
+        home_ot_losses=11,
+        shootout=True,
+    ),
+
+    #
+    # Final
+    #
+
+    HockeyGame(
+        away="OTT",
+        home="BUF",
+        status="Final",
+        start_time="",
+        date="",
+        away_score=5,
+        home_score=2,
+        away_wins=39,
+        away_losses=31,
+        away_ot_losses=12,
+        home_wins=35,
+        home_losses=35,
+        home_ot_losses=12,
+    ),
+
+    HockeyGame(
+        away="STL",
+        home="NSH",
+        status="Final",
+        start_time="",
+        date="",
+        away_score=1,
+        home_score=0,
+        away_wins=41,
+        away_losses=29,
+        away_ot_losses=12,
+        home_wins=38,
+        home_losses=31,
+        home_ot_losses=13,
+    ),
+]

@@ -26,7 +26,7 @@ TEST_GAMES_CFB = [
     # Final state: Blowout (One ranked team, one unranked/None)
     CollegeFootballGame(
         away="CLEM", home="FSU", status="FINAL", start_time="3:30 PM",
-        away_rank=18, home_rank=None,
+        away_rank=18, home_rank=25,
         away_score=42, home_score=10,
         away_wins=6, away_losses=4, home_wins=2, home_losses=8,
         quarter=4, clock="0:00",
