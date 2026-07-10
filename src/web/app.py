@@ -5,6 +5,8 @@ from flask import Flask, request, redirect, session
 
 from common.settings import get_settings, update_settings
 
+from fantasy.api import connect_sleeper_user, get_user_leagues
+
 app = Flask(__name__)
 app.secret_key = "change-this-later"
 
@@ -32,6 +34,7 @@ def page_header(active_page="games"):
     games_active = "active" if active_page == "games" else ""
     alerts_active = "active" if active_page == "alerts" else ""
     settings_active = "active" if active_page == "settings" else ""
+    fantasy_active = "active" if active_page == "fantasy" else ""
 
     return f"""
     <div class="header">
@@ -45,6 +48,7 @@ def page_header(active_page="games"):
 
     <div class="tabs">
         <a class="tab {games_active}" href="/games">Games</a>
+        <a class="tab {fantasy_active}" href="/fantasy">Fantasy</a>
         <a class="tab {settings_active}" href="/settings">Settings</a>
     </div>
     """
@@ -386,9 +390,18 @@ def get_game_league(game):
     
     if class_name == "HockeyGame":
         return "nhl", "NHL"
+
+    if class_name == "NotificationCard":
+        return "notification", "Notification"
     
     return "mlb", "MLB"
 
+def get_game_id(game):
+    if get_game_league(game) == ("notification", "Notification"):
+        return f"notification:{getattr(game, 'provider', 'unknown')}:{getattr(game, 'source', 'unknown')}:{getattr(game, 'title', 'unknown')}"
+    else:
+        league_key, _ = get_game_league(game)
+        return f"{league_key}:{game.away}@{game.home}"
 
 def get_display_status(game, league_key):
     status = getattr(game, "status", "")
@@ -470,8 +483,13 @@ def games():
 
     game_rows = ""
 
+    # Loop through the games first
     for game in latest_games:
-        game_id = f"{game.away}@{game.home}"
+        # FIX: Check if it's a notification INSIDE the loop, and skip it safely
+        if get_game_league(game) == ("notification", "Notification"):
+            continue
+
+        game_id = get_game_id(game)
         checked = "" if game_id in hidden else "checked"
         league_key, league_label = get_game_league(game)
         display_status = get_display_status(game, league_key)
@@ -918,6 +936,167 @@ def alerts_page():
 </html>
     """
 
+@app.route("/fantasy", methods=["GET", "POST"])
+@login_required
+def fantasy_page():
+    settings = get_settings()
+    fantasy = settings.get("fantasy", {})
+
+    error = ""
+
+    if request.method == "POST":
+        action = request.form.get("action")
+
+        if action == "connect":
+            username = request.form.get("username", "").strip()
+
+            try:
+                user = connect_sleeper_user(username)
+
+                if not user:
+                    error = "Sleeper user not found."
+                else:
+                    return redirect("/fantasy")
+
+            except Exception as e:
+                error = str(e)
+
+        elif action == "save_leagues":
+            fantasy["enabled"] = request.form.get("enabled") == "on"
+            fantasy["season"] = request.form.get("season", "2026").strip()
+            fantasy["selected_leagues"] = request.form.getlist("selected_leagues")
+
+            update_settings({"fantasy": fantasy})
+            return redirect("/fantasy")
+
+    user_id = fantasy.get("user_id", "")
+    username = fantasy.get("username", "")
+    season = fantasy.get("season", "2026")
+
+    leagues = []
+
+    if user_id:
+        try:
+            leagues = get_user_leagues(user_id, season)
+        except Exception as e:
+            error = str(e)
+
+    selected_leagues = set(fantasy.get("selected_leagues", []))
+
+    league_rows = ""
+
+    for league in leagues:
+        league_id = league.get("league_id", "")
+        name = league.get("name", "Sleeper League")
+        total_rosters = league.get("total_rosters", 0)
+
+        checked = "checked" if league_id in selected_leagues else ""
+
+        league_rows += f"""
+        <label class="game-row">
+            <input
+                type="checkbox"
+                name="selected_leagues"
+                value="{escape(str(league_id), quote=True)}"
+                {checked}
+            >
+
+            <div class="game-info">
+                <div class="matchup">{escape(str(name))}</div>
+                <div class="details">{total_rosters} teams · {escape(str(season))}</div>
+            </div>
+        </label>
+        """
+
+    if user_id and not league_rows:
+        league_rows = """
+        <div class="empty">
+            No Sleeper leagues found for this season.
+        </div>
+        """
+
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fantasy Football</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    {page_styles()}
+</head>
+
+<body>
+    <div class="page">
+        {page_header("fantasy")}
+
+        {"<div class='error'>" + escape(error) + "</div>" if error else ""}
+
+        <form method="POST">
+            <input type="hidden" name="action" value="connect">
+
+            <div class="card">
+                <div class="card-title">Connect Sleeper</div>
+
+                <div class="control">
+                    <label>Sleeper Username</label>
+                    <input
+                        class="search-input"
+                        name="username"
+                        placeholder="Enter Sleeper username"
+                        value="{escape(str(username), quote=True)}"
+                    >
+                </div>
+
+                <button class="save-button" type="submit">
+                    Connect Sleeper
+                </button>
+
+                <div class="hint">
+                    Sleeper does not require a password here. ScoreCast uses Sleeper's public read-only API.
+                </div>
+            </div>
+        </form>
+
+        <form method="POST">
+            <input type="hidden" name="action" value="save_leagues">
+
+            <div class="card">
+                <div class="card-title">Fantasy Settings</div>
+
+                <label class="game-row">
+                    <input type="checkbox" name="enabled" {"checked" if fantasy.get("enabled", False) else ""}>
+                    <div class="game-info">
+                        <div class="matchup">Enable fantasy football</div>
+                        <div class="details">Show Sleeper matchups on the Games page</div>
+                    </div>
+                </label>
+
+                <div class="control">
+                    <div class="control-top">
+                        <label>Season</label>
+                        <input
+                            class="number-input"
+                            type="number"
+                            name="season"
+                            value="{escape(str(season), quote=True)}"
+                        >
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Leagues</div>
+
+                {league_rows if user_id else '<div class="empty">Connect Sleeper first.</div>'}
+            </div>
+
+            <button class="save-button" type="submit">
+                Save Fantasy Leagues
+            </button>
+        </form>
+    </div>
+</body>
+</html>
+    """
 
 @app.route("/settings")
 @login_required
@@ -1026,7 +1205,7 @@ def save_games():
     visible_games = request.form.getlist("game")
 
     all_game_ids = [
-        f"{game.away}@{game.home}"
+        get_game_id(game)
         for game in latest_games
     ]
 

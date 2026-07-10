@@ -16,6 +16,149 @@ DEFAULT_SETTINGS = {
         "provider": "spotify",
         "poll_interval": 5,
         "display_mode": "auto"
+    },
+
+    "odds": {
+        "enabled": True,
+        "provider": "theoddsapi",
+        "api_key": "",
+        "refresh_interval": 900
+    },
+
+    "fantasy": {
+        "enabled": False,
+        "provider": "sleeper",
+        "username": "",
+        "user_id": "",
+        "season": "2026",
+        "refresh_interval": 120,
+        "selected_leagues": []
+    },
+
+    "notifications": {
+        "enabled": True,
+        "refresh_interval": 60,
+        "max_cards": 3,
+        "sources": [
+            {
+                "provider": "rss",
+                "source": "ESPN Headlines",
+                "url": "https://www.espn.com/espn/rss/news"
+            },
+            {
+                "provider": "rss",
+                "source": "CBS Sports Headlines",
+                "url": "https://www.cbssports.com/rss/headlines/"
+            },
+
+            {
+                "provider": "rss",
+                "source": "ESPN NFL",
+                "url": "https://www.espn.com/espn/rss/nfl/news"
+            },
+            {
+                "provider": "rss",
+                "source": "CBS NFL",
+                "url": "https://www.cbssports.com/rss/headlines/nfl/"
+            },
+
+            {
+                "provider": "rss",
+                "source": "ESPN MLB",
+                "url": "https://www.espn.com/espn/rss/mlb/news"
+            },
+            {
+                "provider": "rss",
+                "source": "CBS MLB",
+                "url": "https://www.cbssports.com/rss/headlines/mlb/"
+            },
+            {
+                "provider": "rss",
+                "source": "MLB.com",
+                "url": "https://www.mlb.com/feeds/news/rss.xml"
+            },
+
+            {
+                "provider": "rss",
+                "source": "ESPN NBA",
+                "url": "https://www.espn.com/espn/rss/nba/news"
+            },
+            {
+                "provider": "rss",
+                "source": "CBS NBA",
+                "url": "https://www.cbssports.com/rss/headlines/nba/"
+            },
+            {
+                "provider": "rss",
+                "source": "NBA.com",
+                "url": "https://www.nba.com/rss/nba_rss.xml"
+            },
+
+            {
+                "provider": "rss",
+                "source": "ESPN NHL",
+                "url": "https://www.espn.com/espn/rss/nhl/news"
+            },
+            {
+                "provider": "rss",
+                "source": "CBS NHL",
+                "url": "https://www.cbssports.com/rss/headlines/nhl/"
+            },
+            {
+                "provider": "rss",
+                "source": "NHL.com",
+                "url": "https://www.nhl.com/feeds/news/rss.xml"
+            },
+
+            {
+                "provider": "rss",
+                "source": "ESPN College Football",
+                "url": "https://www.espn.com/espn/rss/ncf/news"
+            },
+            {
+                "provider": "rss",
+                "source": "CBS College Football",
+                "url": "https://www.cbssports.com/rss/headlines/college-football/"
+            },
+
+            {
+                "provider": "rss",
+                "source": "ESPN College Basketball",
+                "url": "https://www.espn.com/espn/rss/ncb/news"
+            },
+            {
+                "provider": "rss",
+                "source": "CBS College Basketball",
+                "url": "https://www.cbssports.com/rss/headlines/college-basketball/"
+            },
+            {
+                "provider": "rss",
+                "source": "NCAA Basketball",
+                "url": "https://www.ncaa.com/news/basketball-men/d1/rss.xml"
+            },
+
+            {
+                "provider": "rss",
+                "source": "ESPN Golf",
+                "url": "https://www.espn.com/espn/rss/golf/news"
+            },
+            {
+                "provider": "rss",
+                "source": "CBS Golf",
+                "url": "https://www.cbssports.com/rss/headlines/golf/"
+            },
+
+            {
+                "provider": "rss",
+                "source": "ESPN MMA",
+                "url": "https://www.espn.com/espn/rss/mma/news"
+            },
+            {
+                "provider": "rss",
+                "source": "CBS MMA",
+                "url": "https://www.cbssports.com/rss/headlines/mma/"
+            }
+        ]
     }
 }
 
