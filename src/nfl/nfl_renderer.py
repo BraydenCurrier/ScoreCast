@@ -233,7 +233,7 @@ def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, 
     draw.line([(rx + 1, y + 3), (rx + 1, y + 5)], fill=POST_YELLOW) 
 
 
-def render_football_game_onto(draw, game, offset_x):
+def render_football_game_onto(draw, game, odds, offset_x):
 
     away_color = team_color(game.away)
     home_color = team_color(game.home)
@@ -291,12 +291,12 @@ def render_football_game_onto(draw, game, offset_x):
 
     
 
-def render_game_strip_onto(draw, game, offset_x):
+def render_game_strip_onto(draw, game, odds, offset_x):
     # Away logo before the score card
     draw_team_logo(draw, game.away, offset_x, 1)
 
     # Existing 64px score card after away logo
-    render_football_game_onto(draw, game, offset_x + LOGO_SIZE)
+    render_football_game_onto(draw, game, odds, offset_x + LOGO_SIZE)
 
     # Home logo after the score card
     draw_team_logo(draw, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1)    

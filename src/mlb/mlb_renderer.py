@@ -61,7 +61,7 @@ def draw_team_logo(draw, team_abbreviation, x_start, y_start):
             if rgb_color != (0, 0, 0):
                 draw.point((x_start + x, y_start + y), fill=rgb_color)
 
-def render_baseball_game_onto(draw, game, offset_x):
+def render_baseball_game_onto(draw, game, odds, offset_x):
     print_gfx_5x7(draw, game.away, 3 + offset_x, 2, team_color(game.away))
 
     print_gfx_5x7(draw, game.home, 44 + offset_x, 2, team_color(game.home))
@@ -70,6 +70,26 @@ def render_baseball_game_onto(draw, game, offset_x):
         width = get_3x5_width(game.start_time)
         centered_x = (64 - width) // 2
         print_3x5(draw, game.start_time, centered_x + offset_x, 2, YELLOW)
+
+        if odds:
+            odds_text = ""
+
+            if odds.spread is not None:
+                odds_text = f"{game.away} {odds.spread:+g}"
+
+            elif odds.total is not None:
+                odds_text = f"O/U {odds.total:g}"
+
+            elif odds.moneyline_away is not None:
+                odds_text = f"{game.away} {odds.moneyline_away:+d}"
+
+            print_gfx_5x7(
+                draw,
+                odds_text,
+                x + 2,
+                25,
+                WHITE
+            )
     else:
         draw_inning(draw, 27 + offset_x, 19, game.inning, game.top_inning, YELLOW)
 
@@ -92,12 +112,12 @@ def render_baseball_game_onto(draw, game, offset_x):
     print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 2 + offset_x, 25, GREY)
     print_3x5(draw, f"{game.home_wins}-{game.home_losses}", 43 + offset_x, 25, GREY)
 
-def render_game_strip_onto(draw, game, offset_x):
+def render_game_strip_onto(draw, game, odds, offset_x):
     # Away logo before the score card
     draw_team_logo(draw, game.away, offset_x, 1)
 
     # Existing 64px score card after away logo
-    render_baseball_game_onto(draw, game, offset_x + LOGO_SIZE)
+    render_baseball_game_onto(draw, game, odds, offset_x + LOGO_SIZE)
 
     # Home logo after the score card
     draw_team_logo(draw, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1)

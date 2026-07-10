@@ -37,7 +37,7 @@ def draw_team_logo(draw, team_abbreviation, x_start, y_start):
             if rgb_color != (0, 0, 0):
                 draw.point((x_start + x, y_start + y), fill=rgb_color)
 
-def render_soccer_game_onto(draw, game, offset_x):
+def render_soccer_game_onto(draw, game, odds, offset_x):
     # Team Away
     print_gfx_5x7(draw, game.away, 3 + offset_x, 2, WHITE)
 
@@ -66,12 +66,12 @@ def render_soccer_game_onto(draw, game, offset_x):
     stage_name = game.stage.replace("-", " ").upper()
     print_4x5_centered(draw, stage_name, 32 + offset_x, 24, WHITE)
 
-def render_game_strip_onto(draw, game, offset_x):
+def render_game_strip_onto(draw, game, odds, offset_x):
     # Away logo before the score card
     draw_team_logo(draw, game.away, offset_x, 1)
 
     # Existing 64px score card after away logo
-    render_soccer_game_onto(draw, game, offset_x + LOGO_SIZE)
+    render_soccer_game_onto(draw, game, odds, offset_x + LOGO_SIZE)
 
     # Home logo after the score card
     draw_team_logo(draw, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1)
