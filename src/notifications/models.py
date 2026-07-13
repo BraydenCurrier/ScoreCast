@@ -4,8 +4,8 @@ import time
 
 @dataclass
 class NotificationCard:
-    provider: str      # twitter, rss, spotify, calendar
-    source: str        # @AdamSchefter
+    provider: str    
+    source: str     
     title: str
     body: str
 

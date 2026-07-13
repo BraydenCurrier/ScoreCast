@@ -9,6 +9,15 @@ MLB_SCHEDULE_URL = "https://statsapi.mlb.com/api/v1/schedule"
 LOCAL_TIMEZONE = "America/Chicago"
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
+HTTP_TIMEOUT = (3.05, 10)
+
+_session = requests.Session()
+_session.headers.update({
+    "User-Agent": "P4SportsTicker/1.0",
+    "Accept": "application/json",
+})
+
+# lookup table to convert team id's to abbreviations
 TEAM_ABBR = {
     108: "LAA", 109: "ARI", 110: "BAL", 111: "BOS", 112: "CHC",
     113: "CIN", 114: "CLE", 115: "COL", 116: "DET", 117: "HOU",
@@ -55,10 +64,10 @@ def get_today_games():
         "hydrate": "probablePitcher,linescore,team",
     }
 
-    response = requests.get(
+    response = _session.get(
         MLB_SCHEDULE_URL,
         params=params,
-        timeout=10,
+        timeout=HTTP_TIMEOUT,
         verify=CA_BUNDLE,
     )
 

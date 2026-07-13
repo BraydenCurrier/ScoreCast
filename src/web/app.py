@@ -14,6 +14,14 @@ WEB_PASSWORD = "ticker123"
 
 latest_games = []
 
+CFB_CONFERENCE_OPTIONS = [
+    ("80", "All FBS"),
+    ("8", "SEC"),
+    ("5", "Big Ten"),
+    ("1", "ACC"),
+    ("4", "Big 12"),
+    ("17", "Mountain West"),
+]
 
 def set_latest_games(games):
     global latest_games
@@ -483,9 +491,7 @@ def games():
 
     game_rows = ""
 
-    # Loop through the games first
     for game in latest_games:
-        # FIX: Check if it's a notification INSIDE the loop, and skip it safely
         if get_game_league(game) == ("notification", "Notification"):
             continue
 
@@ -738,7 +744,7 @@ def alerts_page():
 
         selected_types = set(team_rules.get(team, []))
 
-        # Backward compatibility with old alerts["teams"] list.
+        
         if not selected_types and team in alerts.get("teams", []):
             selected_types = {"score_change"}
 
@@ -1103,9 +1109,49 @@ def fantasy_page():
 def settings_page():
     settings = get_settings()
 
+    cfb_settings = settings.get("cfb", {})
+
+    selected_cfb_conferences = {
+        str(group_id)
+        for group_id in cfb_settings.get(
+            "selected_conferences",
+            ["80"],
+        )
+    }
+
+    cfb_conference_rows = ""
+
+    for group_id, conference_name in CFB_CONFERENCE_OPTIONS:
+        checked = (
+            "checked"
+            if group_id in selected_cfb_conferences
+            else ""
+        )
+
+        cfb_conference_rows += f"""
+        <label class="game-row">
+            <input
+                type="checkbox"
+                name="cfb_conferences"
+                value="{group_id}"
+                data-cfb-conference="{group_id}"
+                onchange="handleCfbConferenceChange(this)"
+                {checked}
+            >
+
+            <div class="game-info">
+                <div class="matchup">{escape(conference_name)}</div>
+                <div class="details">
+                    {"Show every FBS game" if group_id == "80" else "Show games involving this conference"}
+                </div>
+            </div>
+        </label>
+        """
+
     scroll_speed = settings.get("scroll_speed", 0.4)
     brightness = settings.get("brightness", 50)
     refresh_interval = settings.get("refresh_interval", 120)
+    fps = settings.get("fps", 60)
 
     return f"""
 <!DOCTYPE html>
@@ -1127,16 +1173,51 @@ def settings_page():
                 <div class="control">
                     <div class="control-top">
                         <label for="scroll_speed">Scroll Speed</label>
-                        <input class="number-input" type="number"
-                            id="scroll_speed_number" name="scroll_speed"
-                            min="0.1" max="2.0" step="0.1"
-                            value="{scroll_speed}">
+                            <input class="number-input" type="number"
+                                id="scroll_speed_number" name="scroll_speed"
+                                min="5" max="120" step="1"
+                                value="{scroll_speed}">
                     </div>
 
                     <input type="range" id="scroll_speed"
-                        min="0.1" max="2.0" step="0.1"
+                        min="5" max="120" step="1"
                         value="{scroll_speed}"
                         oninput="scroll_speed_number.value = this.value">
+
+                    <div class="hint">
+                        Scroll speed is measured in pixels per second.
+                    </div>
+                </div>
+
+                <div class="setting-group">
+                    <div class="setting-header">
+                        <label for="fps">Frames Per Second</label>
+
+                        <input
+                            class="number-input"
+                            type="number"
+                            id="fps_number"
+                            name="fps"
+                            min="10"
+                            max="120"
+                            step="1"
+                            value="{fps}"
+                        >
+                    </div>
+
+                    <input
+                        type="range"
+                        id="fps"
+                        min="10"
+                        max="120"
+                        step="1"
+                        value="{fps}"
+                        oninput="fps_number.value = this.value"
+                    >
+
+                    <div class="hint">
+                        Higher values make scrolling smoother.
+                    </div>
                 </div>
 
                 <div class="control">
@@ -1174,6 +1255,17 @@ def settings_page():
                 </div>
             </div>
 
+            <div class="card">
+                <div class="card-title">College Football Conferences</div>
+
+                <div class="hint" style="margin-bottom: 12px;">
+                    Choose All FBS or select one or more individual conferences.
+                    Games involving a selected conference will appear on the Games page.
+                </div>
+
+                {cfb_conference_rows}
+            </div>
+
             <button class="save-button" type="submit">
                 Save Settings
             </button>
@@ -1190,9 +1282,48 @@ def settings_page():
             }});
         }}
 
+        function handleCfbConferenceChange(changedCheckbox) {{
+            const allFbs = document.querySelector(
+                'input[name="cfb_conferences"][value="80"]'
+            );
+
+            const individualConferences = Array.from(
+                document.querySelectorAll(
+                    'input[name="cfb_conferences"]:not([value="80"])'
+                )
+            );
+
+            if (changedCheckbox.value === "80" && changedCheckbox.checked) {{
+                individualConferences.forEach(function(checkbox) {{
+                    checkbox.checked = false;
+                }});
+
+                return;
+            }}
+
+            if (
+                changedCheckbox.value !== "80"
+                && changedCheckbox.checked
+                && allFbs
+            ) {{
+                allFbs.checked = false;
+            }}
+
+            const anySelected = Array.from(
+                document.querySelectorAll(
+                    'input[name="cfb_conferences"]:checked'
+                )
+            ).length > 0;
+
+            if (!anySelected && allFbs) {{
+                allFbs.checked = true;
+            }}
+        }}
+
         bindNumberToSlider("scroll_speed_number", "scroll_speed");
         bindNumberToSlider("brightness_number", "brightness");
         bindNumberToSlider("refresh_interval_number", "refresh_interval");
+        bindNumberToSlider("fps_number", "fps");
     </script>
 </body>
 </html>
@@ -1225,10 +1356,45 @@ def save_games():
 @app.route("/save_settings", methods=["POST"])
 @login_required
 def save_settings():
+    selected_cfb_conferences = request.form.getlist(
+        "cfb_conferences"
+    )
+
+    valid_conference_ids = {
+        group_id
+        for group_id, _ in CFB_CONFERENCE_OPTIONS
+    }
+
+    selected_cfb_conferences = [
+        group_id
+        for group_id in selected_cfb_conferences
+        if group_id in valid_conference_ids
+    ]
+
+    if not selected_cfb_conferences:
+        selected_cfb_conferences = ["80"]
+
+    if "80" in selected_cfb_conferences:
+        selected_cfb_conferences = ["80"]
+
     update_settings({
-        "scroll_speed": float(request.form["scroll_speed"]),
-        "brightness": int(request.form["brightness"]),
-        "refresh_interval": int(request.form["refresh_interval"]),
+        "scroll_speed": float(
+            request.form["scroll_speed"]
+        ),
+        "brightness": int(
+            request.form["brightness"]
+        ),
+        "refresh_interval": int(
+            request.form["refresh_interval"]
+        ),
+        "fps": int(
+            request.form["fps"]
+        ),
+        "cfb": {
+            "selected_conferences": (
+                selected_cfb_conferences
+            ),
+        },
     })
 
     return redirect("/settings")

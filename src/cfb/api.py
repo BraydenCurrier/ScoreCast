@@ -3,31 +3,101 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-# Assuming your model is updated to accept away_rank and home_rank
 from cfb.models import CollegeFootballGame 
 
-# The exact endpoint for College Football (FBS)
+from common.settings import get_settings
+
+CFB_CONFERENCES = {
+    "80": "All FBS",
+    "8": "SEC",
+    "5": "Big Ten",
+    "1": "ACC",
+    "4": "Big 12",
+    "17": "Mountain West",
+}
+
+DEFAULT_CONFERENCE_GROUPS = ["80"]
+
 NCAAF_SCHEDULE_URL = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
 LOCAL_TIMEZONE = "America/Chicago"
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
+HTTP_TIMEOUT = (3.05, 10)
+
+_session = requests.Session()
+_session.headers.update({
+    "User-Agent": "P4SportsTicker/1.0",
+    "Accept": "application/json",
+})
+
+def get_selected_conference_groups():
+    settings = get_settings()
+    cfb_settings = settings.get("cfb", {})
+
+    selected = cfb_settings.get(
+        "selected_conferences",
+        DEFAULT_CONFERENCE_GROUPS,
+    )
+
+    if not isinstance(selected, list):
+        return DEFAULT_CONFERENCE_GROUPS.copy()
+
+    selected = [
+        str(group_id)
+        for group_id in selected
+        if str(group_id) in CFB_CONFERENCES
+    ]
+
+    if not selected:
+        return DEFAULT_CONFERENCE_GROUPS.copy()
+
+    if "80" in selected:
+        return ["80"]
+
+    return selected
+
+def fetch_scoreboard_group(group_id):
+    params = {
+        "groups": str(group_id),
+        "limit": 200,
+    }
+
+    response = _session.get(
+        NCAAF_SCHEDULE_URL,
+        params=params,
+        timeout=HTTP_TIMEOUT,
+        verify=CA_BUNDLE,
+    )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Unexpected CFB response for group {group_id}"
+        )
+
+    return data
 
 def get_team_abbr(team):
     # Fetch the team's unique ESPN ID
     team_id = str(team.get("id", ""))
     
-    # 🛠 Unique ID Check for the two USCs
+    # handle specific duoplicate team abbreviations, more to be added when discovered
     if team_id == "2579":
         return "USCG"  # South Carolina Gamecocks
     if team_id == "30":
         return "USC"   # Southern California Trojans
 
-    # Fallback to standard abbreviation if it's not one of those IDs
+    # fallback to standard abbreviation if not one of the special cases
     raw_abbr = team.get("abbreviation", team.get("name", "")[:3].upper())
     
-    # Your existing manual mapping overrides (like Texas A&M)
+    # handle specific overrides for team abbreviations, more to be added as needed
     OVERRIDES = {
         "TA&M": "TAMU",
+        "M-OH": "MOH",
+        "AFA": "AF",
     }
     
     return OVERRIDES.get(raw_abbr, raw_abbr)
@@ -69,25 +139,42 @@ def safe_int(value, default=0):
 
 
 def get_today_games():
-    # 'groups': '80' forces ESPN to return all FBS games, not just the Top 25
-    params = {
-        "groups": "80",
-        "limit": 100
-    }
+    selected_groups = get_selected_conference_groups()
 
-    response = requests.get(
-        NCAAF_SCHEDULE_URL,
-        params=params,
-        timeout=10,
-        verify=CA_BUNDLE,
-    )
+    events_by_id = {}
+    week_number = 0
 
-    response.raise_for_status()
+    for group_id in selected_groups:
+        try:
+            data = fetch_scoreboard_group(group_id)
+        except Exception as error:
+            print(
+                f"CFB conference fetch failed "
+                f"for group {group_id}: {error}"
+            )
+            continue
 
-    data = response.json()
+        if not week_number:
+            week_number = safe_int(
+                (data.get("week") or {}).get("number"),
+                0,
+            )
+
+        for event in data.get("events", []):
+            event_id = str(event.get("id", "")).strip()
+
+            if not event_id:
+                # Emergency fallback when ESPN does not provide an ID.
+                event_id = (
+                    f"{event.get('date', '')}:"
+                    f"{event.get('name', '')}"
+                )
+
+            events_by_id[event_id] = event
+
     games = []
 
-    for event in data.get("events", []):
+    for event in events_by_id.values():
         competition = event["competitions"][0]
         status_info = event["status"]
         situation = competition.get("situation", {})
@@ -101,15 +188,15 @@ def get_today_games():
         home_record = get_record(home_data)
         away_record = get_record(away_data)
 
-        # Extract AP/CFP rankings (defaults to 0 if the team is unranked)
+        # get rankings, default to 0 if not present
         home_rank_raw = home_data.get("curatedRankings", {}).get("current", 0)
         away_rank_raw = away_data.get("curatedRankings", {}).get("current", 0)
         
-        # Set to None if unranked so your UI doesn't display a '0' rank
+        # set to none if rank is 0 or not present
         home_rank = int(home_rank_raw) if home_rank_raw > 0 else None
         away_rank = int(away_rank_raw) if away_rank_raw > 0 else None
 
-        # Determine possession team abbreviation from the live game ID string
+        # determine possession team abbreviation, default to empty string if not present
         possession_id = situation.get("possession")
         possession_abbr = ""
         if possession_id:
@@ -117,7 +204,7 @@ def get_today_games():
                 if comp["id"] == str(possession_id):
                     possession_abbr = comp["team"].get("abbreviation", "")
 
-        # Extract yardline side details safely
+        # extract yardline side details
         yardline_side = ""
         if "lastPlay" in situation:
             yardline_side = situation["lastPlay"].get("type", {}).get("text", "")[:3]
@@ -162,7 +249,7 @@ def get_today_games():
                 yardline_side=yardline_side,
                 yardline_number=int(situation.get("yardline", 0)),
                 date=formatted_date,
-                week=int(data.get("week", {}).get("number", 0)),
+                week=week_number,
             )
         )
 

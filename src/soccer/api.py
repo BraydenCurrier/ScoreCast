@@ -12,6 +12,13 @@ ESPN_WORLD_CUP_URL = (
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 LOCAL_TIMEZONE = "America/Chicago"
 
+HTTP_TIMEOUT = (3.05, 10)
+
+_session = requests.Session()
+_session.headers.update({
+    "User-Agent": "P4SportsTicker/1.0",
+    "Accept": "application/json",
+})
 
 def format_local_time(utc_time_str):
     utc_dt = datetime.fromisoformat(
@@ -50,7 +57,6 @@ def format_game_date(utc_time_str):
 def get_minute(status_type):
     detail = status_type.get("shortDetail", "")
 
-    # Examples: "45'", "90'+3'", "HT", "FT"
     if "'" not in detail:
         return 0
 
@@ -65,7 +71,6 @@ def get_minute(status_type):
 def get_stoppage(status_type):
     detail = status_type.get("shortDetail", "")
 
-    # Example: "90'+3'"
     if "+" not in detail:
         return ""
 
@@ -97,7 +102,6 @@ def get_score(competitor):
 def get_today_games():
     now = datetime.now(ZoneInfo(LOCAL_TIMEZONE))
 
-    # Pull a few days so scheduled World Cup games show too.
     start_date = now.strftime("%Y%m%d")
     end_date = (now + timedelta(days=3)).strftime("%Y%m%d")
 
@@ -106,10 +110,10 @@ def get_today_games():
         "limit": 100,
     }
 
-    response = requests.get(
+    response = _session.get(
         ESPN_WORLD_CUP_URL,
         params=params,
-        timeout=10,
+        timeout=HTTP_TIMEOUT,
         verify=CA_BUNDLE,
     )
 

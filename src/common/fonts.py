@@ -10,7 +10,7 @@ FONT_4x5_DATA = {
     '7': [0xF, 0x1, 0x2, 0x4, 0x4],
     '8': [0xF, 0x9, 0xF, 0x9, 0xF],
     '9': [0xF, 0x9, 0xF, 0x1, 0xF],
-    # Alphabet (4x5 matrices)
+    # Uppercase Letters
     'A': [0x6, 0x9, 0xF, 0x9, 0x9],
     'B': [0xE, 0x9, 0xE, 0x9, 0xE],
     'C': [0x7, 0x8, 0x8, 0x8, 0x7],
@@ -37,14 +37,14 @@ FONT_4x5_DATA = {
     'W': [0x9, 0x9, 0xF, 0xF, 0x9],
     'X': [0x9, 0x9, 0x6, 0x9, 0x9],
     'Z': [0xF, 0x2, 0x4, 0x8, 0xF],
-    # Down Suffix Lowercase Letters (4x5)
+    # Lowercase Letters
     'd': [0x1, 0x7, 0x9, 0x9, 0x7],
     'h': [0x8, 0xE, 0x9, 0x9, 0x9],
     'n': [0x0, 0xC, 0x9, 0x9, 0x9],
     'r': [0x0, 0x5, 0x6, 0x4, 0x4],
     's': [0x0, 0x7, 0x6, 0x1, 0xE],
     't': [0x4, 0xE, 0x4, 0x4, 0x5],
-    # Symbols / Formatting
+    # Symbols
     '-': [0x0, 0x0, 0xF, 0x0, 0x0],
     ':': [0x0, 0x4, 0x0, 0x4, 0x0],
     '&': [0x6, 0x4, 0xA, 0xA, 0x7],
@@ -69,6 +69,7 @@ MICRO_FONT = [
 ]
 
 GFX_5X7 = {
+    # Uppercase letters
     "A": [0x7C, 0x12, 0x11, 0x12, 0x7C],
     "B": [0x7F, 0x49, 0x49, 0x49, 0x36],
     "C": [0x3E, 0x41, 0x41, 0x41, 0x22],
@@ -96,6 +97,7 @@ GFX_5X7 = {
     "Y": [0x07, 0x08, 0x70, 0x08, 0x07],
     "Z": [0x61, 0x51, 0x49, 0x45, 0x43],
 
+    # Numbers
     "0": [0x3E, 0x51, 0x49, 0x45, 0x3E],
     "1": [0x00, 0x42, 0x7F, 0x40, 0x00],
     "2": [0x42, 0x61, 0x51, 0x49, 0x46],
@@ -107,12 +109,12 @@ GFX_5X7 = {
     "8": [0x36, 0x49, 0x49, 0x49, 0x36],
     "9": [0x06, 0x49, 0x49, 0x29, 0x1E],
 
+    # Symbols
     "-": [0x08, 0x08, 0x08, 0x08, 0x08],
     " ": [0x00, 0x00, 0x00, 0x00, 0x00],
 }
 
 def draw_4x5_char(draw, x, y, char, color):
-    """Draws a single 4x5 character safely from the font tracking table."""
     if char not in FONT_4x5_DATA:
         return
 
@@ -123,7 +125,6 @@ def draw_4x5_char(draw, x, y, char, color):
                 draw.point((x + col, y + row), fill=color)
 
 def print_4x5(draw, text, x, y, color):
-    """Parses text and draws it on the canvas, handling colons and '1's with custom widths."""
     current_x = x
     text = str(text).upper()
 
@@ -144,7 +145,6 @@ def print_4x5(draw, text, x, y, color):
             current_x += 2
 
 def get_4x5_width(text):
-    """Calculates the exact pixel width of a 4x5 string, matching the tight '1' and colon logic."""
     total_width = 0
     text = str(text).upper()
     
@@ -163,18 +163,12 @@ def get_4x5_width(text):
     return total_width - 1 if total_width > 0 else 0
 
 def print_4x5_centered(draw, text, center_x, y, color):
-    """Prints a 4x5 font string anchored perfectly to a target horizontal midpoint."""
-    # 1. Enforce string conversion to safely handle numbers, quarters, or timestamps
     text_str = str(text)
     
-    # 2. Calculate the exact footprint width of the string
     string_width = get_4x5_width(text_str)
     
-    # 3. Derive the exact tracking starting pixel coordinate
-    # Integer division keeps it completely snapped to the matrix pixel grid
     start_x = center_x - (string_width // 2)
     
-    # 4. Hand off execution to your layout engine loop
     print_4x5(draw, text_str, start_x, y, color)
 
 def print_4x5_right(draw, text, right_x, y, color):
@@ -194,12 +188,10 @@ def print_clock(draw, clock_string, center_x, y, color):
     
     clock_str = str(clock_string).strip().upper()
     
-    # 1. Handle edge cases where there is no colon
     if ':' not in clock_str:
         print_4x5_centered(draw, clock_str, center_x, y, color)
         return
 
-    # 2. Split the string into minutes and seconds
     time_parts = clock_str.split(':')
     minutes_str = time_parts[0]
     seconds_str = time_parts[1]
@@ -207,25 +199,18 @@ def print_clock(draw, clock_string, center_x, y, color):
     if len(seconds_str) == 1:
         seconds_str = "0" + seconds_str
 
-    # 3. Draw the colon locked at the center position
-    # The dot sits at index 2. Subtracting 2 centers it exactly on center_x.
     colon_start_x = center_x - 2
     print_4x5(draw, ":", colon_start_x, y, color)
     
-    # 4. Draw the minutes string to the left of the colon
     minutes_width = get_4x5_width(minutes_str)
-    # Lock the right edge of the minutes string 1 pixel to the left of the colon box
+
     minutes_start_x = colon_start_x - minutes_width - 1
     print_4x5(draw, minutes_str, minutes_start_x, y, color)
     
-    # 5. Draw the seconds string to the right of the colon
-    # NEW: Move seconds left by 1 pixel (colon_start_x + 3 instead of + 4)
-    # This pulls the seconds tight against the centered dot for a perfect 1px gap.
     seconds_start_x = colon_start_x + 2
     print_4x5(draw, seconds_str, seconds_start_x, y, color)
 
 def draw_3x5_glyph(draw, x, y, index, color):
-    # Updated bounds check for the new index
     if index < 0 or index > 12:
         return
 

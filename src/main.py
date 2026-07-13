@@ -2,6 +2,10 @@ import threading
 import time
 from wsgiref.simple_server import make_server
 
+import traceback
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from PIL import Image, ImageDraw
 
 from common.matrix import create_matrix
@@ -42,7 +46,9 @@ from odds.manager import OddsManager
 
 odds_manager = OddsManager()
 
-FRAME_DELAY = 1 / 60
+DEFAULT_FPS = 60
+MIN_FPS = 10
+MAX_FPS = 120
 
 DISPLAY_WIDTH = 384
 MATRIX_HEIGHT = 32
@@ -67,6 +73,41 @@ _odds_refresh_in_progress = False
 notification_manager = NotificationManager()
 _notification_refresh_in_progress = False
 
+SPORT_FETCHERS = {
+    "mlb": get_live_mlb,
+    "nfl": get_live_nfl,
+    "soccer": get_live_soccer,
+    "cfb": get_live_cfb,
+    "nba": get_live_nba,
+    "nhl": get_live_nhl,
+}
+
+def fetch_all_sports():
+    results = {}
+    errors = {}
+
+    with ThreadPoolExecutor(
+        max_workers=len(SPORT_FETCHERS),
+        thread_name_prefix="sports-api",
+    ) as executor:
+        future_to_sport = {
+            executor.submit(fetcher): sport
+            for sport, fetcher in SPORT_FETCHERS.items()
+        }
+
+        for future in as_completed(future_to_sport):
+            sport = future_to_sport[future]
+
+            try:
+                games = future.result()
+                results[sport] = games or []
+            except Exception as exc:
+                errors[sport] = exc
+                results[sport] = []
+                print(f"{sport.upper()} refresh failed: {exc}")
+
+    return results, errors
+
 def game_signature(game):
     return (game.__class__.__name__, tuple(sorted(vars(game).items())))
 
@@ -86,7 +127,6 @@ def odds_signature(odds):
 
 def is_cfb_game(game):
     return game.__class__.__name__ == "CollegeFootballGame" 
-
 
 def is_nfl_game(game):
     return game.__class__.__name__ == "FootballGame"
@@ -156,7 +196,7 @@ def get_game_step(game):
 
 def draw_game(draw, game, odds, x):
     if is_cfb_game(game):
-        draw_cfb_strip(draw, game, odds, x)
+        draw_cfb_strip(draw, game, x)
     elif is_nba_game(game):
         draw_nba_strip(draw, game, odds, x)
     elif is_nfl_game(game):
@@ -198,11 +238,45 @@ def apply_saved_order(all_games, settings):
     order_index = {gid: idx for idx, gid in enumerate(saved_order)}
     return sorted(all_games, key=lambda g: order_index.get(game_id(g), 999))
 
+def get_target_fps(settings):
+    try:
+        fps = int(settings.get("fps", DEFAULT_FPS))
+    except (TypeError, ValueError):
+        fps = DEFAULT_FPS
+
+    return max(
+        MIN_FPS,
+        min(MAX_FPS, fps),
+    )
 
 def get_visible_games(all_games, settings):
     hidden = set(settings.get("hidden_games", []))
     return [game for game in all_games if game_id(game) not in hidden]
 
+def render_error_card(game, error):
+    card_width = get_game_width(game)
+
+    image = Image.new(
+        "RGB",
+        (card_width, MATRIX_HEIGHT),
+        (0, 0, 0),
+    )
+
+    draw = ImageDraw.Draw(image)
+
+    draw.text(
+        (2, 2),
+        "CARD ERROR",
+        fill=(255, 0, 0),
+    )
+
+    draw.text(
+        (2, 14),
+        get_sport(game).upper(),
+        fill=(255, 255, 255),
+    )
+
+    return image
 
 def render_card(game, odds):
     key = (
@@ -211,14 +285,33 @@ def render_card(game, odds):
     )
 
     cached = _card_cache.get(key)
+
     if cached is not None:
         return cached
 
     card_width = get_game_width(game)
 
-    image = Image.new("RGB", (card_width, MATRIX_HEIGHT), (0, 0, 0))
+    image = Image.new(
+        "RGB",
+        (card_width, MATRIX_HEIGHT),
+        (0, 0, 0),
+    )
+
     draw = ImageDraw.Draw(image)
-    draw_game(draw, game, odds, 0)
+
+    try:
+        draw_game(draw, game, odds, 0)
+
+    except Exception as error:
+        print(
+            "Card rendering failed:",
+            get_sport(game),
+            repr(game),
+            error,
+        )
+        traceback.print_exc()
+
+        image = render_error_card(game, error)
 
     _card_cache[key] = image
     return image
@@ -230,7 +323,6 @@ def rebuild_visible_games_if_needed(settings):
     with _games_lock:
         current_games = _games.copy()
 
-    # The signature naturally tracks notifications now because they live inside current_games!
     signature = (
         tuple(game_signature(g) for g in current_games),
         tuple(settings.get("hidden_games", [])),
@@ -264,24 +356,17 @@ def refresh_games_background():
     global _games, _refresh_in_progress, _cache_signature
 
     try:
-        # 1. Fetch live sports data
-        live_mlb = get_live_mlb()
-        live_nfl = get_live_nfl()
-        live_soccer = get_live_soccer()
-        live_cfb = get_live_cfb()
-        live_nba = get_live_nba()
-        live_nhl = get_live_nhl()
+        sports_results, sports_errors = fetch_all_sports()
 
-        current_mlb = live_mlb if live_mlb else TEST_GAMES_MLB
-        current_nfl = live_nfl if live_nfl else TEST_GAMES_NFL
-        current_soccer = live_soccer if live_soccer else TEST_GAMES_SOCCER
-        current_cfb = live_cfb if live_cfb else TEST_GAMES_CFB
-        current_nba = live_nba if live_nba else TEST_GAMES_NBA
-        current_nhl = live_nhl if live_nhl else TEST_GAMES_NHL
+        current_mlb = sports_results["mlb"] or TEST_GAMES_MLB
+        current_nfl = sports_results["nfl"] or TEST_GAMES_NFL
+        current_soccer = sports_results["soccer"] or TEST_GAMES_SOCCER
+        current_cfb = sports_results["cfb"] or TEST_GAMES_CFB
+        current_nba = sports_results["nba"] or TEST_GAMES_NBA
+        current_nhl = sports_results["nhl"] or TEST_GAMES_NHL
 
         settings = get_settings()
 
-        # 2. Fetch notifications and treat them exactly like game data
         # try:
         #     notification_manager.refresh()
         #     raw_notifications = notification_manager.get_cards()
@@ -289,10 +374,8 @@ def refresh_games_background():
         #     print("Notification refresh failed during game pull:", e)
         #     raw_notifications = []
 
-        # 3. Apply the max_cards limit strictly here
         # notification_cards = get_limited_notification_cards(settings)
 
-        # 4. Combine them into one unified card roster
         combined_games = (
             current_mlb
             + current_nfl
@@ -323,26 +406,23 @@ def run_web_server():
 
 
 def load_initial_games():
-    settings = get_settings()
-    
-    #  Load initial notifications
-    # try:
-    #     notification_manager.refresh()
-    #     raw_notifications = notification_manager.get_cards()
-    # except Exception:
-    #     raw_notifications = []
-        
-    #notification_cards = get_limited_notification_cards(settings)
+    sports_results, sports_errors = fetch_all_sports()
 
-    # Load initial sports
-    initial_mlb = get_live_mlb() or TEST_GAMES_MLB
-    initial_nfl = get_live_nfl() or TEST_GAMES_NFL
-    initial_soccer = get_live_soccer() or TEST_GAMES_SOCCER
-    initial_cfb = get_live_cfb() or TEST_GAMES_CFB
-    initial_nba = get_live_nba() or TEST_GAMES_NBA
-    initial_nhl = get_live_nhl() or TEST_GAMES_NHL
+    initial_mlb = sports_results["mlb"] or TEST_GAMES_MLB
+    initial_nfl = sports_results["nfl"] or TEST_GAMES_NFL
+    initial_soccer = sports_results["soccer"] or TEST_GAMES_SOCCER
+    initial_cfb = sports_results["cfb"] or TEST_GAMES_CFB
+    initial_nba = sports_results["nba"] or TEST_GAMES_NBA
+    initial_nhl = sports_results["nhl"] or TEST_GAMES_NHL
 
-    return initial_mlb + initial_nfl + initial_soccer + initial_cfb + initial_nba + initial_nhl
+    return (
+        initial_mlb
+        + initial_nfl
+        + initial_soccer
+        + initial_cfb
+        + initial_nba
+        + initial_nhl
+    )
 
 def refresh_notifications_background():
     global _notification_refresh_in_progress
@@ -367,10 +447,10 @@ threading.Thread(
 _games = load_initial_games()
 set_latest_games(_games)
 
-threading.Thread(
-    target=refresh_notifications_background,
-    daemon=True,
-).start()
+# threading.Thread(
+#     target=refresh_notifications_background,
+#     daemon=True,
+# ).start()
 
 threading.Thread(
     target=odds_manager.refresh_all,
@@ -379,24 +459,42 @@ threading.Thread(
 
 current_game = 0
 scroll_x = 0.0
-last_refresh = time.time()
-last_notification_refresh = time.time()
 
-last_odds_refresh = time.time()
-
+last_refresh = time.monotonic()
+last_notification_refresh = time.monotonic()
+last_odds_refresh = time.monotonic()
 last_settings_poll = 0.0
+
+last_frame_time = time.monotonic()
+
 settings = get_settings()
+
 last_brightness = None
 
+frame_image = Image.new(
+    "RGB",
+    (DISPLAY_WIDTH, MATRIX_HEIGHT),
+    (0, 0, 0),
+)
 
 while True:
-    now = time.time()
+    frame_started_at = time.monotonic()
+
+    delta_seconds = frame_started_at - last_frame_time
+    last_frame_time = frame_started_at
+
+    delta_seconds = min(delta_seconds, 0.1)
+
+    now = frame_started_at
 
     if now - last_settings_poll >= SETTINGS_POLL_INTERVAL:
         settings = get_settings()
         last_settings_poll = now
 
-    scroll_speed = float(settings.get("scroll_speed", 0.4))
+    target_fps = get_target_fps(settings)
+    frame_delay = 1.0 / target_fps
+
+    scroll_speed = float(settings.get("scroll_speed", 30.0))
     brightness = int(settings.get("brightness", 50))
     refresh_interval = int(settings.get("refresh_interval", 120))
 
@@ -453,13 +551,18 @@ while True:
     visible_games = rebuild_visible_games_if_needed(settings)
 
     if not visible_games:
-        time.sleep(FRAME_DELAY)
+        frame_elapsed = time.monotonic() - frame_started_at
+        sleep_time = frame_delay - frame_elapsed
+
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+
         continue
 
     if current_game >= len(visible_games):
         current_game = 0
 
-    scroll_x -= scroll_speed
+    scroll_x -= scroll_speed * delta_seconds
 
     active_card_step = get_game_step(
         visible_games[current_game]
@@ -472,10 +575,9 @@ while True:
         if current_game >= len(visible_games):
             current_game = 0
 
-    frame_image = Image.new(
-        "RGB",
-        (DISPLAY_WIDTH, MATRIX_HEIGHT),
-        (0, 0, 0)
+    frame_image.paste(
+        (0, 0, 0),
+        (0, 0, DISPLAY_WIDTH, MATRIX_HEIGHT),
     )
 
     x = int(scroll_x)
@@ -512,4 +614,8 @@ while True:
 
     matrix.SetImage(frame_image)
 
-    time.sleep(FRAME_DELAY)
+    frame_elapsed = time.monotonic() - frame_started_at
+    sleep_time = frame_delay - frame_elapsed
+
+    if sleep_time > 0:
+        time.sleep(sleep_time)

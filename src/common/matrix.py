@@ -15,4 +15,6 @@ def create_matrix():
     options.pwm_lsb_nanoseconds = 130
     options.brightness = 60
 
+    options.drop_privileges = False
+
     return RGBMatrix(options=options)

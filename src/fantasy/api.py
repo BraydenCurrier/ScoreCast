@@ -6,11 +6,18 @@ from fantasy.models import FantasyMatchup
 BASE_URL = "https://api.sleeper.app/v1"
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
+HTTP_TIMEOUT = (3.05, 10)
+
+_session = requests.Session()
+_session.headers.update({
+    "User-Agent": "P4SportsTicker/1.0",
+    "Accept": "application/json",
+})
 
 def sleeper_get(path):
-    response = requests.get(
+    response = _session.get(
         f"{BASE_URL}{path}",
-        timeout=10,
+        timeout=HTTP_TIMEOUT,
         verify=CA_BUNDLE,
     )
     response.raise_for_status()
