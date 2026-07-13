@@ -13,6 +13,13 @@ NBA_SCOREBOARD_URL = (
 LOCAL_TIMEZONE = "America/Chicago"
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
+HTTP_TIMEOUT = (3.05, 10)
+
+_session = requests.Session()
+_session.headers.update({
+    "User-Agent": "P4SportsTicker/1.0",
+    "Accept": "application/json",
+})
 
 def format_local_time(date_string):
     utc_dt = datetime.fromisoformat(
@@ -52,9 +59,9 @@ def get_record(team):
 
 
 def get_today_games():
-    response = requests.get(
+    response = _session.get(
         NBA_SCOREBOARD_URL,
-        timeout=10,
+        timeout=HTTP_TIMEOUT,
         verify=CA_BUNDLE,
     )
 

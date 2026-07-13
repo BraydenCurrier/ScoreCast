@@ -24,8 +24,7 @@ def draw_text_right(draw, text, right_x, y, color):
     print_gfx_5x7(draw, str(text), right_x - width, y, color)
 
 def draw_team_logo(draw, team_abbreviation, x_start, y_start):
-    """Stamps a pre-processed 16x16 team logo onto your matrix image frame"""
-    # Look up array safely dynamically (e.g., "LAD", "NYY", "CHC")
+    # look up logo array
     logo_data = getattr(nba_logos, f"LOGO_{team_abbreviation}", None)
     
     if not logo_data:
@@ -38,25 +37,30 @@ def draw_team_logo(draw, team_abbreviation, x_start, y_start):
                 draw.point((x_start + x, y_start + y), fill=rgb_color)
 
 def render_basketball_game_onto(draw, game, odds, offset_x):
-    # Team Away
+    # team Away
     print_gfx_5x7(draw, game.away, 3 + offset_x, 2, WHITE)
 
-    # Team Home
+    # team Home
     draw_text_right(draw, game.home, 61 + offset_x, 2, WHITE)
 
+    # print records
     print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 2 + offset_x, 25, GREY)
     print_3x5(draw, f"{game.home_wins}-{game.home_losses}", 43 + offset_x, 25, GREY)
 
-    # Preview or Live/Final
+    # preview or live/final
     if game.status == "SCHEDULED":
+        # calculate center
         width = get_3x5_width(game.start_time)
         centered_x = (64 - width) // 2
+        # print start time and date
         print_3x5(draw, game.start_time, centered_x + offset_x, 2, YELLOW)
         print_4x5_centered(draw, game.date, 32 + offset_x, 14, WHITE)
     else:
+        # print quarter and clock
         print_4x5_centered(draw, "Q" + str(game.quarter), 32 + offset_x, 2, YELLOW)
         print_clock(draw, game.clock, 32 + offset_x, 14, YELLOW)
 
+        # print scores centered 
         if game.away_score < 10:
             print_gfx_5x7(draw, str(game.away_score), 9 + offset_x, 13, YELLOW)
         else:
@@ -69,28 +73,11 @@ def render_basketball_game_onto(draw, game, odds, offset_x):
 
 
 def render_game_strip_onto(draw, game, odds, offset_x):
-    # Away logo before the score card
+    # away logo
     draw_team_logo(draw, game.away, offset_x, 1)
 
-    # Existing 64px score card after away logo
+    # score card
     render_basketball_game_onto(draw, game, odds, offset_x + LOGO_SIZE)
 
-    # Home logo after the score card
+    # home logo
     draw_team_logo(draw, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1)
-
-def render_scrolling_games(games, current_game, scroll_x):
-    image = Image.new("RGB", (PANEL_WIDTH, PANEL_HEIGHT), (0, 0, 0))
-    draw = ImageDraw.Draw(image)
-
-    if not games:
-        draw.text((3, 12), "NO GAMES", fill=WHITE)
-        return image
-
-    next_game = current_game + 1
-    if next_game >= len(games):
-        next_game = 0
-
-    render_game_strip_onto(draw, games[current_game], int(scroll_x))
-    render_game_strip_onto(draw, games[next_game], int(scroll_x) + GAME_WIDTH + GAME_GAP)
-
-    return image

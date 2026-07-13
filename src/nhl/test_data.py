@@ -3,10 +3,6 @@ from nhl.models import HockeyGame
 
 TEST_GAMES_NHL = [
 
-    #
-    # Scheduled
-    #
-
     HockeyGame(
         away="BOS",
         home="NYR",
@@ -39,10 +35,6 @@ TEST_GAMES_NHL = [
         home_ot_losses=0,
     ),
 
-    #
-    # First Period
-    #
-
     HockeyGame(
         away="DAL",
         home="COL",
@@ -61,10 +53,6 @@ TEST_GAMES_NHL = [
         clock="12:41",
     ),
 
-    #
-    # Second Period
-    #
-
     HockeyGame(
         away="VGK",
         home="LA",
@@ -82,10 +70,6 @@ TEST_GAMES_NHL = [
         period=2,
         clock="8:53",
     ),
-
-    #
-    # Intermission
-    #
 
     HockeyGame(
         away="EDM",
@@ -106,10 +90,6 @@ TEST_GAMES_NHL = [
         intermission=True,
     ),
 
-    #
-    # Third Period
-    #
-
     HockeyGame(
         away="TB",
         home="FLA",
@@ -127,10 +107,6 @@ TEST_GAMES_NHL = [
         period=3,
         clock="2:15",
     ),
-
-    #
-    # Overtime
-    #
 
     HockeyGame(
         away="MIN",
@@ -151,10 +127,6 @@ TEST_GAMES_NHL = [
         overtime=True,
     ),
 
-    #
-    # Shootout
-    #
-
     HockeyGame(
         away="VAN",
         home="SEA",
@@ -171,10 +143,6 @@ TEST_GAMES_NHL = [
         home_ot_losses=11,
         shootout=True,
     ),
-
-    #
-    # Final
-    #
 
     HockeyGame(
         away="OTT",

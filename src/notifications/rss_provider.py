@@ -42,8 +42,6 @@ def utc_timestamp_from_pub_date(pub_date_text):
 
     dt = parsedate_to_datetime(pub_date_text)
 
-    # Some feeds use timezone names like EST incorrectly.
-    # Force Python to respect the explicit abbreviation.
     parts = pub_date_text.strip().split()
     tz_name = parts[-1].upper() if parts else ""
 

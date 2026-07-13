@@ -9,14 +9,19 @@ NFL_SCHEDULE_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/s
 LOCAL_TIMEZONE = "America/Chicago"
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
+HTTP_TIMEOUT = (3.05, 10)
+
+_session = requests.Session()
+_session.headers.update({
+    "User-Agent": "P4SportsTicker/1.0",
+    "Accept": "application/json",
+})
 
 def get_team_abbr(team):
-    # ESPN provides the string abbreviation natively (e.g., "PIT", "GNB", "DAL")
     return team.get("abbreviation", team.get("name", "")[:3].upper())
 
 
 def format_local_time(utc_time_str):
-    # Handles ESPN's ISO string format seamlessly
     utc_dt = datetime.fromisoformat(
         utc_time_str.replace("Z", "+00:00")
     )
@@ -33,7 +38,6 @@ def get_record(team_data):
     if not records:
         return {"wins": 0, "losses": 0}
         
-    # Grab the overall season record summary (usually index 0, e.g., "3-1")
     summary = records[0].get("summary", "0-0")
     try:
         parts = summary.split("-")
@@ -51,11 +55,9 @@ def safe_int(value, default=0):
         return default
 
 def get_today_games():
-    # This matches the MLB pattern, but note that ESPN's scoreboard endpoint 
-    # automatically returns the current active NFL week's games by default.
-    response = requests.get(
+    response = _session.get(
         NFL_SCHEDULE_URL,
-        timeout=10,
+        timeout=HTTP_TIMEOUT,
         verify=CA_BUNDLE,
     )
 
@@ -78,7 +80,6 @@ def get_today_games():
         home_record = get_record(home_data)
         away_record = get_record(away_data)
 
-        # Determine possession team abbreviation from the live game ID string
         possession_id = situation.get("possession")
         possession_abbr = ""
         if possession_id:
@@ -86,7 +87,6 @@ def get_today_games():
                 if comp["id"] == str(possession_id):
                     possession_abbr = comp["team"].get("abbreviation", "")
 
-        # Extract yardline side details safely
         yardline_side = ""
         if "lastPlay" in situation:
             yardline_side = situation["lastPlay"].get("type", {}).get("text", "")[:3]
@@ -96,14 +96,11 @@ def get_today_games():
 
         if raw_date_string:
             try:
-                # Remove the 'Z' at the end if present to help Python parse it cleanly
                 clean_date = raw_date_string.replace("Z", "")
-                # Parse the ISO timestamp format: "YYYY-MM-DDTHH:MM..."
                 dt = datetime.fromisoformat(clean_date)
-                # %b gives short month (Sep), %d gives day (16). upper() makes it SEP 16
                 formatted_date = dt.strftime("%b %d").upper()
             except ValueError:
-                formatted_date = raw_date_string # Fallback if string format shifts
+                formatted_date = raw_date_string
 
         games.append(
             FootballGame(
@@ -131,7 +128,7 @@ def get_today_games():
                 yardline_side=yardline_side,
                 yardline_number=int(situation.get("yardline", 0)),
                 date=formatted_date,
-                week=int(data.get("week", {}).get("number", 0)),  # <-- Fixed parameter name and data mapping here
+                week=int(data.get("week", {}).get("number", 0)),
             )
         )
 

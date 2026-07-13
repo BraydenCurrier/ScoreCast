@@ -1,7 +1,6 @@
 from cfb.models import CollegeFootballGame
 
 TEST_GAMES_CFB = [
-    # Mid-game: Close conference matchup (Top 5 battle)
     CollegeFootballGame(
         away="TEX", home="UGA", status="IN_PROGRESS", start_time="7:30 PM",
         away_rank=3, home_rank=2,
@@ -12,7 +11,6 @@ TEST_GAMES_CFB = [
         yardline_side="TEX", yardline_number=35,
         date="NOV 14", week=11
     ),
-    # Early-game: Big Ten clash (The Game)
     CollegeFootballGame(
         away="OSU", home="MICH", status="IN_PROGRESS", start_time="12:00 PM",
         away_rank=2, home_rank=5,
@@ -23,7 +21,6 @@ TEST_GAMES_CFB = [
         yardline_side="MICH", yardline_number=25,
         date="NOV 28", week=13
     ),
-    # Final state: Blowout (One ranked team, one unranked/None)
     CollegeFootballGame(
         away="CLEM", home="FSU", status="FINAL", start_time="3:30 PM",
         away_rank=18, home_rank=25,
@@ -34,7 +31,6 @@ TEST_GAMES_CFB = [
         yardline_side="", yardline_number=0,
         date="OCT 31", week=9
     ),
-    # Pre-game: Awaiting kickoff (Saban-era legacy rivalry)
     CollegeFootballGame(
         away="LSU", home="ALA", status="PRE_GAME", start_time="8:00 PM",
         away_rank=12, home_rank=7,

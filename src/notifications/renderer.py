@@ -62,12 +62,10 @@ def render_notification_onto(draw, card, x):
     if created_at is None:
         time_text = "NOW"
     else:
-        # Get true UTC current time in seconds since epoch
         now_dt = datetime.datetime.now(datetime.timezone.utc)
         epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
         now_utc_seconds = (now_dt - epoch).total_seconds()
         
-        # Simple integer/float subtraction avoids all datetime parsing bugs
         diff_seconds = max(0, now_utc_seconds - created_at)
         diff_minutes = int(diff_seconds // 60)
 
@@ -76,36 +74,20 @@ def render_notification_onto(draw, card, x):
         else:
             time_text = f"{diff_minutes}M"
 
-    #
-    # Background
-    #
-
     draw.rectangle(
         (x, 0, x + 272, 31),
         fill=(0, 0, 0)
     )
-
-    #
-    # Left accent
-    #
 
     draw.rectangle(
         (x, 0, x + 2, 31),
         fill=color
     )
 
-    #
-    # Divider
-    #
-
     draw.line(
         (x + 4, 8, x + 268, 8),
         fill=DARK
     )
-
-    #
-    # Source
-    #
 
     print_4x5(
         draw,
@@ -115,10 +97,6 @@ def render_notification_onto(draw, card, x):
         color
     )
 
-    #
-    # Time Elapsed (Placed at x + 195, just to the left of the Provider name)
-    #
-
     print_4x5(
         draw,
         time_text,
@@ -126,10 +104,6 @@ def render_notification_onto(draw, card, x):
         1,
         GRAY
     )
-
-    #
-    # Provider
-    #
 
     print_4x5(
         draw,
@@ -139,10 +113,6 @@ def render_notification_onto(draw, card, x):
         GRAY
     )
 
-    #
-    # Title
-    #
-
     print_4x5(
         draw,
         title,
@@ -150,10 +120,6 @@ def render_notification_onto(draw, card, x):
         11,
         WHITE
     )
-
-    #
-    # Body
-    #
 
     print_4x5(
         draw,

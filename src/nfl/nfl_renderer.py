@@ -33,7 +33,7 @@ def in_redzone(game):
     if game.possession == "":
         return False
 
-    # If ball is on opponent 20 or closer
+    # determine if a team is inside the opponents 20 (redzone)
     if game.possession == game.away:
         return game.yardline_side == game.home and game.yardline_number <= 20
 
@@ -53,24 +53,6 @@ def draw_3x5_center(draw, text, center_x, y, color):
     width = get_3x5_width(text)
     print_3x5(draw, text, center_x - width // 2, y, color)
 
-
-def draw_possession_arrow(draw, x, y, direction, color):
-    if direction == "left":
-        points = [
-            (x, y + 3),
-            (x + 5, y),
-            (x + 5, y + 6),
-        ]
-    else:
-        points = [
-            (x + 5, y + 3),
-            (x, y),
-            (x, y + 6),
-        ]
-
-    draw.polygon(points, fill=color)
-
-
 def ordinal_down(down):
     if down == 1:
         return "1st"
@@ -82,84 +64,67 @@ def ordinal_down(down):
         return "4th"
     return "-"
 
-
-def draw_border(draw, game):
-    color = RED if in_redzone(game) else GREY
-    draw.rectangle((0, 0, PANEL_WIDTH - 1, PANEL_HEIGHT - 1), outline=color)
-
 def draw_possession_football(draw, x, y):
-    # Row 0 (Top profile):   . X X X .
+    # top
     draw.line([(x + 1, y), (x + 3, y)], fill=BALL_BROWN)
     
-    # Row 1 (Middle laces): X X W X X  (W = White Lace)
+    # middle with lace
     draw.point((x, y + 1), fill=BALL_BROWN)
     draw.point((x + 1, y + 1), fill=BALL_BROWN)
     draw.point((x + 2, y + 1), fill=WHITE)  # Center lace
     draw.point((x + 3, y + 1), fill=BALL_BROWN)
     draw.point((x + 4, y + 1), fill=BALL_BROWN)
     
-    # Row 2 (Bottom profile): . X X X .
+    # bottom
     draw.line([(x + 1, y + 2), (x + 3, y + 2)], fill=BALL_BROWN)
 
 def draw_team_logo(draw, team_abbreviation, x_start, y_start):
-    """Stamps a pre-processed 16x16 team logo onto your matrix image frame"""
     logo_data = getattr(nfl_logos, f"LOGO_{team_abbreviation}", None)
     
     if not logo_data:
-        return  # Fall back smoothly if logo doesn't exist
+        return  
         
     for y, row in enumerate(logo_data):
         for x, rgb_color in enumerate(row):
-            # Treat (0, 0, 0) as transparent background so it doesn't draw black blocks
             if rgb_color != (0, 0, 0):
                 draw.point((x_start + x, y_start + y), fill=rgb_color)
 
 def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, home_team, home_color):
-    """Draws a scaled football field tracker with home_color endzones, 
-    goal posts, a line of scrimmage, and a mini 5x3 football tracker.
-    """
-    # 🎨 Colors
     GRASS = (0, 180, 30)
     LINE_COLOR = (200, 200, 200)
-    BALL_COLOR = (255, 220, 0)       # Line of Scrimmage
-    POST_YELLOW = (255, 205, 0)      # Goal post yellow
-    BALL_BROWN = (139, 69, 19)       # Football leather
-    LACE_WHITE = (255, 255, 255)     # Football laces
+    BALL_COLOR = (255, 220, 0)       
+    POST_YELLOW = (255, 205, 0)      
+    BALL_BROWN = (139, 69, 19)       
+    LACE_WHITE = (255, 255, 255)   
     
-    # Field Dimensions   
+    # field dimensions   
     ez_width = 3
     playable_width = 50
     field_height = 6    
     
-    # 1. Draw Background Turf & Endzones
-    # Left Endzone
+    # left endzone
     draw.rectangle([x, y, x + ez_width - 1, y + field_height - 1], fill=home_color)
-    # Playable Grass
+    # field
     draw.rectangle([x + ez_width, y, x + ez_width + playable_width - 1, y + field_height - 1], fill=GRASS)
-    # Right Endzone
+    # right endzone
     draw.rectangle([x + ez_width + playable_width, y, x + ez_width + playable_width + ez_width - 1, y + field_height - 1], fill=home_color)
     
-    # 2. Draw Major Field Lines & White Goal Lines
-    # Left Goal Line (The first column of green grass turned white)
+    # left goal line
     left_goal_x = x + ez_width
     draw.line([left_goal_x, y, left_goal_x, y + field_height - 1], fill=LINE_COLOR)
     
-    # Right Goal Line (The last column of green grass turned white)
+    # right goal line
     right_goal_x = x + ez_width + playable_width - 1
     draw.line([right_goal_x, y, right_goal_x, y + field_height - 1], fill=LINE_COLOR)
 
-    # 2. Draw Major Field Lines (50, 20s)
+    # yard lines
     draw.line([x + ez_width + 25, y, x + ez_width + 25, y + field_height - 1], fill=LINE_COLOR)
     draw.point((x + ez_width + 10, y), fill=LINE_COLOR)
     draw.point((x + ez_width + playable_width - 10, y), fill=LINE_COLOR)
 
-    # ==========================================
-    # 5. Calculate Absolute Yards Based on Fixed Directions
-    # ==========================================
     is_home_attacking = (possession == home_team)
     
     if is_home_attacking:
-        # Home always drives Right to Left
         if possession_direction == "OWN":
             absolute_yards = 100 - yardline
         else:
@@ -168,28 +133,16 @@ def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, 
         pixel_offset = int(absolute_yards / 2)
         scrimmage_x = x + ez_width + pixel_offset
         
-        # 6. Draw Line of Scrimmage Indicator
+        # line of scrimmage
         draw.line([scrimmage_x, y, scrimmage_x, y + field_height - 1], fill=BALL_COLOR)
         
-        # 7. Draw Football ABOVE Field (Pointing Left: Tip at LOS, Laces on TOP)
+        # draw football
         fx = scrimmage_x
         fy = y - 3
         
-        # Row 0
-        draw.line([(fx + 1, fy), (fx + 3, fy)], fill=BALL_BROWN)
-    
-        # Row 1 (Middle laces): X X W X X  (W = White Lace)
-        draw.point((fx, fy + 1), fill=BALL_BROWN)
-        draw.point((fx + 1, fy + 1), fill=BALL_BROWN)
-        draw.point((fx + 2, fy + 1), fill=LACE_WHITE)  # Center lace
-        draw.point((fx + 3, fy + 1), fill=BALL_BROWN)
-        draw.point((fx + 4, fy + 1), fill=BALL_BROWN)
-    
-        # Row 2 (Bottom profile): . X X X .
-        draw.line([(fx + 1, fy + 2), (fx + 3, fy + 2)], fill=BALL_BROWN)
+        draw_possession_football(draw, fx - 4, fy)
 
     else:
-        # Away always drives Left to Right
         if possession_direction == "OWN":
             absolute_yards = yardline
         else:
@@ -198,26 +151,16 @@ def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, 
         pixel_offset = int(absolute_yards / 2)
         scrimmage_x = x + ez_width + pixel_offset
         
-        # 6. Draw Line of Scrimmage Indicator
+        # line of scrimmage
         draw.line([scrimmage_x, y, scrimmage_x, y + field_height - 1], fill=BALL_COLOR)
         
-        # 7. Draw Football ABOVE Field (Pointing Right: Tip at LOS, Laces on TOP)
+        # draw football
         fx = scrimmage_x - 4
         fy = y - 3
         
-        draw.line([(fx + 1, fy), (fx + 3, fy)], fill=BALL_BROWN)
-    
-        # Row 1 (Middle laces): X X W X X  (W = White Lace)
-        draw.point((fx, fy + 1), fill=BALL_BROWN)
-        draw.point((fx + 1, fy + 1), fill=BALL_BROWN)
-        draw.point((fx + 2, fy + 1), fill=LACE_WHITE)  # Center lace
-        draw.point((fx + 3, fy + 1), fill=BALL_BROWN)
-        draw.point((fx + 4, fy + 1), fill=BALL_BROWN)
-    
-        # Row 2 (Bottom profile): . X X X .
-        draw.line([(fx + 1, fy + 2), (fx + 3, fy + 2)], fill=BALL_BROWN)
+        draw_possession_football(draw, fx - 4, fy)
 
-    # 3. Draw Left Field Goal Post (Back of Left Endzone)
+    # draw left field goal
     lx = x - 1
     y = y - 4  
     draw.line([(lx, y), (lx, y + 2)], fill=POST_YELLOW)          
@@ -225,7 +168,7 @@ def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, 
     draw.line([(lx, y + 2), (lx + 2, y + 2)], fill=POST_YELLOW)  
     draw.line([(lx + 1, y + 3), (lx + 1, y + 5)], fill=POST_YELLOW) 
 
-    # 4. Draw Right Field Goal Post (Back of Right Endzone)
+    # draw right field goal
     rx = x + ez_width + playable_width + ez_width - 2
     draw.line([(rx, y), (rx, y + 2)], fill=POST_YELLOW)          
     draw.line([(rx + 2, y), (rx + 2, y + 2)], fill=POST_YELLOW)  
@@ -251,27 +194,27 @@ def render_football_game_onto(draw, game, odds, offset_x):
         #date
         print_4x5_centered(draw, game.date, 32 + offset_x, 20, WHITE)
     else:
-        #quarter
+        # quarter
         print_4x5(draw, "Q" + str(game.quarter), 27 + offset_x, 2, WHITE)
 
-        #time
+        # time
         print_clock(draw, game.clock, 33 + offset_x, 8, YELLOW)
 
-        #down
+        # down and distance
         downAndDistance = ordinal_down(game.down) + "&" + str(game.distance) 
         print_4x5_centered(draw, downAndDistance, 32 + offset_x, 14, WHITE)
 
-        #possession
+        # possession
         if game.possession == game.away:
             draw_possession_football(draw, 8 + offset_x, 10)
         else:
             draw_possession_football(draw, 50 + offset_x, 10)
         
-        #yardline
+        # yardline
         yard = game.yardline_side + " " + str(game.yardline_number)
         print_4x5_centered(draw, yard, 32 + offset_x, 20, WHITE)
 
-        #score
+        # print scores centered
         if game.away_score < 10:
             print_gfx_5x7(draw, str(game.away_score), 8 + offset_x, 14, YELLOW)
         else:
@@ -282,21 +225,22 @@ def render_football_game_onto(draw, game, odds, offset_x):
         else:
             draw_text_right(draw, game.home_score, 58 + offset_x, 14, YELLOW)
 
+        # football field
+        if game.possession == game.yardline_side:
+            draw_field_tracker(draw, 4 + offset_x, 29, game.yardline_number, "OWN", game.possession, game.home, home_color);
+        else:
+            draw_field_tracker(draw, 4 + offset_x, 29, game.yardline_number, "OPP", game.possession, game.home, home_color);
 
-    #football field
-    if game.possession == game.yardline_side:
-        draw_field_tracker(draw, 4 + offset_x, 29, game.yardline_number, "OWN", game.possession, game.home, home_color);
-    else:
-        draw_field_tracker(draw, 4 + offset_x, 29, game.yardline_number, "OPP", game.possession, game.home, home_color);
+
 
     
 
 def render_game_strip_onto(draw, game, odds, offset_x):
-    # Away logo before the score card
+    # away logo
     draw_team_logo(draw, game.away, offset_x, 1)
 
-    # Existing 64px score card after away logo
+    # score card
     render_football_game_onto(draw, game, odds, offset_x + LOGO_SIZE)
 
-    # Home logo after the score card
+    # home logo
     draw_team_logo(draw, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1)    
