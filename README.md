@@ -246,8 +246,6 @@ Current settings include:
 - Brightness
 - Scroll speed
 - Refresh interval
-- Betting odds
-- News feeds
 
 ---
 
