@@ -5,7 +5,7 @@ from pathlib import Path
 from functools import wraps
 from html import escape
 
-from flask import Flask, request, redirect, session, jsonify
+from flask import Flask, request, redirect, session, jsonify, url_for
 
 from common.settings import get_settings, update_settings
 
