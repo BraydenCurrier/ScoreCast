@@ -290,6 +290,59 @@ def create_release(
     return release_path
 
 
+def copy_rgbmatrix_binding(
+    source_python: Path,
+    target_python: Path,
+) -> None:
+    """
+    Copy the working local rgbmatrix binding into a new release venv.
+
+    The hzeller binding is often installed outside normal PyPI handling,
+    so it may not be visible inside a newly created virtual environment.
+    """
+    source_result = run_command(
+        [
+            str(source_python),
+            "-c",
+            (
+                "import pathlib, rgbmatrix; "
+                "print(pathlib.Path(rgbmatrix.__file__)"
+                ".resolve().parent)"
+            ),
+        ]
+    )
+
+    source_package = Path(
+        source_result.stdout.strip()
+    )
+
+    target_result = run_command(
+        [
+            str(target_python),
+            "-c",
+            (
+                "import site; "
+                "print(site.getsitepackages()[0])"
+            ),
+        ]
+    )
+
+    target_site_packages = Path(
+        target_result.stdout.strip()
+    )
+
+    target_package = (
+        target_site_packages / "rgbmatrix"
+    )
+
+    if target_package.exists():
+        shutil.rmtree(target_package)
+
+    shutil.copytree(
+        source_package,
+        target_package,
+    )
+
 def create_release_venv(
     release_path: Path,
     version: str,
@@ -300,11 +353,32 @@ def create_release_venv(
     )
 
     if python_path.is_file():
-        log(
-            f"Virtual environment for "
-            f"{version} already exists."
+        rgbmatrix_check = subprocess.run(
+            [
+                str(python_path),
+                "-c",
+                "import rgbmatrix",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
         )
-        return venv_path
+
+        if rgbmatrix_check.returncode == 0:
+            log(
+                f"Virtual environment for "
+                f"{version} already exists."
+            )
+            return venv_path
+
+        log(
+            f"Existing environment for {version} "
+            "is incomplete; rebuilding it."
+        )
+
+        shutil.rmtree(
+            venv_path
+        )
 
     if venv_path.exists():
         shutil.rmtree(
@@ -371,6 +445,21 @@ def create_release_venv(
             "-r",
             str(requirements_path),
         ]
+    )
+
+    current_python = (
+        CURRENT_VENV_LINK
+        / "bin"
+        / "python"
+    )
+
+    log(
+        "Copying RGB matrix Python binding."
+    )
+
+    copy_rgbmatrix_binding(
+        current_python,
+        python_path,
     )
 
     return venv_path
