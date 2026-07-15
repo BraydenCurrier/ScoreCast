@@ -29,3 +29,8 @@ class FootballGame:
     date: str = "5-6-26"
     week: int = 0
     event_id: str = ""
+
+    # Alert metadata from ESPN's situation.lastPlay
+    last_play_id: str = ""
+    last_play_text: str = ""
+    scoring_play: bool = False

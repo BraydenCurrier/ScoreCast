@@ -865,34 +865,47 @@ def alerts_page():
 
         updated_alerts = {
             "enabled": (
-                request.form.get("enabled")
-                == "on"
+                request.form.get("enabled") == "on"
             ),
-
+            "possession_enabled": (
+                request.form.get(
+                    "possession_enabled"
+                ) == "on"
+            ),
+            "redzone_enabled": (
+                request.form.get(
+                    "redzone_enabled"
+                ) == "on"
+            ),
+            "touchdown_enabled": (
+                request.form.get(
+                    "touchdown_enabled"
+                ) == "on"
+            ),
+            "field_goal_enabled": (
+                request.form.get(
+                    "field_goal_enabled"
+                ) == "on"
+            ),
             "possession_teams": sorted(
                 selected_teams
             ),
-
             "poll_interval_seconds": max(
                 2.0,
                 min(30.0, poll_interval),
             ),
-
             "confirmations_required": max(
                 1,
                 min(5, confirmations),
             ),
-
             "cooldown_seconds": max(
                 0.0,
                 min(300.0, cooldown),
             ),
-
             "chant_frame_seconds": max(
                 0.2,
                 min(3.0, chant_seconds),
             ),
-
             "details_frame_seconds": max(
                 1.0,
                 min(15.0, details_seconds),
@@ -913,6 +926,48 @@ def alerts_page():
         )
     }
 
+    enabled_checked = (
+        "checked"
+        if alerts.get("enabled", False)
+        else ""
+    )
+
+    possession_checked = (
+        "checked"
+        if alerts.get(
+            "possession_enabled",
+            True,
+        )
+        else ""
+    )
+
+    redzone_checked = (
+        "checked"
+        if alerts.get(
+            "redzone_enabled",
+            True,
+        )
+        else ""
+    )
+
+    touchdown_checked = (
+        "checked"
+        if alerts.get(
+            "touchdown_enabled",
+            True,
+        )
+        else ""
+    )
+
+    field_goal_checked = (
+        "checked"
+        if alerts.get(
+            "field_goal_enabled",
+            True,
+        )
+        else ""
+    )
+
     team_rows = ""
 
     for abbreviation, definition in sorted(
@@ -929,53 +984,62 @@ def alerts_page():
             abbreviation,
             quote=True,
         )
-
-        safe_name = escape(
-            definition.name
-        )
-
+        safe_name = escape(definition.name)
         safe_chant = escape(
             " → ".join(definition.chant)
         )
 
         team_rows += f"""
-        <div
-            class="possession-team-row"
-            data-team-search="{safe_name.lower()} {safe_abbreviation.lower()}"
-        >
-            <input
-                type="checkbox"
-                name="possession_team:{safe_abbreviation}"
-                {checked}
-            >
+        <div class="team-row">
+            <label>
+                <input
+                    type="checkbox"
+                    name="possession_team:{safe_abbreviation}"
+                    {checked}
+                >
+                <strong>{safe_name}</strong>
+                <span>
+                    {safe_abbreviation} · {safe_chant}
+                </span>
+            </label>
 
-            <div class="team-color"
-                style="
-                    background: rgb{definition.primary};
-                    border-color: rgb{definition.accent};
-                ">
+            <div class="alert-test-buttons">
+                <form
+                    method="post"
+                    action="/alerts/test/{safe_abbreviation}/POSSESSION"
+                >
+                    <button type="submit">
+                        Possession
+                    </button>
+                </form>
+
+                <form
+                    method="post"
+                    action="/alerts/test/{safe_abbreviation}/REDZONE"
+                >
+                    <button type="submit">
+                        Red Zone
+                    </button>
+                </form>
+
+                <form
+                    method="post"
+                    action="/alerts/test/{safe_abbreviation}/TOUCHDOWN"
+                >
+                    <button type="submit">
+                        TD
+                    </button>
+                </form>
+
+                <form
+                    method="post"
+                    action="/alerts/test/{safe_abbreviation}/FIELD_GOAL"
+                >
+                    <button type="submit">
+                        FG
+                    </button>
+                </form>
             </div>
-
-            <div class="game-info">
-                <div class="matchup">
-                    {safe_name}
-                </div>
-
-                <div class="details">
-                    {safe_abbreviation}
-                    ·
-                    {safe_chant}
-                </div>
-            </div>
-
-            <button
-                class="secondary-button test-alert-button"
-                type="submit"
-                formaction="/alerts/test/{safe_abbreviation}"
-                formmethod="POST"
-            >
-                Test
-            </button>
         </div>
         """
 
@@ -984,371 +1048,426 @@ def alerts_page():
     if request.args.get("saved") == "1":
         saved_message = """
         <div class="success-message">
-            Possession alert settings saved.
+            Alert settings saved.
         </div>
         """
 
+    poll_interval = alerts.get(
+        "poll_interval_seconds",
+        3.0,
+    )
+    confirmations = alerts.get(
+        "confirmations_required",
+        2,
+    )
+    cooldown = alerts.get(
+        "cooldown_seconds",
+        20,
+    )
+    chant_seconds = alerts.get(
+        "chant_frame_seconds",
+        0.9,
+    )
+    details_seconds = alerts.get(
+        "details_frame_seconds",
+        4.0,
+    )
+
     return f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Possession Alerts</title>
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1"
-    >
+    <!doctype html>
+    <html>
+    <head>
+        <title>ScoreCast Alerts</title>
+        {page_styles()}
 
-    {page_styles()}
+        <style>
+            .alert-options {{
+                display: grid;
+                gap: 12px;
+                margin-bottom: 24px;
+            }}
 
-    <style>
-        .success-message {{
-            background: rgba(48, 209, 88, 0.15);
-            border: 1px solid rgba(48, 209, 88, 0.5);
-            color: #78f09a;
-            border-radius: 12px;
-            padding: 12px;
-            margin-bottom: 16px;
-            font-weight: 700;
-        }}
+            .alert-option {{
+                display: flex;
+                align-items: flex-start;
+                gap: 10px;
+                padding: 12px;
+                border: 1px solid #333;
+                border-radius: 8px;
+            }}
 
-        .possession-team-row {{
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px 0;
-            border-bottom: 1px solid #2c2c35;
-        }}
+            .alert-option input {{
+                margin-top: 4px;
+            }}
 
-        .possession-team-row:last-child {{
-            border-bottom: 0;
-        }}
+            .alert-option strong {{
+                display: block;
+                margin-bottom: 4px;
+            }}
 
-        .possession-team-row input {{
-            width: 22px;
-            height: 22px;
-            flex: 0 0 auto;
-            accent-color: #0a84ff;
-        }}
+            .alert-option span {{
+                display: block;
+                opacity: 0.75;
+                font-size: 0.9rem;
+            }}
 
-        .team-color {{
-            width: 28px;
-            height: 28px;
-            flex: 0 0 auto;
-            border-radius: 8px;
-            border: 3px solid;
-        }}
+            .team-row {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 12px;
+                padding: 10px 0;
+                border-bottom: 1px solid #333;
+            }}
 
-        .quick-actions {{
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-bottom: 14px;
-        }}
+            .team-row label {{
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }}
 
-        .settings-grid {{
-            display: grid;
-            grid-template-columns: 1fr 90px;
-            gap: 10px;
-            align-items: center;
-        }}
-    </style>
-</head>
+            .team-row label span {{
+                opacity: 0.7;
+                margin-left: 6px;
+            }}
 
-<body>
-    <div class="page">
+            .alert-test-buttons {{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+            }}
+
+            .alert-test-buttons form {{
+                margin: 0;
+            }}
+
+            .alert-test-buttons button {{
+                padding: 5px 8px;
+                font-size: 0.8rem;
+            }}
+
+            .timing-grid {{
+                display: grid;
+                grid-template-columns:
+                    repeat(auto-fit, minmax(220px, 1fr));
+                gap: 14px;
+            }}
+
+            .timing-field label {{
+                display: block;
+                font-weight: bold;
+                margin-bottom: 5px;
+            }}
+
+            .timing-field input {{
+                width: 100%;
+            }}
+
+            .timing-field small {{
+                display: block;
+                margin-top: 4px;
+                opacity: 0.7;
+            }}
+        </style>
+    </head>
+
+    <body>
         {page_header("alerts")}
-
         {saved_message}
 
-        <form method="POST">
-            <div class="card">
-                <div class="card-title">
-                    Possession Alerts
-                </div>
+        <main>
+            <h1>NFL Alerts</h1>
 
-                <label class="game-row">
-                    <input
-                        type="checkbox"
-                        name="enabled"
-                        {
-                            "checked"
-                            if alerts.get(
-                                "enabled",
-                                False,
-                            )
-                            else ""
-                        }
-                    >
+            <form method="post">
+                <section>
+                    <h2>Alert System</h2>
 
-                    <div class="game-info">
-                        <div class="matchup">
-                            Enable possession alerts
+                    <div class="alert-options">
+                        <label class="alert-option">
+                            <input
+                                type="checkbox"
+                                name="enabled"
+                                {enabled_checked}
+                            >
+
+                            <span>
+                                <strong>
+                                    Enable NFL alerts
+                                </strong>
+
+                                Allow alerts to temporarily
+                                take over the matrix.
+                            </span>
+                        </label>
+
+                        <label class="alert-option">
+                            <input
+                                type="checkbox"
+                                name="possession_enabled"
+                                {possession_checked}
+                            >
+
+                            <span>
+                                <strong>
+                                    Possession alerts
+                                </strong>
+
+                                Alert when a selected team
+                                gains possession.
+                            </span>
+                        </label>
+
+                        <label class="alert-option">
+                            <input
+                                type="checkbox"
+                                name="redzone_enabled"
+                                {redzone_checked}
+                            >
+
+                            <span>
+                                <strong>
+                                    Red-zone alerts
+                                </strong>
+
+                                Alert when a selected team
+                                enters the opponent's
+                                20-yard line.
+                            </span>
+                        </label>
+
+                        <label class="alert-option">
+                            <input
+                                type="checkbox"
+                                name="touchdown_enabled"
+                                {touchdown_checked}
+                            >
+
+                            <span>
+                                <strong>
+                                    Touchdown alerts
+                                </strong>
+
+                                Alert when a selected team
+                                scores a touchdown.
+                            </span>
+                        </label>
+
+                        <label class="alert-option">
+                            <input
+                                type="checkbox"
+                                name="field_goal_enabled"
+                                {field_goal_checked}
+                            >
+
+                            <span>
+                                <strong>
+                                    Field-goal alerts
+                                </strong>
+
+                                Alert when a selected team
+                                makes a field goal.
+                            </span>
+                        </label>
+                    </div>
+                </section>
+
+                <section>
+                    <h2>Select Teams</h2>
+
+                    <p>
+                        Alert types above apply to every
+                        selected NFL team.
+                    </p>
+
+                    <div>
+                        <button
+                            type="button"
+                            onclick="setAllTeams(true)"
+                        >
+                            Select All
+                        </button>
+
+                        <button
+                            type="button"
+                            onclick="setAllTeams(false)"
+                        >
+                            Select None
+                        </button>
+                    </div>
+
+                    <div class="team-list">
+                        {team_rows}
+                    </div>
+                </section>
+
+                <section>
+                    <h2>Timing</h2>
+
+                    <div class="timing-grid">
+                        <div class="timing-field">
+                            <label
+                                for="poll_interval_seconds"
+                            >
+                                NFL polling interval
+                            </label>
+
+                            <input
+                                id="poll_interval_seconds"
+                                name="poll_interval_seconds"
+                                type="number"
+                                min="2"
+                                max="30"
+                                step="0.5"
+                                value="{poll_interval}"
+                            >
+
+                            <small>
+                                How often ScoreCast checks
+                                for new NFL events.
+                            </small>
                         </div>
 
-                        <div class="details">
-                            Temporarily take over the matrix
-                            when a selected NFL team gains
-                            possession.
+                        <div class="timing-field">
+                            <label
+                                for="confirmations_required"
+                            >
+                                Possession confirmations
+                            </label>
+
+                            <input
+                                id="confirmations_required"
+                                name="confirmations_required"
+                                type="number"
+                                min="1"
+                                max="5"
+                                step="1"
+                                value="{confirmations}"
+                            >
+
+                            <small>
+                                Matching readings required
+                                before a possession alert.
+                            </small>
+                        </div>
+
+                        <div class="timing-field">
+                            <label
+                                for="chant_frame_seconds"
+                            >
+                                Chant word duration
+                            </label>
+
+                            <input
+                                id="chant_frame_seconds"
+                                name="chant_frame_seconds"
+                                type="number"
+                                min="0.2"
+                                max="3"
+                                step="0.1"
+                                value="{chant_seconds}"
+                            >
+
+                            <small>
+                                Seconds each alert word
+                                remains visible.
+                            </small>
+                        </div>
+
+                        <div class="timing-field">
+                            <label
+                                for="details_frame_seconds"
+                            >
+                                Details duration
+                            </label>
+
+                            <input
+                                id="details_frame_seconds"
+                                name="details_frame_seconds"
+                                type="number"
+                                min="1"
+                                max="15"
+                                step="0.5"
+                                value="{details_seconds}"
+                            >
+
+                            <small>
+                                Seconds the final alert
+                                screen remains visible.
+                            </small>
+                        </div>
+
+                        <div class="timing-field">
+                            <label
+                                for="cooldown_seconds"
+                            >
+                                Duplicate cooldown
+                            </label>
+
+                            <input
+                                id="cooldown_seconds"
+                                name="cooldown_seconds"
+                                type="number"
+                                min="0"
+                                max="300"
+                                step="1"
+                                value="{cooldown}"
+                            >
+
+                            <small>
+                                Prevent repeated alerts
+                                caused by duplicate data.
+                            </small>
                         </div>
                     </div>
-                </label>
-            </div>
+                </section>
 
-            <div class="card">
-                <div class="card-title">
-                    Select Teams
-                </div>
-
-                <input
-                    class="search-input"
-                    id="possession_team_search"
-                    type="text"
-                    placeholder="Search NFL teams..."
-                    oninput="filterPossessionTeams()"
-                >
-
-                <div class="quick-actions">
-                    <button
-                        class="secondary-button"
-                        type="button"
-                        onclick="setVisibleTeams(true)"
-                    >
-                        Select All
+                <p>
+                    <button type="submit">
+                        Save NFL Alerts
                     </button>
+                </p>
+            </form>
+        </main>
 
-                    <button
-                        class="secondary-button"
-                        type="button"
-                        onclick="setVisibleTeams(false)"
-                    >
-                        Select None
-                    </button>
-                </div>
-
-                <div id="possession_team_list">
-                    {team_rows}
-                </div>
-            </div>
-
-            <div class="card">
-                <div class="card-title">
-                    Timing
-                </div>
-
-                <div class="control">
-                    <div class="control-top">
-                        <label>
-                            NFL polling interval
-                        </label>
-
-                        <input
-                            class="number-input"
-                            type="number"
-                            name="poll_interval_seconds"
-                            min="2"
-                            max="30"
-                            step="0.5"
-                            value="{
-                                alerts.get(
-                                    "poll_interval_seconds",
-                                    3.0,
-                                )
-                            }"
-                        >
-                    </div>
-
-                    <div class="hint">
-                        How often ScoreCast checks for
-                        possession changes. Three seconds
-                        is recommended.
-                    </div>
-                </div>
-
-                <div class="control">
-                    <div class="control-top">
-                        <label>
-                            Confirmations required
-                        </label>
-
-                        <input
-                            class="number-input"
-                            type="number"
-                            name="confirmations_required"
-                            min="1"
-                            max="5"
-                            step="1"
-                            value="{
-                                alerts.get(
-                                    "confirmations_required",
-                                    2,
-                                )
-                            }"
-                        >
-                    </div>
-
-                    <div class="hint">
-                        Two matching API readings helps
-                        prevent false alerts.
-                    </div>
-                </div>
-
-                <div class="control">
-                    <div class="control-top">
-                        <label>
-                            Chant word duration
-                        </label>
-
-                        <input
-                            class="number-input"
-                            type="number"
-                            name="chant_frame_seconds"
-                            min="0.2"
-                            max="3"
-                            step="0.1"
-                            value="{
-                                alerts.get(
-                                    "chant_frame_seconds",
-                                    0.9,
-                                )
-                            }"
-                        >
-                    </div>
-
-                    <div class="hint">
-                        Seconds each chant word remains
-                        visible.
-                    </div>
-                </div>
-
-                <div class="control">
-                    <div class="control-top">
-                        <label>
-                            Details duration
-                        </label>
-
-                        <input
-                            class="number-input"
-                            type="number"
-                            name="details_frame_seconds"
-                            min="1"
-                            max="15"
-                            step="0.5"
-                            value="{
-                                alerts.get(
-                                    "details_frame_seconds",
-                                    4.0,
-                                )
-                            }"
-                        >
-                    </div>
-
-                    <div class="hint">
-                        How long the final team and field
-                        position screen remains visible.
-                    </div>
-                </div>
-
-                <div class="control">
-                    <div class="control-top">
-                        <label>
-                            Duplicate cooldown
-                        </label>
-
-                        <input
-                            class="number-input"
-                            type="number"
-                            name="cooldown_seconds"
-                            min="0"
-                            max="300"
-                            step="5"
-                            value="{
-                                alerts.get(
-                                    "cooldown_seconds",
-                                    20,
-                                )
-                            }"
-                        >
-                    </div>
-
-                    <div class="hint">
-                        Prevents the same team from alerting
-                        repeatedly because of noisy data.
-                    </div>
-                </div>
-            </div>
-
-            <button
-                class="save-button"
-                type="submit"
-            >
-                Save Possession Alerts
-            </button>
-        </form>
-    </div>
-
-    <script>
-        function filterPossessionTeams() {{
-            const search = (
+        <script>
+            function setAllTeams(checked) {{
                 document
-                    .getElementById(
-                        "possession_team_search"
+                    .querySelectorAll(
+                        'input[name^="possession_team:"]'
                     )
-                    .value
-                    .toLowerCase()
-                    .trim()
-            );
-
-            document
-                .querySelectorAll(
-                    ".possession-team-row"
-                )
-                .forEach(function(row) {{
-                    const searchable = (
-                        row.dataset.teamSearch || ""
-                    );
-
-                    row.style.display = (
-                        searchable.includes(search)
-                        ? ""
-                        : "none"
-                    );
-                }});
-        }}
-
-        function setVisibleTeams(checked) {{
-            document
-                .querySelectorAll(
-                    ".possession-team-row"
-                )
-                .forEach(function(row) {{
-                    if (row.style.display === "none") {{
-                        return;
-                    }}
-
-                    const checkbox = row.querySelector(
-                        'input[type="checkbox"]'
-                    );
-
-                    if (checkbox) {{
-                        checkbox.checked = checked;
-                    }}
-                }});
-        }}
-    </script>
-</body>
-</html>
-"""
+                    .forEach((input) => {{
+                        input.checked = checked;
+                    }});
+            }}
+        </script>
+    </body>
+    </html>
+    """
 
 @app.route(
-    "/alerts/test/<team>",
+    "/alerts/test/<team>/<alert_type>",
     methods=["POST"],
 )
 @login_required
-def test_possession_alert(team):
+def test_possession_alert(
+    team: str,
+    alert_type: str,
+):
     team = str(team).upper()
+    alert_type = str(alert_type).upper()
+
+    valid_alert_types = {
+        "POSSESSION",
+        "REDZONE",
+        "TOUCHDOWN",
+        "FIELD_GOAL",
+    }
 
     if team not in NFL_TEAM_ALERTS:
         return "Unknown NFL team.", 404
+
+    if alert_type not in valid_alert_types:
+        return "Unknown alert type.", 404
 
     settings = get_settings()
 
@@ -1357,6 +1476,7 @@ def test_possession_alert(team):
         .enqueue_test_alert(
             team=team,
             settings=settings,
+            alert_type=alert_type,
         )
     )
 
@@ -1364,168 +1484,6 @@ def test_possession_alert(team):
         return "Could not queue alert.", 400
 
     return redirect("/alerts")
-
-@app.route("/fantasy", methods=["GET", "POST"])
-@login_required
-def fantasy_page():
-    settings = get_settings()
-    fantasy = settings.get("fantasy", {})
-
-    error = ""
-
-    if request.method == "POST":
-        action = request.form.get("action")
-
-        if action == "connect":
-            username = request.form.get("username", "").strip()
-
-            try:
-                user = connect_sleeper_user(username)
-
-                if not user:
-                    error = "Sleeper user not found."
-                else:
-                    return redirect("/fantasy")
-
-            except Exception as e:
-                error = str(e)
-
-        elif action == "save_leagues":
-            fantasy["enabled"] = request.form.get("enabled") == "on"
-            fantasy["season"] = request.form.get("season", "2026").strip()
-            fantasy["selected_leagues"] = request.form.getlist("selected_leagues")
-
-            update_settings({"fantasy": fantasy})
-            return redirect("/fantasy")
-
-    user_id = fantasy.get("user_id", "")
-    username = fantasy.get("username", "")
-    season = fantasy.get("season", "2026")
-
-    leagues = []
-
-    if user_id:
-        try:
-            leagues = get_user_leagues(user_id, season)
-        except Exception as e:
-            error = str(e)
-
-    selected_leagues = set(fantasy.get("selected_leagues", []))
-
-    league_rows = ""
-
-    for league in leagues:
-        league_id = league.get("league_id", "")
-        name = league.get("name", "Sleeper League")
-        total_rosters = league.get("total_rosters", 0)
-
-        checked = "checked" if league_id in selected_leagues else ""
-
-        league_rows += f"""
-        <label class="game-row">
-            <input
-                type="checkbox"
-                name="selected_leagues"
-                value="{escape(str(league_id), quote=True)}"
-                {checked}
-            >
-
-            <div class="game-info">
-                <div class="matchup">{escape(str(name))}</div>
-                <div class="details">{total_rosters} teams · {escape(str(season))}</div>
-            </div>
-        </label>
-        """
-
-    if user_id and not league_rows:
-        league_rows = """
-        <div class="empty">
-            No Sleeper leagues found for this season.
-        </div>
-        """
-
-    return f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Fantasy Football</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    {page_styles()}
-</head>
-
-<body>
-    <div class="page">
-        {page_header("fantasy")}
-
-        {"<div class='error'>" + escape(error) + "</div>" if error else ""}
-
-        <form method="POST">
-            <input type="hidden" name="action" value="connect">
-
-            <div class="card">
-                <div class="card-title">Connect Sleeper</div>
-
-                <div class="control">
-                    <label>Sleeper Username</label>
-                    <input
-                        class="search-input"
-                        name="username"
-                        placeholder="Enter Sleeper username"
-                        value="{escape(str(username), quote=True)}"
-                    >
-                </div>
-
-                <button class="save-button" type="submit">
-                    Connect Sleeper
-                </button>
-
-                <div class="hint">
-                    Sleeper does not require a password here. ScoreCast uses Sleeper's public read-only API.
-                </div>
-            </div>
-        </form>
-
-        <form method="POST">
-            <input type="hidden" name="action" value="save_leagues">
-
-            <div class="card">
-                <div class="card-title">Fantasy Settings</div>
-
-                <label class="game-row">
-                    <input type="checkbox" name="enabled" {"checked" if fantasy.get("enabled", False) else ""}>
-                    <div class="game-info">
-                        <div class="matchup">Enable fantasy football</div>
-                        <div class="details">Show Sleeper matchups on the Games page</div>
-                    </div>
-                </label>
-
-                <div class="control">
-                    <div class="control-top">
-                        <label>Season</label>
-                        <input
-                            class="number-input"
-                            type="number"
-                            name="season"
-                            value="{escape(str(season), quote=True)}"
-                        >
-                    </div>
-                </div>
-            </div>
-
-            <div class="card">
-                <div class="card-title">Leagues</div>
-
-                {league_rows if user_id else '<div class="empty">Connect Sleeper first.</div>'}
-            </div>
-
-            <button class="save-button" type="submit">
-                Save Fantasy Leagues
-            </button>
-        </form>
-    </div>
-</body>
-</html>
-    """
 
 @app.route("/settings")
 @login_required
