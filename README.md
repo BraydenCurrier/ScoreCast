@@ -92,22 +92,16 @@ After booting, update the Pi:
 ```bash
 sudo apt update
 sudo apt upgrade -y
+sudo reboot
 ```
 
 ---
 
-## 2. Install Git
+## 2. Install required packages
 
 ```bash
-sudo apt install git -y
-```
-
----
-
-## 3. Install Python dependencies
-
-```bash
-sudo apt install \
+sudo apt install -y \
+git \
 python3 \
 python3-pip \
 python3-venv \
@@ -125,22 +119,22 @@ libharfbuzz-dev \
 libfribidi-dev \
 libxcb1-dev \
 libssl-dev \
-ca-certificates \
--y
+ca-certificates
 ```
-
 ---
 
-## 4. Clone ScoreCast
+## 3. Clone ScoreCast
 
 ```bash
-git clone https://github.com/BraydenCurrier/ScoreCast.git
-cd ScoreCast
+cd /opt
+sudo git clone https://github.com/BraydenCurrier/ScoreCast.git scorecast
+sudo chown -R $USER:$USER /opt/scorecast
+cd /opt/scorecast
 ```
 
 ---
 
-## 5. Create a virtual environment
+## 4. Create a virtual environment
 
 ```bash
 python3 -m venv venv
@@ -154,18 +148,20 @@ source venv/bin/activate
 
 ---
 
-## 6. Install Python packages
+## 5. Install Python packages
 
 ```bash
-pip install --upgrade pip
+pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
 ```
 
 ---
 
-## 7. Install the RGB Matrix library
+## 6. Install the RGB Matrix library
 
 ```bash
+cd /opt
+
 git clone https://github.com/hzeller/rpi-rgb-led-matrix.git
 
 cd rpi-rgb-led-matrix
@@ -174,28 +170,26 @@ make build-python
 
 sudo make install-python
 
-cd ..
+cd /opt/scorecast
 ```
 
 ---
 
-## 8. Run ScoreCast
+## 7. Create the persistent settings directory
+
+ScoreCast stores all user settings outside of the application so they survive updates and power loss.
 
 ```bash
-sudo ./venv/bin/python src/main.py
-```
-
-The web dashboard will be available at:
-
-```
-http://<raspberry-pi-ip>:8080
+sudo mkdir -p /var/lib/scorecast
+sudo chown root:root /var/lib/scorecast
+sudo chmod 700 /var/lib/scorecast
 ```
 
 ---
 
-# Run Automatically on Boot
+# 8. Install the systemd service
 
-Create a systemd service:
+Create the service:
 
 ```bash
 sudo nano /etc/systemd/system/scorecast.service
@@ -207,13 +201,31 @@ Paste:
 [Unit]
 Description=ScoreCast LED Sports Ticker
 After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/ScoreCast
-ExecStart=/home/pi/ScoreCast/venv/bin/python /home/pi/ScoreCast/src/main.py
+
+User=root
+Group=root
+
+WorkingDirectory=/opt/scorecast
+
+ExecStart=/opt/scorecast/venv/bin/python /opt/scorecast/src/main.py
+
 Restart=always
+RestartSec=3
+
+StateDirectory=scorecast
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/scorecast
+
+Environment=SCORECAST_CONFIG_DIR=/var/lib/scorecast
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
@@ -227,11 +239,52 @@ sudo systemctl enable scorecast
 sudo systemctl start scorecast
 ```
 
+Verify it is running:
+
+```bash
+sudo systemctl status scorecast
+```
+
 View logs:
 
 ```bash
 sudo journalctl -u scorecast -f
 ```
+
+---
+
+# 9. Open the Web Dashboard
+Find your Pi's IP address:
+
+```bash
+hostname -I
+```
+
+Open:
+
+```bash
+http://<raspberry-pi-ip>:8080
+```
+
+Then you can add it to your homescreen as a bookmark to use it like an app.
+
+Default Web App password:
+
+```bash
+ticker123
+```
+
+---
+
+# Updating ScoreCast
+ScoreCast includes a built-in updater.
+
+When a new release is published on GitHub:
+1. Open the web dashboard.
+2. Click Check and Install Update.
+3. Wait for the update to complete.
+4. The Service will automatically restart.
+5. Your setting are preserved.
 
 ---
 
