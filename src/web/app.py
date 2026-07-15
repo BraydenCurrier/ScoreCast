@@ -983,65 +983,59 @@ def alerts_page():
 
             <div class="team-test-row">
                 <button
-                    class="
-                        secondary-button
-                        alert-test-button
-                    "
+                    class="secondary-button alert-test-button"
                     type="submit"
-                    formaction="
-                        /alerts/test/
-                        {safe_abbreviation}/POSSESSION
-                    "
+                    formaction="{url_for(
+                        'test_possession_alert',
+                        team=abbreviation,
+                        alert_type='POSSESSION',
+                    )}"
                     formmethod="POST"
                 >
                     Possession
                 </button>
 
                 <button
-                    class="
-                        secondary-button
-                        alert-test-button
-                    "
+                    class="secondary-button alert-test-button"
                     type="submit"
-                    formaction="
-                        /alerts/test/
-                        {safe_abbreviation}/REDZONE
-                    "
+                    formaction="{url_for(
+                        'test_possession_alert',
+                        team=abbreviation,
+                        alert_type='REDZONE',
+                    )}"
                     formmethod="POST"
                 >
                     Red Zone
                 </button>
 
                 <button
-                    class="
-                        secondary-button
-                        alert-test-button
-                    "
+                    class="secondary-button alert-test-button"
                     type="submit"
-                    formaction="
-                        /alerts/test/
-                        {safe_abbreviation}/TOUCHDOWN
-                    "
+                    formaction="{url_for(
+                        'test_possession_alert',
+                        team=abbreviation,
+                        alert_type='TOUCHDOWN',
+                    )}"
                     formmethod="POST"
                 >
                     TD
                 </button>
 
                 <button
-                    class="
-                        secondary-button
-                        alert-test-button
-                    "
+                    class="secondary-button alert-test-button"
                     type="submit"
-                    formaction="
-                        /alerts/test/
-                        {safe_abbreviation}/FIELD_GOAL
-                    "
+                    formaction="{url_for(
+                        'test_possession_alert',
+                        team=abbreviation,
+                        alert_type='FIELD_GOAL',
+                    )}"
                     formmethod="POST"
                 >
                     FG
                 </button>
             </div>
+
+
         </div>
         """
 
