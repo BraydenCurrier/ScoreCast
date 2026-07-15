@@ -28,3 +28,4 @@ class FootballGame:
 
     date: str = "5-6-26"
     week: int = 0
+    event_id: str = ""

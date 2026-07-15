@@ -24,6 +24,16 @@ DEFAULT_SETTINGS = {
     "hidden_games": [],
     "game_order": [],
 
+    "alerts": {
+        "enabled": False,
+        "possession_teams": [],
+        "cooldown_seconds": 20,
+        "poll_interval_seconds": 3.0,
+        "confirmations_required": 2,
+        "chant_frame_seconds": 0.65,
+        "details_frame_seconds": 4.0,
+    },
+
     "music": {
         "enabled": False,
         "provider": "spotify",
