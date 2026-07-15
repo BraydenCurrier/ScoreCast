@@ -41,6 +41,11 @@ SYSTEMD_DIR="/etc/systemd/system"
 MAIN_SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE_NAME}.service"
 UPDATE_SERVICE_FILE="${SYSTEMD_DIR}/${UPDATE_SERVICE_NAME}.service"
 
+RESUME_MARKER="/var/lib/scorecast/install-resume.pending"
+RESUME_SCRIPT="/usr/local/sbin/scorecast-install-resume"
+RESUME_SERVICE="/etc/systemd/system/scorecast-install-resume.service"
+AUDIO_BLACKLIST="/etc/modprobe.d/scorecast-audio.conf"
+
 APT_PACKAGES=(
     git
     curl
@@ -49,12 +54,15 @@ APT_PACKAGES=(
     python3-pip
     python3-venv
     python3-dev
+    python3-pil
+    cython3
+    cmake
+    ninja-build
     build-essential
     libjpeg-dev
     zlib1g-dev
     libopenjp2-7-dev
     libtiff-dev
-    libatlas-base-dev
     libfreetype6-dev
     liblcms2-dev
     libwebp-dev
@@ -63,7 +71,6 @@ APT_PACKAGES=(
     libxcb1-dev
     libssl-dev
 )
-
 log() {
     printf '\n[ScoreCast installer] %s\n' "$*"
 }
@@ -102,6 +109,248 @@ install_os_packages() {
 
     log "Installing operating-system dependencies."
     DEBIAN_FRONTEND=noninteractive apt-get install -y "${APT_PACKAGES[@]}"
+}
+
+get_boot_config_path() {
+    if [[ -f /boot/firmware/config.txt ]]; then
+        printf '%s\n' "/boot/firmware/config.txt"
+        return 0
+    fi
+
+    if [[ -f /boot/config.txt ]]; then
+        printf '%s\n' "/boot/config.txt"
+        return 0
+    fi
+
+    return 1
+}
+
+rgb_matrix_audio_conflict_present() {
+    grep -q '^snd_bcm2835 ' /proc/modules 2>/dev/null
+}
+
+disable_builtin_audio() {
+    local boot_config
+
+    boot_config="$(get_boot_config_path)" || {
+        die "Could not find Raspberry Pi config.txt."
+    }
+
+    log "Disabling Raspberry Pi built-in audio for the RGB matrix."
+
+    cp -a \
+        "${boot_config}" \
+        "${boot_config}.scorecast-backup"
+
+    # Replace active audio=on entries.
+    sed -i \
+        -E 's/^[[:space:]]*dtparam=audio=on[[:space:]]*$/dtparam=audio=off/' \
+        "${boot_config}"
+
+    # Add audio=off when it is not already present.
+    if ! grep -Eq \
+        '^[[:space:]]*dtparam=audio=off[[:space:]]*$' \
+        "${boot_config}"; then
+
+        {
+            printf '\n'
+            printf '# ScoreCast RGB matrix configuration\n'
+            printf 'dtparam=audio=off\n'
+        } >> "${boot_config}"
+    fi
+
+    # Prevent the conflicting kernel module from loading.
+    cat > "${AUDIO_BLACKLIST}" <<'EOF'
+# ScoreCast uses the Raspberry Pi hardware timing subsystem for the RGB matrix.
+blacklist snd_bcm2835
+EOF
+
+    log "Built-in Raspberry Pi audio has been disabled."
+}
+
+install_resume_helper() {
+    log "Installing the one-time post-reboot setup helper."
+
+    install -d \
+        -m 0755 \
+        /var/lib/scorecast
+
+    touch "${RESUME_MARKER}"
+    chmod 0644 "${RESUME_MARKER}"
+
+    cat > "${RESUME_SCRIPT}" <<'EOF'
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+MARKER="/var/lib/scorecast/install-resume.pending"
+STATUS_FILE="/opt/scorecast/update-status.json"
+SERVICE_NAME="scorecast"
+DASHBOARD_URL="http://127.0.0.1:8080/"
+MAX_ATTEMPTS=30
+SLEEP_SECONDS=2
+
+log() {
+    printf '\n[ScoreCast resume] %s\n' "$*"
+}
+
+write_status() {
+    local state="$1"
+    local message="$2"
+
+    python3 - "${STATUS_FILE}" "${state}" "${message}" <<'PY'
+import json
+import os
+import sys
+import tempfile
+from datetime import datetime, timezone
+
+path, state, message = sys.argv[1:4]
+
+data = {
+    "state": state,
+    "message": message,
+    "updated_at": datetime.now(timezone.utc).isoformat(),
+}
+
+directory = os.path.dirname(path)
+os.makedirs(directory, exist_ok=True)
+
+fd, temporary_path = tempfile.mkstemp(
+    dir=directory,
+    prefix=".update-status.",
+    suffix=".tmp",
+)
+
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+    os.replace(temporary_path, path)
+except Exception:
+    try:
+        os.unlink(temporary_path)
+    except FileNotFoundError:
+        pass
+    raise
+PY
+}
+
+fail() {
+    local message="$1"
+
+    log "ERROR: ${message}"
+    write_status "error" "${message}"
+    exit 1
+}
+
+if [[ ! -e "${MARKER}" ]]; then
+    log "No pending installation was found."
+    exit 0
+fi
+
+if grep -q '^snd_bcm2835 ' /proc/modules 2>/dev/null; then
+    fail "snd_bcm2835 is still loaded after reboot."
+fi
+
+if [[ ! -x /opt/scorecast/current-venv/bin/python ]]; then
+    fail "The active ScoreCast Python environment is missing."
+fi
+
+if [[ ! -f /opt/scorecast/current/src/main.py ]]; then
+    fail "The active ScoreCast release is missing src/main.py."
+fi
+
+log "Starting ScoreCast after reboot."
+
+systemctl reset-failed "${SERVICE_NAME}" || true
+systemctl restart "${SERVICE_NAME}"
+
+for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
+    if curl \
+        --fail \
+        --silent \
+        --show-error \
+        --max-time 3 \
+        "${DASHBOARD_URL}" \
+        >/dev/null 2>&1; then
+
+        log "ScoreCast is healthy."
+
+        rm -f "${MARKER}"
+        write_status \
+            "success" \
+            "ScoreCast installation completed successfully after reboot."
+
+        systemctl disable scorecast-install-resume.service \
+            >/dev/null 2>&1 || true
+
+        exit 0
+    fi
+
+    sleep "${SLEEP_SECONDS}"
+done
+
+journalctl \
+    -u "${SERVICE_NAME}" \
+    -n 50 \
+    --no-pager || true
+
+fail "ScoreCast did not become healthy after reboot."
+EOF
+
+    chmod 0755 "${RESUME_SCRIPT}"
+}
+
+install_resume_service() {
+    log "Installing the one-time post-reboot systemd service."
+
+    cat > "${RESUME_SERVICE}" <<EOF
+[Unit]
+Description=Complete ScoreCast installation after reboot
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=${RESUME_MARKER}
+
+[Service]
+Type=oneshot
+ExecStart=${RESUME_SCRIPT}
+RemainAfterExit=no
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable scorecast-install-resume.service
+}
+
+schedule_installation_reboot() {
+    log "A reboot is required to finish the ScoreCast installation."
+
+    printf '\n'
+    printf '%s\n' "============================================================"
+    printf '%s\n' " ScoreCast has been installed."
+    printf '%s\n' " Built-in Raspberry Pi audio has been disabled."
+    printf '%s\n' " The installation will finish automatically after reboot."
+    printf '%s\n' "============================================================"
+    printf '\n'
+
+    sync
+
+    if [[ -t 0 && -t 1 ]]; then
+        read -r -p "Press Enter to reboot now, or Ctrl+C to reboot later. "
+    else
+        log "Rebooting automatically."
+        sleep 5
+    fi
+
+    systemctl reboot
+    exit 0
 }
 
 prepare_directories() {
@@ -203,19 +452,24 @@ checkout_release() {
 }
 
 install_rgb_matrix_library() {
-    log "Installing the RGB matrix library."
+    log "Downloading the RGB matrix library."
 
     if [[ ! -d "${RGB_MATRIX_DIR}/.git" ]]; then
         rm -rf "${RGB_MATRIX_DIR}"
-        git clone https://github.com/hzeller/rpi-rgb-led-matrix.git "${RGB_MATRIX_DIR}"
+
+        git clone \
+            https://github.com/hzeller/rpi-rgb-led-matrix.git \
+            "${RGB_MATRIX_DIR}"
     else
         git -C "${RGB_MATRIX_DIR}" fetch --prune origin
         git -C "${RGB_MATRIX_DIR}" reset --hard origin/master
     fi
 
-    make -C "${RGB_MATRIX_DIR}" -j"$(nproc)"
-    make -C "${RGB_MATRIX_DIR}" build-python
-    make -C "${RGB_MATRIX_DIR}" install-python
+    log "Building the RGB matrix C++ examples."
+
+    make \
+        -C "${RGB_MATRIX_DIR}" \
+        -j"$(nproc)"
 }
 
 create_release_venv() {
@@ -242,6 +496,12 @@ create_release_venv() {
     "${VENV_PIP}" install \
         --disable-pip-version-check \
         -r "${RELEASE_DIR}/requirements.txt"
+
+    log "Installing the RGB matrix Python binding."
+
+    "${VENV_PIP}" install \
+        --disable-pip-version-check \
+        "${RGB_MATRIX_DIR}"
 
     log "Verifying the RGB matrix Python binding."
     if ! "${VENV_PYTHON}" -c 'import rgbmatrix' >/dev/null 2>&1; then
@@ -413,6 +673,24 @@ EOF
 }
 
 start_and_verify() {
+    log "Preparing to start ScoreCast."
+
+    systemctl enable "${SERVICE_NAME}.service"
+
+    if rgb_matrix_audio_conflict_present; then
+        log "The Raspberry Pi built-in audio module conflicts with the RGB matrix."
+
+        systemctl stop "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
+        systemctl reset-failed "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
+
+        disable_builtin_audio
+        install_resume_helper
+        install_resume_service
+        schedule_installation_reboot
+
+        return
+    fi
+
     log "Starting ScoreCast."
 
     systemctl restart "${SERVICE_NAME}.service"
@@ -428,7 +706,14 @@ start_and_verify() {
                 --max-time 3 \
                 http://127.0.0.1:8080/ \
                 >/dev/null 2>&1; then
+
                 log "ScoreCast is running and the dashboard is responding."
+
+                rm -f "${RESUME_MARKER}"
+
+                systemctl disable scorecast-install-resume.service \
+                    >/dev/null 2>&1 || true
+
                 return
             fi
         fi
@@ -437,7 +722,10 @@ start_and_verify() {
     done
 
     systemctl status "${SERVICE_NAME}.service" --no-pager || true
-    journalctl -u "${SERVICE_NAME}.service" -n 100 --no-pager || true
+    journalctl \
+        -u "${SERVICE_NAME}.service" \
+        -n 100 \
+        --no-pager || true
 
     die "ScoreCast did not become healthy after installation."
 }
