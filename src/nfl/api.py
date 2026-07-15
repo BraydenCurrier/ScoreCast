@@ -281,6 +281,8 @@ def get_today_games():
             {},
         ) or {}
 
+        last_play = situation.get("lastPlay") or {}
+
         home_data, away_data = (
             _get_home_and_away(
                 competition
@@ -391,6 +393,10 @@ def get_today_games():
                 situation.get("distance"),
                 0,
             ),
+
+            last_play_id=str(last_play.get("id", "")),
+            last_play_text=str(last_play.get("text", "")),
+            scoring_play=bool(last_play.get("scoringPlay", False)),
 
             yardline_side=yardline_side,
             yardline_number=yardline_number,

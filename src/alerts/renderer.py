@@ -375,32 +375,31 @@ def _render_chant_frame(
 
     return image
 
-
 def _render_details_frame(
     alert: PossessionAlert,
 ) -> Image.Image:
-    image, draw = _create_team_frame(
-        alert
-    )
+    image, draw = _create_team_frame(alert)
 
-    possession_label = str(
-        alert.possession_label
+    headline = str(
+        getattr(alert, "headline", "")
+        or alert.possession_label
     ).upper()
 
-    field_position = _field_position_text(
-        alert
-    )
+    detail = str(
+        getattr(alert, "detail", "")
+        or _field_position_text(alert)
+    ).upper()
 
     _draw_centered_5x7(
         draw,
-        possession_label,
+        headline,
         y=2,
         color=alert.accent,
     )
 
     _draw_centered_5x7(
         draw,
-        field_position,
+        detail,
         y=18,
         color=(255, 255, 255),
     )
