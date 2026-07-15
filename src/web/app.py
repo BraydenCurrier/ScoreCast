@@ -1,7 +1,11 @@
+import json
+import subprocess
+from pathlib import Path
+
 from functools import wraps
 from html import escape
 
-from flask import Flask, request, redirect, session
+from flask import Flask, request, redirect, session, jsonify
 
 from common.settings import get_settings, update_settings
 
@@ -9,6 +13,8 @@ from fantasy.api import connect_sleeper_user, get_user_leagues
 
 from alerts.manager import possession_alert_manager
 from alerts.teams import NFL_TEAM_ALERTS
+
+from updater.status import read_status
 
 app = Flask(__name__)
 app.secret_key = "change-this-later"
@@ -25,6 +31,43 @@ CFB_CONFERENCE_OPTIONS = [
     ("4", "Big 12"),
     ("17", "Mountain West"),
 ]
+
+UPDATE_SERVICE_NAME = "scorecast-update.service"
+
+UPDATE_STATUS_FILE = Path(
+    "/opt/scorecast/update-status.json"
+)
+
+ACTIVE_UPDATE_STATES = {
+    "checking",
+    "downloading",
+    "installing",
+    "validating",
+    "restarting",
+}
+
+def is_update_service_active() -> bool:
+    try:
+        result = subprocess.run(
+            [
+                "/usr/bin/systemctl",
+                "is-active",
+                "--quiet",
+                UPDATE_SERVICE_NAME,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+
+        return result.returncode == 0
+
+    except (
+        OSError,
+        subprocess.TimeoutExpired,
+    ):
+        return False
 
 def set_latest_games(games):
     global latest_games
@@ -741,7 +784,11 @@ def games():
             );
         }});
 
-        document.addEventListener("DOMContentLoaded", filterGames);
+        document.addEventListener("DOMContentLoaded", function () {{
+            filterGames();
+            loadUpdateStatus();
+            updateStatusTimer = setInterval(loadUpdateStatus, 2000);
+        }});
     </script>
 </body>
 </html>
@@ -1642,6 +1689,79 @@ def settings_page():
                 {cfb_conference_rows}
             </div>
 
+            <div class="card">
+                <div class="card-title">
+                    Software Update
+                </div>
+
+                <div class="hint">
+                    Install the latest stable ScoreCast
+                    release from GitHub.
+                </div>
+
+                <div
+                    id="update_status_box"
+                    style="
+                        margin-top: 14px;
+                        padding: 12px;
+                        border-radius: 8px;
+                        background: rgba(255, 255, 255, 0.05);
+                    "
+                >
+                    <div
+                        id="update_status_message"
+                        style="font-weight: 600;"
+                    >
+                        Loading update status...
+                    </div>
+
+                    <div
+                        id="update_status_details"
+                        class="hint"
+                        style="margin-top: 5px;"
+                    ></div>
+                </div>
+
+                <div
+                    id="update_progress_container"
+                    style="
+                        display: none;
+                        margin-top: 12px;
+                    "
+                >
+                    <div
+                        style="
+                            width: 100%;
+                            height: 8px;
+                            border-radius: 999px;
+                            overflow: hidden;
+                            background: rgba(255, 255, 255, 0.1);
+                        "
+                    >
+                        <div
+                            id="update_progress_bar"
+                            style="
+                                width: 10%;
+                                height: 100%;
+                                border-radius: 999px;
+                                background: currentColor;
+                                transition: width 0.3s ease;
+                            "
+                        ></div>
+                    </div>
+                </div>
+
+                <button
+                    type="button"
+                    id="update_button"
+                    class="save-button"
+                    style="margin-top: 14px;"
+                    onclick="startScoreCastUpdate()"
+                >
+                    Check and Install Update
+                </button>
+            </div>
+
             <button class="save-button" type="submit">
                 Save Settings
             </button>
@@ -1649,6 +1769,284 @@ def settings_page():
     </div>
 
     <script>
+
+        const updateStateLabels = {{
+            idle: "Ready",
+            checking: "Checking GitHub",
+            available: "Update Available",
+            downloading: "Downloading Update",
+            installing: "Installing Dependencies",
+            validating: "Validating Release",
+            restarting: "Restarting ScoreCast",
+            complete: "Update Complete",
+            current: "Already Up to Date",
+            rolled_back: "Update Rolled Back",
+            failed: "Update Failed"
+        }};
+
+        const updateStateProgress = {{
+            idle: 0,
+            checking: 10,
+            available: 10,
+            downloading: 30,
+            installing: 55,
+            validating: 75,
+            restarting: 90,
+            complete: 100,
+            current: 100,
+            rolled_back: 100,
+            failed: 100
+        }};
+
+        const activeUpdateStates = new Set([
+            "checking",
+            "downloading",
+            "installing",
+            "validating",
+            "restarting"
+        ]);
+
+        function renderUpdateStatus(status) {{
+            const messageElement = document.getElementById(
+                "update_status_message"
+            );
+
+            const detailsElement = document.getElementById(
+                "update_status_details"
+            );
+
+            const button = document.getElementById(
+                "update_button"
+            );
+
+            const progressContainer = document.getElementById(
+                "update_progress_container"
+            );
+
+            const progressBar = document.getElementById(
+                "update_progress_bar"
+            );
+
+            if (
+                !messageElement
+                || !detailsElement
+                || !button
+            ) {{
+                return;
+            }}
+
+            const state = status.state || "idle";
+
+            const label = (
+                updateStateLabels[state]
+                || "Update Status"
+            );
+
+            messageElement.textContent = label;
+
+            detailsElement.textContent = (
+                status.message
+                || "Update status unavailable."
+            );
+
+            const isActive = (
+                activeUpdateStates.has(state)
+                || status.service_active === true
+            );
+
+            button.disabled = isActive;
+
+            button.textContent = isActive
+                ? "Updating..."
+                : "Check and Install Update";
+
+            const showProgress = (
+                isActive
+                || state === "complete"
+                || state === "failed"
+                || state === "rolled_back"
+            );
+
+            if (progressContainer) {{
+                progressContainer.style.display = (
+                    showProgress
+                    ? "block"
+                    : "none"
+                );
+            }}
+
+            if (progressBar) {{
+                const progress = (
+                    updateStateProgress[state]
+                    ?? 0
+                );
+
+                progressBar.style.width = (
+                    progress + "%"
+                );
+            }}
+        }}
+
+        let updateStatusTimer = null;
+        let scoreCastWasRestarting = false;
+
+        async function loadUpdateStatus() {{
+            try {{
+                const response = await fetch(
+                    "/api/update/status",
+                    {{
+                        method: "GET",
+                        cache: "no-store"
+                    }}
+                );
+
+                if (!response.ok) {{
+                    throw new Error(
+                        "Unable to read update status."
+                    );
+                }}
+
+                const status = await response.json();
+
+                renderUpdateStatus(status);
+
+                if (
+                    status.state === "restarting"
+                    || status.state === "complete"
+                ) {{
+                    scoreCastWasRestarting = true;
+                }}
+
+                if (
+                    scoreCastWasRestarting
+                    && (
+                        status.state === "complete"
+                        || status.state === "current"
+                        || status.state === "failed"
+                        || status.state === "rolled_back"
+                    )
+                ) {{
+                    scoreCastWasRestarting = false;
+                }}
+
+            }} catch (error) {{
+                const messageElement = (
+                    document.getElementById(
+                        "update_status_message"
+                    )
+                );
+
+                const detailsElement = (
+                    document.getElementById(
+                        "update_status_details"
+                    )
+                );
+
+                if (messageElement) {{
+                    messageElement.textContent = (
+                        "ScoreCast is restarting..."
+                    );
+                }}
+
+                if (detailsElement) {{
+                    detailsElement.textContent = (
+                        "The dashboard will reconnect automatically."
+                    );
+                }}
+
+                scoreCastWasRestarting = true;
+            }}
+        }}
+
+        async function startScoreCastUpdate() {{
+            const confirmed = window.confirm(
+                "Install the latest stable ScoreCast release? "
+                + "The display and dashboard will restart."
+            );
+
+            if (!confirmed) {{
+                return;
+            }}
+
+            const button = document.getElementById(
+                "update_button"
+            );
+
+            const messageElement = document.getElementById(
+                "update_status_message"
+            );
+
+            const detailsElement = document.getElementById(
+                "update_status_details"
+            );
+
+            if (button) {{
+                button.disabled = true;
+                button.textContent = "Starting update...";
+            }}
+
+            if (messageElement) {{
+                messageElement.textContent = (
+                    "Starting Update"
+                );
+            }}
+
+            if (detailsElement) {{
+                detailsElement.textContent = (
+                    "Preparing the updater service."
+                );
+            }}
+
+            try {{
+                const response = await fetch(
+                    "/api/update/start",
+                    {{
+                        method: "POST",
+                        headers: {{
+                            "Content-Type": "application/json"
+                        }}
+                    }}
+                );
+
+                const result = await response.json();
+
+                if (!response.ok || !result.ok) {{
+                    throw new Error(
+                        result.message
+                        || "Unable to start update."
+                    );
+                }}
+
+                if (detailsElement) {{
+                    detailsElement.textContent = (
+                        result.message
+                    );
+                }}
+
+                await loadUpdateStatus();
+
+            }} catch (error) {{
+                if (messageElement) {{
+                    messageElement.textContent = (
+                        "Unable to Start Update"
+                    );
+                }}
+
+                if (detailsElement) {{
+                    detailsElement.textContent = (
+                        error.message
+                    );
+                }}
+
+                if (button) {{
+                    button.disabled = false;
+                    button.textContent = (
+                        "Check and Install Update"
+                    );
+                }}
+            }}
+        }}
+
         function bindNumberToSlider(numberId, sliderId) {{
             const number = document.getElementById(numberId);
             const slider = document.getElementById(sliderId);
@@ -1774,3 +2172,87 @@ def save_settings():
     })
 
     return redirect("/settings")
+
+
+@app.route(
+    "/api/update/status",
+    methods=["GET"],
+)
+@login_required
+def api_update_status():
+    status = read_status()
+
+    status["service_active"] = (
+        is_update_service_active()
+    )
+
+    return jsonify(status)
+
+@app.route(
+    "/api/update/start",
+    methods=["POST"],
+)
+@login_required
+def api_start_update():
+    status = read_status()
+
+    if (
+        status.get("state")
+        in ACTIVE_UPDATE_STATES
+        or is_update_service_active()
+    ):
+        return jsonify({
+            "ok": False,
+            "message": (
+                "A ScoreCast update is already running."
+            ),
+        }), 409
+
+    try:
+        result = subprocess.run(
+            [
+                "/usr/bin/systemctl",
+                "start",
+                "--no-block",
+                UPDATE_SERVICE_NAME,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            "ok": False,
+            "message": (
+                "Starting the updater timed out."
+            ),
+        }), 500
+
+    except OSError as error:
+        return jsonify({
+            "ok": False,
+            "message": (
+                f"Unable to start updater: {error}"
+            ),
+        }), 500
+
+    if result.returncode != 0:
+        error_message = (
+            result.stderr.strip()
+            or result.stdout.strip()
+            or "systemctl returned an error"
+        )
+
+        return jsonify({
+            "ok": False,
+            "message": error_message,
+        }), 500
+
+    return jsonify({
+        "ok": True,
+        "message": (
+            "ScoreCast update started."
+        ),
+    })
