@@ -85,9 +85,13 @@ Web Dashboard:
 
 ## 1. Install Raspberry Pi OS Lite
 
-Flash **Raspberry Pi OS Lite (64-bit)** to your SD card using Raspberry Pi Imager.
+Flash the latest **Raspberry Pi OS Lite (64-bit)** using Raspberry Pi Imager.
 
-After booting, update the Pi:
+Boot the Pi and connect it to the internet.
+
+---
+
+## 2. Update the Pi
 
 ```bash
 sudo apt update
@@ -95,166 +99,43 @@ sudo apt upgrade -y
 sudo reboot
 ```
 
+Reconnect after the reboot.
+
 ---
 
-## 2. Install required packages
+## 3. Download ScoreCast
 
 ```bash
-sudo apt install -y \
-git \
-python3 \
-python3-pip \
-python3-venv \
-python3-dev \
-build-essential \
-libjpeg-dev \
-zlib1g-dev \
-libopenjp2-7-dev \
-libtiff5-dev \
-libatlas-base-dev \
-libfreetype6-dev \
-liblcms2-dev \
-libwebp-dev \
-libharfbuzz-dev \
-libfribidi-dev \
-libxcb1-dev \
-libssl-dev \
-ca-certificates
-```
----
-
-## 3. Clone ScoreCast
-
-```bash
-cd /opt
-sudo git clone https://github.com/BraydenCurrier/ScoreCast.git scorecast
-sudo chown -R $USER:$USER /opt/scorecast
-cd /opt/scorecast
+git clone https://github.com/BraydenCurrier/ScoreCast.git
+cd ScoreCast
 ```
 
 ---
 
-## 4. Create a virtual environment
+## 4. Run the installer
 
 ```bash
-python3 -m venv venv
+chmod +x scripts/install.sh
+
+sudo ./scripts/install.sh
 ```
 
-Activate it:
+The installer automatically:
 
-```bash
-source venv/bin/activate
-```
+- Installs all required system packages
+- Installs the RGB Matrix library
+- Downloads the latest ScoreCast release
+- Creates the Python virtual environment
+- Configures persistent settings storage
+- Installs and enables the ScoreCast systemd service
+- Installs the automatic updater service
+- Starts ScoreCast
 
 ---
 
-## 5. Install Python packages
+## 5. Open the dashboard
 
-```bash
-pip install --upgrade pip setuptools wheel
-pip install -r requirements.txt
-```
-
----
-
-## 6. Install the RGB Matrix library
-
-```bash
-cd /opt
-
-git clone https://github.com/hzeller/rpi-rgb-led-matrix.git
-
-cd rpi-rgb-led-matrix
-
-make build-python
-
-sudo make install-python
-
-cd /opt/scorecast
-```
-
----
-
-## 7. Create the persistent settings directory
-
-ScoreCast stores all user settings outside of the application so they survive updates and power loss.
-
-```bash
-sudo mkdir -p /var/lib/scorecast
-sudo chown root:root /var/lib/scorecast
-sudo chmod 700 /var/lib/scorecast
-```
-
----
-
-# 8. Install the systemd service
-
-Create the service:
-
-```bash
-sudo nano /etc/systemd/system/scorecast.service
-```
-
-Paste:
-
-```ini
-[Unit]
-Description=ScoreCast LED Sports Ticker
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-
-User=root
-Group=root
-
-WorkingDirectory=/opt/scorecast
-
-ExecStart=/opt/scorecast/venv/bin/python /opt/scorecast/src/main.py
-
-Restart=always
-RestartSec=3
-
-StateDirectory=scorecast
-StateDirectoryMode=0700
-ReadWritePaths=/var/lib/scorecast
-
-Environment=SCORECAST_CONFIG_DIR=/var/lib/scorecast
-Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONDONTWRITEBYTECODE=1
-
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable it:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable scorecast
-sudo systemctl start scorecast
-```
-
-Verify it is running:
-
-```bash
-sudo systemctl status scorecast
-```
-
-View logs:
-
-```bash
-sudo journalctl -u scorecast -f
-```
-
----
-
-# 9. Open the Web Dashboard
-Find your Pi's IP address:
+Find your Raspberry Pi's IP address:
 
 ```bash
 hostname -I
@@ -262,43 +143,55 @@ hostname -I
 
 Open:
 
-```bash
+```
 http://<raspberry-pi-ip>:8080
 ```
 
-Then you can add it to your homescreen as a bookmark to use it like an app.
-
-Default Web App password:
-
-```bash
-ticker123
-```
+Everything can now be configured from the web dashboard.
 
 ---
 
 # Updating ScoreCast
+
 ScoreCast includes a built-in updater.
 
-When a new release is published on GitHub:
+When a new version is available:
+
 1. Open the web dashboard.
-2. Click Check and Install Update.
-3. Wait for the update to complete.
-4. The Service will automatically restart.
-5. Your setting are preserved.
+2. Click **Check and Install Update**.
+3. Wait for the update to finish.
+4. ScoreCast automatically restarts.
+5. All settings are preserved.
+
+No SSH, Git commands, or manual installation steps are required after the initial setup.
 
 ---
 
-# Configuration
+# Troubleshooting
 
-Everything can be configured from the web dashboard.
+View the ScoreCast logs:
 
-Current settings include:
+```bash
+sudo journalctl -u scorecast -f
+```
 
-- Game order
-- Hidden games
-- Brightness
-- Scroll speed
-- Refresh interval
+Check the service status:
+
+```bash
+sudo systemctl status scorecast
+```
+
+Restart ScoreCast:
+
+```bash
+sudo systemctl restart scorecast
+```
+
+Restart the updater service manually:
+
+```bash
+sudo systemctl start scorecast-update
+```
 
 ---
 
