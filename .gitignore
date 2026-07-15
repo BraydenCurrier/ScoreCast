@@ -8,3 +8,6 @@ __pycache__/
 .DS_Store
 .env
 lib/rpi-rgb-led-matrix/
+
+__pycache__/
+*.py[cod]

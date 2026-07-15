@@ -11,6 +11,10 @@ from PIL import Image, ImageDraw
 from common.matrix import create_matrix
 from common.settings import get_settings
 
+from alerts.manager import possession_alert_manager
+from alerts.renderer import render_possession_alert
+from alerts.watcher import possession_watch_loop
+
 from mlb.api import get_today_games as get_live_mlb
 from mlb.mlb_renderer import render_game_strip_onto as draw_mlb_strip
 
@@ -444,6 +448,12 @@ threading.Thread(
     daemon=True
 ).start()
 
+threading.Thread(
+    target=possession_watch_loop,
+    daemon=True,
+    name="possession-watcher",
+).start()
+
 _games = load_initial_games()
 set_latest_games(_games)
 
@@ -548,7 +558,42 @@ while True:
         matrix.brightness = brightness
         last_brightness = brightness
 
-    visible_games = rebuild_visible_games_if_needed(settings)
+    active_alert = possession_alert_manager.get_active(
+        now
+    )
+
+    if active_alert is not None:
+        alert_frame = render_possession_alert(
+            active_alert,
+            now=now,
+        )
+
+        matrix.SetImage(
+            alert_frame
+        )
+
+        frame_elapsed = (
+            time.monotonic()
+            - frame_started_at
+        )
+
+        sleep_time = (
+            frame_delay
+            - frame_elapsed
+        )
+
+        if sleep_time > 0:
+            time.sleep(
+                sleep_time
+            )
+
+        last_frame_time = time.monotonic()
+
+        continue
+
+    visible_games = rebuild_visible_games_if_needed(
+        settings
+    )
 
     if not visible_games:
         frame_elapsed = time.monotonic() - frame_started_at
