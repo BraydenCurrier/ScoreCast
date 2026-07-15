@@ -1,0 +1,30 @@
+[Unit]
+Description=ScoreCast LED Sports Ticker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+WorkingDirectory=/opt/scorecast/current
+
+ExecStart=/opt/scorecast/current-venv/bin/python /opt/scorecast/current/src/main.py
+
+Restart=always
+RestartSec=3
+
+StateDirectory=scorecast
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/scorecast
+
+Environment=SCORECAST_CONFIG_DIR=/var/lib/scorecast
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

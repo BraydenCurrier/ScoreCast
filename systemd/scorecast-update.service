@@ -1,0 +1,27 @@
+[Unit]
+Description=Update ScoreCast from GitHub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+User=root
+Group=root
+
+WorkingDirectory=/opt/scorecast/current
+
+ExecStart=/opt/scorecast/current-venv/bin/python -m updater.updater
+
+Environment=PYTHONPATH=/opt/scorecast/current/src
+Environment=SCORECAST_CONFIG_DIR=/var/lib/scorecast
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+StandardOutput=journal
+StandardError=journal
+
+TimeoutStartSec=15min
+
+[Install]
+WantedBy=multi-user.target
