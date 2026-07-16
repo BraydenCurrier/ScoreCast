@@ -168,6 +168,29 @@ EOF
     log "Built-in Raspberry Pi audio has been disabled."
 }
 
+ensure_isolcpus() {
+    local cmdline
+
+    if [[ -f /boot/firmware/cmdline.txt ]]; then
+        cmdline="/boot/firmware/cmdline.txt"
+    elif [[ -f /boot/cmdline.txt ]]; then
+        cmdline="/boot/cmdline.txt"
+    else
+        die "Unable to locate cmdline.txt"
+    fi
+
+    if grep -qw "isolcpus=3" /proc/cmdline; then
+        log "isolcpus=3 is already enabled."
+        return
+    fi
+
+    log "Enabling isolcpus=3 for improved LED matrix performance."
+
+    cp -a "$cmdline" "${cmdline}.scorecast-backup"
+
+    sed -i '1 s/$/ isolcpus=3/' "$cmdline"
+}
+
 install_resume_helper() {
     log "Installing the one-time post-reboot setup helper."
 
@@ -684,6 +707,7 @@ start_and_verify() {
         systemctl reset-failed "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
 
         disable_builtin_audio
+        ensure_isolcpus
         install_resume_helper
         install_resume_service
         schedule_installation_reboot
