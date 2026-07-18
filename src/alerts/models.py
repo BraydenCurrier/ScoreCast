@@ -25,20 +25,9 @@ class PossessionAlert:
 
     @property
     def total_duration(self) -> float:
-        word_duration = max(
-            0.1,
-            self.chant_frame_seconds,
-        )
-        blank_duration = max(
-            0.05,
-            word_duration * 0.30,
-        )
+        word_duration = max(0.1, self.chant_frame_seconds)
+        blank_duration = max(0.05, word_duration * 0.30)
 
-        chant_duration = len(self.chant) * (
-            word_duration + blank_duration
-        )
+        chant_duration = len(self.chant) * (word_duration + blank_duration)
 
-        return (
-            chant_duration
-            + self.details_frame_seconds
-        )
+        return (chant_duration + self.details_frame_seconds)
