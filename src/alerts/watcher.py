@@ -15,33 +15,20 @@ _last_error_message = ""
 _last_error_logged_at = 0.0
 
 
-def _safe_poll_interval(settings: dict) -> float:
-    alerts_settings = settings.get(
-        "alerts",
-        {},
-    )
+def _safe_poll_interval(settings):
+    alerts_settings = settings.get("alerts", {})
 
-    raw_value = alerts_settings.get(
-        "poll_interval_seconds",
-        DEFAULT_POLL_INTERVAL,
-    )
+    raw_value = alerts_settings.get("poll_interval_seconds", DEFAULT_POLL_INTERVAL)
 
     try:
         value = float(raw_value)
     except (TypeError, ValueError):
         value = DEFAULT_POLL_INTERVAL
 
-    return max(
-        MINIMUM_POLL_INTERVAL,
-        min(MAXIMUM_POLL_INTERVAL, value),
-    )
+    return max(MINIMUM_POLL_INTERVAL, min(MAXIMUM_POLL_INTERVAL, value))
 
 
-def _log_error_throttled(error: Exception) -> None:
-    """
-    Avoid flooding the systemd journal if ESPN or the network is down.
-    Log a repeated error at most once every 60 seconds.
-    """
+def _log_error_throttled(error):
     global _last_error_message
     global _last_error_logged_at
 
@@ -49,10 +36,7 @@ def _log_error_throttled(error: Exception) -> None:
     message = f"{type(error).__name__}: {error}"
 
     with _error_lock:
-        should_log = (
-            message != _last_error_message
-            or now - _last_error_logged_at >= 60.0
-        )
+        should_log = (message != _last_error_message or now - _last_error_logged_at >= 60.0)
 
         if not should_log:
             return
@@ -60,22 +44,10 @@ def _log_error_throttled(error: Exception) -> None:
         _last_error_message = message
         _last_error_logged_at = now
 
-    print(
-        "Possession watcher failed:",
-        message,
-        flush=True,
-    )
+    print("Possession watcher failed:", message, flush=True)
 
 
-def possession_watch_loop(
-    stop_event: threading.Event | None = None,
-) -> None:
-    """
-    Poll only the NFL feed at a short interval.
-
-    The regular mixed-sports refresh can remain at 30 seconds or longer.
-    Possession alerts need faster updates, so they use their own thread.
-    """
+def possession_watch_loop(stop_event,):
     if stop_event is None:
         stop_event = threading.Event()
 
@@ -87,33 +59,19 @@ def possession_watch_loop(
 
             games = get_today_games()
 
-            possession_alert_manager.process_games(
-                games=games,
-                settings=settings,
-                now=time.monotonic(),
-            )
+            possession_alert_manager.process_games(games=games, settings=settings, now=time.monotonic())
 
         except Exception as error:
             _log_error_throttled(error)
 
         try:
             settings = get_settings()
-            poll_interval = _safe_poll_interval(
-                settings
-            )
+            poll_interval = _safe_poll_interval(settings)
         except Exception:
             poll_interval = DEFAULT_POLL_INTERVAL
 
-        elapsed = (
-            time.monotonic()
-            - loop_started_at
-        )
+        elapsed = (time.monotonic() - loop_started_at)
 
-        sleep_seconds = max(
-            0.1,
-            poll_interval - elapsed,
-        )
+        sleep_seconds = max(0.1, poll_interval - elapsed)
 
-        stop_event.wait(
-            sleep_seconds
-        )
+        stop_event.wait(sleep_seconds)

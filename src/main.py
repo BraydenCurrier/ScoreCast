@@ -448,8 +448,12 @@ threading.Thread(
     daemon=True
 ).start()
 
+possession_stop_event = threading.Event()
+
+
 threading.Thread(
     target=possession_watch_loop,
+    args=(possession_stop_event,),
     daemon=True,
     name="possession-watcher",
 ).start()

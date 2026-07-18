@@ -9,11 +9,7 @@ from alerts.teams import get_team_alert
 from nfl.models import FootballGame
 
 
-LIVE_STATUSES = {
-    "STATUS_IN_PROGRESS",
-    "IN_PROGRESS",
-    "LIVE",
-}
+LIVE_STATUSES = {"STATUS_IN_PROGRESS", "IN_PROGRESS", "LIVE"}
 
 
 @dataclass
@@ -32,78 +28,31 @@ class GamePossessionState:
     redzone_team: str = ""
 
     # Cooldowns are tracked separately by event type and team.
-    last_alert_times: dict[str, float] = field(
-        default_factory=dict,
-    )
+    last_alert_times: dict = field(default_factory=dict)
 
     last_seen_at: float = 0.0
 
 
 class PossessionAlertManager:
-    def __init__(self) -> None:
+    def __init__(self):
         self._lock = RLock()
 
-        self._game_states: Dict[
-            str,
-            GamePossessionState,
-        ] = {}
+        self._game_states = {}
+        self._queue = deque(maxlen=8)
 
-        self._queue: Deque[PossessionAlert] = deque(
-            maxlen=8,
-        )
+        self._active_alert = None
 
-        self._active_alert: Optional[
-            PossessionAlert
-        ] = None
-
-    def process_games(
-        self,
-        games: Iterable[FootballGame],
-        settings: dict,
-        now: Optional[float] = None,
-    ) -> list[PossessionAlert]:
+    def process_games(self, games, settings, now):
         if now is None:
             now = time.monotonic()
 
-        alerts_settings = settings.get(
-            "alerts",
-            {},
-        )
+        alerts_settings = settings.get("alerts", {})
+        enabled = bool(alerts_settings.get("enabled", False))
 
-        enabled = bool(
-            alerts_settings.get(
-                "enabled",
-                False,
-            )
-        )
-
-        possession_enabled = bool(
-            alerts_settings.get(
-                "possession_enabled",
-                True,
-            )
-        )
-
-        redzone_enabled = bool(
-            alerts_settings.get(
-                "redzone_enabled",
-                True,
-            )
-        )
-
-        touchdown_enabled = bool(
-            alerts_settings.get(
-                "touchdown_enabled",
-                True,
-            )
-        )
-
-        field_goal_enabled = bool(
-            alerts_settings.get(
-                "field_goal_enabled",
-                True,
-            )
-        )
+        possession_enabled = bool(alerts_settings.get("possession_enabled", True))
+        redzone_enabled = bool(alerts_settings.get("redzone_enabled", True))
+        touchdown_enabled = bool(alerts_settings.get("touchdown_enabled", True))
+        field_goal_enabled = bool(alerts_settings.get("field_goal_enabled", True))
 
         watched_teams = {
             str(team).upper()
@@ -113,49 +62,13 @@ class PossessionAlertManager:
             )
         }
 
-        confirmations_required = self._safe_int(
-            alerts_settings.get(
-                "confirmations_required",
-                2,
-            ),
-            default=2,
-            minimum=1,
-            maximum=5,
-        )
+        confirmations_required = self._safe_int(alerts_settings.get("confirmations_required", 2), default=2, minimum=1, maximum=5)
+        cooldown_seconds = self._safe_float(alerts_settings.get("cooldown_seconds", 20), default=20.0, minimum=0.0, maximum=300.0)
+        chant_frame_seconds = self._safe_float(alerts_settings.get("chant_frame_seconds", 0.65), default=0.65, minimum=0.2, maximum=3.0)
 
-        cooldown_seconds = self._safe_float(
-            alerts_settings.get(
-                "cooldown_seconds",
-                20,
-            ),
-            default=20.0,
-            minimum=0.0,
-            maximum=300.0,
-        )
+        details_frame_seconds = self._safe_float(alerts_settings.get("details_frame_seconds", 4.0), default=4.0, minimum=1.0, maximum=15.0)
 
-        chant_frame_seconds = self._safe_float(
-            alerts_settings.get(
-                "chant_frame_seconds",
-                0.65,
-            ),
-            default=0.65,
-            minimum=0.2,
-            maximum=3.0,
-        )
-
-        details_frame_seconds = self._safe_float(
-            alerts_settings.get(
-                "details_frame_seconds",
-                4.0,
-            ),
-            default=4.0,
-            minimum=1.0,
-            maximum=15.0,
-        )
-
-        created_alerts: list[
-            PossessionAlert
-        ] = []
+        created_alerts: list[PossessionAlert] = []
 
         seen_game_ids: set[str] = set()
 

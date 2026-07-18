@@ -306,9 +306,5 @@ NFL_TEAM_ALERTS: Dict[str, NFLTeamAlert] = {
 }
 
 
-def get_team_alert(
-    abbreviation: str,
-) -> NFLTeamAlert | None:
-    return NFL_TEAM_ALERTS.get(
-        str(abbreviation).upper()
-    )
+def get_team_alert(abbreviation):
+    return NFL_TEAM_ALERTS.get(str(abbreviation).upper())
