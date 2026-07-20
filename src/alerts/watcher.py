@@ -47,7 +47,7 @@ def _log_error_throttled(error):
     print("Possession watcher failed:", message, flush=True)
 
 
-def possession_watch_loop(stop_event,):
+def possession_watch_loop(stop_event):
     if stop_event is None:
         stop_event = threading.Event()
 
