@@ -11,6 +11,8 @@ from PIL import Image, ImageDraw
 from common.matrix import create_matrix
 from common.settings import get_settings
 
+from fantasy.api import get_today_games as get_live_fantasy
+
 from alerts.manager import possession_alert_manager
 from alerts.renderer import render_possession_alert
 from alerts.watcher import possession_watch_loop
@@ -84,6 +86,7 @@ SPORT_FETCHERS = {
     "cfb": get_live_cfb,
     "nba": get_live_nba,
     "nhl": get_live_nhl,
+    "fantasy": get_live_fantasy,
 }
 
 def fetch_all_sports():
@@ -147,6 +150,9 @@ def is_nhl_game(game):
 def is_notification_card(game):
     return game.__class__.__name__ == "NotificationCard"
 
+def is_fantasy_game(game):
+    return game.__class__.__name__ == "FantasyMatchup"
+
 def game_id(game):
     if is_notification_card(game):
         return f"notification:{game.source}:{game.title}:{game.created_at}"
@@ -168,6 +174,9 @@ def get_sport(game):
 
     if is_nhl_game(game):
         return "nhl"
+
+    if is_fantasy_game(game):
+        return "fantasy"
     
     if is_notification_card(game):
         return "notification"
@@ -368,6 +377,7 @@ def refresh_games_background():
         current_cfb = sports_results["cfb"] or TEST_GAMES_CFB
         current_nba = sports_results["nba"] or TEST_GAMES_NBA
         current_nhl = sports_results["nhl"] or TEST_GAMES_NHL
+        current_fantasy = sports_results["fantasy"]
 
         settings = get_settings()
 
@@ -387,6 +397,7 @@ def refresh_games_background():
             + current_cfb
             + current_nba
             + current_nhl
+            + current_fantasy
         )
 
         with _games_lock:
@@ -418,6 +429,7 @@ def load_initial_games():
     initial_cfb = sports_results["cfb"] or TEST_GAMES_CFB
     initial_nba = sports_results["nba"] or TEST_GAMES_NBA
     initial_nhl = sports_results["nhl"] or TEST_GAMES_NHL
+    initial_fantasy = sports_results["fantasy"]
 
     return (
         initial_mlb
@@ -426,6 +438,7 @@ def load_initial_games():
         + initial_cfb
         + initial_nba
         + initial_nhl
+        + initial_fantasy
     )
 
 def refresh_notifications_background():
@@ -449,7 +462,6 @@ threading.Thread(
 ).start()
 
 possession_stop_event = threading.Event()
-
 
 threading.Thread(
     target=possession_watch_loop,

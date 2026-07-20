@@ -1795,6 +1795,220 @@ def alerts_page():
     </html>
     """
 
+@app.route("/fantasy", methods=["GET", "POST"])
+@login_required
+def fantasy_page():
+    settings = get_settings()
+    fantasy = settings.get("fantasy", {})
+
+    message = ""
+    error = ""
+
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        season = request.form.get("season", "2026").strip()
+
+        if not season.isdigit() or len(season) != 4:
+            error = "Enter a valid four-digit season."
+        elif not username:
+            error = "Enter your Sleeper username."
+        else:
+            try:
+                user = connect_sleeper_user(username)
+
+                if not user:
+                    error = "Sleeper user not found."
+                else:
+                    leagues = get_user_leagues(
+                        user.get("user_id"),
+                        season,
+                    )
+
+                    selected_leagues = request.form.getlist(
+                        "selected_leagues"
+                    )
+
+                    valid_league_ids = {
+                        str(league.get("league_id"))
+                        for league in leagues
+                    }
+
+                    selected_leagues = [
+                        league_id
+                        for league_id in selected_leagues
+                        if league_id in valid_league_ids
+                    ]
+
+                    update_settings({
+                        "fantasy": {
+                            "enabled": (
+                                request.form.get("enabled") == "on"
+                            ),
+                            "provider": "sleeper",
+                            "username": (
+                                user.get("username")
+                                or username
+                            ),
+                            "user_id": user.get("user_id", ""),
+                            "season": season,
+                            "refresh_interval": 120,
+                            "selected_leagues": selected_leagues,
+                        }
+                    })
+
+                    return redirect("/fantasy?saved=1")
+
+            except Exception as exc:
+                error = f"Unable to connect to Sleeper: {exc}"
+
+    settings = get_settings()
+    fantasy = settings.get("fantasy", {})
+
+    leagues = []
+
+    if fantasy.get("user_id"):
+        try:
+            leagues = get_user_leagues(
+                fantasy["user_id"],
+                fantasy.get("season", "2026"),
+            )
+        except Exception as exc:
+            error = f"Unable to load Sleeper leagues: {exc}"
+
+    selected = {
+        str(league_id)
+        for league_id in fantasy.get("selected_leagues", [])
+    }
+
+    league_rows = ""
+
+    for league in leagues:
+        league_id = str(league.get("league_id", ""))
+        league_name = escape(
+            str(league.get("name", "Unnamed League"))
+        )
+
+        checked = (
+            "checked"
+            if not selected or league_id in selected
+            else ""
+        )
+
+        league_rows += f"""
+        <label class="game-row">
+            <input
+                type="checkbox"
+                name="selected_leagues"
+                value="{escape(league_id, quote=True)}"
+                {checked}
+            >
+
+            <div class="game-info">
+                <div class="matchup">{league_name}</div>
+                <div class="details">
+                    League ID: {escape(league_id)}
+                </div>
+            </div>
+        </label>
+        """
+
+    if not league_rows:
+        league_rows = """
+        <div class="empty">
+            Connect your Sleeper account to load leagues.
+        </div>
+        """
+
+    enabled_checked = (
+        "checked"
+        if fantasy.get("enabled", False)
+        else ""
+    )
+
+    saved_message = (
+        "Fantasy settings saved."
+        if request.args.get("saved") == "1"
+        else message
+    )
+
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Scoreboard Fantasy</title>
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+    {page_styles()}
+</head>
+
+<body>
+    <div class="page">
+        {page_header("fantasy")}
+
+        {
+            f'<div class="card">{escape(saved_message)}</div>'
+            if saved_message else ""
+        }
+
+        {
+            f'<div class="card error">{escape(error)}</div>'
+            if error else ""
+        }
+
+        <form method="POST">
+            <div class="card">
+                <div class="card-title">Sleeper Account</div>
+
+                <label class="game-row">
+                    <input
+                        type="checkbox"
+                        name="enabled"
+                        {enabled_checked}
+                    >
+
+                    <div class="game-info">
+                        <div class="matchup">
+                            Enable Fantasy
+                        </div>
+                        <div class="details">
+                            Show Sleeper matchups on the ticker.
+                        </div>
+                    </div>
+                </label>
+
+                <input
+                    class="search-input"
+                    type="text"
+                    name="username"
+                    value="{escape(str(fantasy.get('username', '')), quote=True)}"
+                    placeholder="Sleeper username"
+                >
+
+                <input
+                    class="search-input"
+                    type="text"
+                    name="season"
+                    value="{escape(str(fantasy.get('season', '2026')), quote=True)}"
+                    placeholder="Season"
+                >
+            </div>
+
+            <div class="card">
+                <div class="card-title">Leagues</div>
+                {league_rows}
+            </div>
+
+            <button class="save-button" type="submit">
+                Save Fantasy Settings
+            </button>
+        </form>
+    </div>
+</body>
+</html>
+"""
+
 @app.route(
     "/alerts/test/<team>/<alert_type>",
     methods=["POST"],
