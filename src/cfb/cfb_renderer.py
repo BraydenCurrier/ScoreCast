@@ -3,7 +3,7 @@ from PIL import Image, ImageDraw
 from common.config import PANEL_WIDTH, PANEL_HEIGHT
 from common.fonts import print_3x5, get_3x5_width, print_3x5_right, print_4x5, get_4x5_width, print_4x5_centered, print_4x5_right, print_clock, print_gfx_5x7, gfx_5x7_width, draw_text_right
 from cfb.colors import RED, WHITE, GREY, YELLOW, GRASS_GREEN, BALL_BROWN, team_color
-from cfb import cfb_logos
+from common.logo_store import draw_logo
 
 LOGO_SIZE = 30     
 # changed score card width to accomadate longer 4 character team abbreviations
@@ -76,16 +76,19 @@ def draw_possession_football(draw, x, y):
     # bottom
     draw.line([(x + 1, y + 2), (x + 3, y + 2)], fill=BALL_BROWN)
 
-def draw_team_logo(draw, team_abbreviation, x_start, y_start):
-    logo_data = getattr(cfb_logos, f"LOGO_{team_abbreviation}", None)
-    
-    if not logo_data:
-        return 
-        
-    for y, row in enumerate(logo_data):
-        for x, rgb_color in enumerate(row):
-            if rgb_color != (0, 0, 0):
-                draw.point((x_start + x, y_start + y), fill=rgb_color)
+def draw_team_logo(
+    image,
+    team_abbreviation,
+    x_start,
+    y_start,
+):
+    return draw_logo(
+        destination=image,
+        league="cfb",
+        identifier=team_abbreviation,
+        x=x_start,
+        y=y_start,
+    )
             
 def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, home_team, home_color):
     GRASS = (0, 180, 30)
@@ -230,12 +233,12 @@ def render_football_game_onto(draw, game, offset_x):
         else:
             draw_field_tracker(draw, 10 + offset_x, 29, game.yardline_number, "OPP", game.possession, game.home, home_color)
 
-def render_game_strip_onto(draw, game, offset_x):
+def render_game_strip_onto(image, draw, game, offset_x):
     # away logo
-    draw_team_logo(draw, game.away, offset_x, 1)
+    draw_team_logo(image, game.away, offset_x, 1)
 
     # score card
     render_football_game_onto(draw, game, offset_x + LOGO_SIZE)
 
     # home logo
-    draw_team_logo(draw, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1)
+    draw_team_logo(image, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1)

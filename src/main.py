@@ -207,21 +207,21 @@ def get_game_step(game):
     return get_game_width(game) + CARD_SPACING
 
 
-def draw_game(draw, game, odds, x):
+def draw_game(image, draw, game, odds, x):
     if is_cfb_game(game):
-        draw_cfb_strip(draw, game, x)
+        draw_cfb_strip(image, draw, game, x)
     elif is_nba_game(game):
-        draw_nba_strip(draw, game, odds, x)
+        draw_nba_strip(image, draw, game, odds, x)
     elif is_nfl_game(game):
-        draw_nfl_strip(draw, game, odds, x)
+        draw_nfl_strip(image, draw, game, odds, x)
     elif is_soccer_game(game):
         draw_soccer_strip(draw, game, odds, x)
     elif is_nhl_game(game):
-        draw_nhl_strip(draw, game, odds, x)
+        draw_nhl_strip(image, game, odds, x)
     elif is_notification_card(game):
         draw_notification_card(draw, game, x)
     else:
-        draw_mlb_strip(draw, game, odds, x)
+        draw_mlb_strip(image, draw, game, odds, x)
 
 
 def get_limited_notification_cards(settings):
@@ -313,7 +313,7 @@ def render_card(game, odds):
     draw = ImageDraw.Draw(image)
 
     try:
-        draw_game(draw, game, odds, 0)
+        draw_game(image, draw, game, odds, 0)
 
     except Exception as error:
         print(

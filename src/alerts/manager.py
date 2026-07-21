@@ -27,7 +27,6 @@ class GamePossessionState:
 
     redzone_team: str = ""
 
-    # Cooldowns are tracked separately by event type and team.
     last_alert_times: dict = field(default_factory=dict)
 
     last_seen_at: float = 0.0
@@ -56,10 +55,7 @@ class PossessionAlertManager:
 
         watched_teams = {
             str(team).upper()
-            for team in alerts_settings.get(
-                "possession_teams",
-                [],
-            )
+            for team in alerts_settings.get("possession_teams", [])
         }
 
         confirmations_required = self._safe_int(alerts_settings.get("confirmations_required", 2), default=2, minimum=1, maximum=5)
@@ -81,27 +77,17 @@ class PossessionAlertManager:
 
                 seen_game_ids.add(game_id)
 
-                state = self._game_states.setdefault(
-                    game_id,
-                    GamePossessionState(),
-                )
+                state = self._game_states.setdefault(game_id, GamePossessionState())
 
                 state.last_seen_at = now
 
-                status = str(
-                    game.status or ""
-                ).upper()
+                status = str(game.status or "").upper()
 
                 if status not in LIVE_STATUSES:
                     self._reset_candidate(state)
                     state.redzone_team = ""
 
-                    # Keep scores synchronized so a game that
-                    # changes status does not create an old alert.
-                    self._initialize_or_sync_scores(
-                        state,
-                        game,
-                    )
+                    self._initialize_or_sync_scores(state, game)
                     continue
 
                 self._process_scoring_alert(
@@ -128,23 +114,13 @@ class PossessionAlertManager:
                     created_alerts=created_alerts,
                 )
 
-                current_team = str(
-                    game.possession or ""
-                ).upper()
+                current_team = str(game.possession or "").upper()
 
-                valid_teams = {
-                    str(game.away or "").upper(),
-                    str(game.home or "").upper(),
-                }
+                valid_teams = {str(game.away or "").upper(), str(game.home or "").upper()}
 
                 valid_teams.discard("")
 
-                if (
-                    not current_team
-                    or current_team not in valid_teams
-                ):
-                    # Missing or malformed possession should
-                    # not erase the last confirmed team.
+                if (not current_team or current_team not in valid_teams):
                     self._reset_candidate(state)
                     state.redzone_team = ""
                     continue
@@ -194,272 +170,95 @@ class PossessionAlertManager:
                     created_alerts=created_alerts,
                 )
 
-            self._remove_stale_states(
-                seen_game_ids,
-                now,
-            )
+            self._remove_stale_states(seen_game_ids, now)
 
         return created_alerts
 
-    def _process_scoring_alert(
-        self,
-        *,
-        game: FootballGame,
-        state: GamePossessionState,
-        watched_teams: set[str],
-        enabled: bool,
-        touchdown_enabled: bool,
-        field_goal_enabled: bool,
-        cooldown_seconds: float,
-        chant_frame_seconds: float,
-        details_frame_seconds: float,
-        now: float,
-        created_alerts: list[PossessionAlert],
-    ) -> None:
-        away_score = self._nonnegative_int(
-            game.away_score,
-        )
+    def _process_scoring_alert(self, *, game, state, watched_teams, enabled, touchdown_enabled, field_goal_enabled, cooldown_seconds, chant_frame_seconds, details_frame_seconds, now, created_alerts):
+        away_score = self._nonnegative_int(game.away_score)
+        home_score = self._nonnegative_int(game.home_score)
 
-        home_score = self._nonnegative_int(
-            game.home_score,
-        )
+        play_id = str(getattr(game, "last_play_id", "") or "").strip()
+        play_text = str(getattr(game, "last_play_text", "") or "").strip()
 
-        play_id = str(
-            getattr(
-                game,
-                "last_play_id",
-                "",
-            )
-            or ""
-        ).strip()
+        scoring_play = bool(getattr(game, "scoring_play", False))
 
-        play_text = str(
-            getattr(
-                game,
-                "last_play_text",
-                "",
-            )
-            or ""
-        ).strip()
-
-        scoring_play = bool(
-            getattr(
-                game,
-                "scoring_play",
-                False,
-            )
-        )
-
-        # The first observation only initializes state.
-        # This prevents false alerts when ScoreCast starts
-        # during an already-active game.
-        if (
-            state.away_score is None
-            or state.home_score is None
-        ):
+        if (state.away_score is None or state.home_score is None):
             state.away_score = away_score
             state.home_score = home_score
             state.last_play_id = play_id
             state.last_play_text = play_text
             return
 
-        away_delta = (
-            away_score - state.away_score
-        )
+        away_delta = (away_score - state.away_score)
+        home_delta = (home_score - state.home_score)
 
-        home_delta = (
-            home_score - state.home_score
-        )
+        scoring_signature = (play_id if play_id else (f"{away_score}:{home_score}:" f"{play_text.upper()}"))
 
-        scoring_signature = (
-            play_id
-            if play_id
-            else (
-                f"{away_score}:{home_score}:"
-                f"{play_text.upper()}"
-            )
-        )
+        score_changed = (away_delta > 0 or home_delta > 0)
 
-        score_changed = (
-            away_delta > 0
-            or home_delta > 0
-        )
+        new_scoring_event = (score_changed and scoring_signature != state.last_scoring_signature)
 
-        new_scoring_event = (
-            score_changed
-            and scoring_signature
-            != state.last_scoring_signature
-        )
-
-        if (
-            enabled
-            and new_scoring_event
-            and (
-                scoring_play
-                or self._looks_like_scoring_play(
-                    play_text
-                )
-            )
-        ):
+        if (enabled and new_scoring_event and (scoring_play or self._looks_like_scoring_play(play_text))):
             scoring_team = ""
             points = 0
 
-            if (
-                away_delta > 0
-                and home_delta <= 0
-            ):
-                scoring_team = str(
-                    game.away or ""
-                ).upper()
+            if (away_delta > 0 and home_delta <= 0):
+                scoring_team = str(game.away or "").upper()
                 points = away_delta
 
-            elif (
-                home_delta > 0
-                and away_delta <= 0
-            ):
-                scoring_team = str(
-                    game.home or ""
-                ).upper()
+            elif (home_delta > 0 and away_delta <= 0):
+                scoring_team = str(game.home or "").upper()
                 points = home_delta
 
-            scoring_type = self._scoring_type(
-                play_text,
-                points,
-            )
+            scoring_type = self._scoring_type(play_text, points)
 
-            event_enabled = (
-                (
-                    scoring_type == "TOUCHDOWN"
-                    and touchdown_enabled
-                )
-                or (
-                    scoring_type == "FIELD_GOAL"
-                    and field_goal_enabled
-                )
-            )
+            event_enabled = ((scoring_type == "TOUCHDOWN" and touchdown_enabled) or (scoring_type == "FIELD_GOAL" and field_goal_enabled))
 
-            if (
-                scoring_team
-                and scoring_team in watched_teams
-                and scoring_type
-                and event_enabled
-                and not self._is_on_cooldown(
-                    state=state,
-                    event_type=scoring_type,
-                    team=scoring_team,
-                    now=now,
-                    cooldown_seconds=(
-                        cooldown_seconds
-                    ),
-                )
-            ):
+            if (scoring_team and scoring_team in watched_teams and scoring_type and event_enabled and not self._is_on_cooldown(state=state, event_type=scoring_type, team=scoring_team, now=now, cooldown_seconds=(cooldown_seconds))):
                 if scoring_type == "TOUCHDOWN":
                     headline = "TOUCHDOWN"
-                    chant = (
-                        "TOUCH",
-                        "DOWN",
-                    )
+                    chant = ("TOUCH", "DOWN")
                 else:
                     headline = "FIELD GOAL"
-                    chant = (
-                        "FIELD",
-                        "GOAL",
-                    )
+                    chant = ("FIELD", "GOAL")
 
-                score_detail = (
-                    f"{str(game.away).upper()} "
-                    f"{away_score}-{home_score} "
-                    f"{str(game.home).upper()}"
-                )
+                score_detail = (f"{str(game.away).upper()} " f"{away_score}-{home_score} " f"{str(game.home).upper()}")
 
-                alert = self._enqueue_event_alert(
-                    game=game,
-                    alert_type=scoring_type,
-                    team=scoring_team,
-                    headline=headline,
-                    detail=score_detail,
-                    chant=chant,
-                    now=now,
-                    chant_frame_seconds=(
-                        chant_frame_seconds
-                    ),
-                    details_frame_seconds=(
-                        details_frame_seconds
-                    ),
-                )
+                alert = self._enqueue_event_alert(game=game, alert_type=scoring_type, team=scoring_team, headline=headline, detail=score_detail, chant=chant, now=now, chant_frame_seconds=(chant_frame_seconds), details_frame_seconds=(details_frame_seconds))
 
                 if alert is not None:
                     created_alerts.append(alert)
 
-                    self._mark_alert(
-                        state=state,
-                        event_type=scoring_type,
-                        team=scoring_team,
-                        now=now,
-                    )
+                    self._mark_alert(state=state, event_type=scoring_type, team=scoring_team, now=now)
 
         if new_scoring_event:
-            state.last_scoring_signature = (
-                scoring_signature
-            )
+            state.last_scoring_signature = (scoring_signature)
 
         state.away_score = away_score
         state.home_score = home_score
         state.last_play_id = play_id
         state.last_play_text = play_text
 
-    def _process_redzone_alert(
-        self,
-        *,
-        game: FootballGame,
-        state: GamePossessionState,
-        current_team: str,
-        watched_teams: set[str],
-        enabled: bool,
-        redzone_enabled: bool,
-        cooldown_seconds: float,
-        chant_frame_seconds: float,
-        details_frame_seconds: float,
-        now: float,
-        created_alerts: list[PossessionAlert],
-    ) -> None:
-        currently_in_redzone = self._is_redzone(
-            game,
-            current_team,
-        )
+    def _process_redzone_alert(self, *, game, state, current_team, watched_teams, enabled, redzone_enabled, cooldown_seconds, chant_frame_seconds, details_frame_seconds, now, created_alerts):
+        currently_in_redzone = self._is_redzone(game, current_team)
 
         if not currently_in_redzone:
-            # Clearing this value allows another alert if
-            # the team leaves and later re-enters.
             state.redzone_team = ""
             return
 
-        # Do not repeatedly alert while the offense remains
-        # inside the red zone across multiple polls.
         if state.redzone_team == current_team:
             return
 
         state.redzone_team = current_team
 
-        if (
-            not enabled
-            or not redzone_enabled
-            or current_team not in watched_teams
-        ):
+        if (not enabled or not redzone_enabled or current_team not in watched_teams):
             return
 
-        if self._is_on_cooldown(
-            state=state,
-            event_type="REDZONE",
-            team=current_team,
-            now=now,
-            cooldown_seconds=cooldown_seconds,
-        ):
+        if self._is_on_cooldown(state=state, event_type="REDZONE", team=current_team, now=now, cooldown_seconds=cooldown_seconds):
             return
 
-        field_position = self._field_position_text(
-            game,
-        )
+        field_position = self._field_position_text(game)
 
         alert = self._enqueue_event_alert(
             game=game,
