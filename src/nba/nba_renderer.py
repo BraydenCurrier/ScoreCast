@@ -1,5 +1,5 @@
 from common.fonts import print_3x5, get_3x5_width, print_4x5, get_4x5_width, print_4x5_centered, print_gfx_5x7, gfx_5x7_width, draw_text_right, print_clock
-from nba import nba_logos
+from common.logo_store import draw_logo
 
 WHITE = (255, 255, 255)
 YELLOW = (255, 235, 0)
@@ -23,18 +23,19 @@ def draw_text_right(draw, text, right_x, y, color):
     width = len(str(text)) * 6 - 1
     print_gfx_5x7(draw, str(text), right_x - width, y, color)
 
-def draw_team_logo(draw, team_abbreviation, x_start, y_start):
-    # look up logo array
-    logo_data = getattr(nba_logos, f"LOGO_{team_abbreviation}", None)
-    
-    if not logo_data:
-        return  # Fall back smoothly if logo doesn't exist
-        
-    for y, row in enumerate(logo_data):
-        for x, rgb_color in enumerate(row):
-            # Treat (0, 0, 0) as transparent background so it doesn't draw black blocks
-            if rgb_color != (0, 0, 0):
-                draw.point((x_start + x, y_start + y), fill=rgb_color)
+def draw_team_logo(
+    image,
+    team_abbreviation,
+    x_start,
+    y_start,
+):
+    return draw_logo(
+        destination=image,
+        league="nba",
+        identifier=team_abbreviation,
+        x=x_start,
+        y=y_start,
+    )
 
 def render_basketball_game_onto(draw, game, odds, offset_x):
     # team Away
@@ -72,12 +73,12 @@ def render_basketball_game_onto(draw, game, odds, offset_x):
             draw_text_right(draw, game.home_score, 60 + offset_x, 13, YELLOW)
 
 
-def render_game_strip_onto(draw, game, odds, offset_x):
+def render_game_strip_onto(image, draw, game, odds, offset_x):
     # away logo
-    draw_team_logo(draw, game.away, offset_x, 1)
+    draw_team_logo(image, game.away, offset_x, 1)
 
     # score card
     render_basketball_game_onto(draw, game, odds, offset_x + LOGO_SIZE)
 
     # home logo
-    draw_team_logo(draw, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1)
+    draw_team_logo(image, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1)

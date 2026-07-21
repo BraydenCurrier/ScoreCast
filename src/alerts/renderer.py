@@ -1,7 +1,7 @@
 import time
 
 from PIL import Image, ImageDraw
-from nfl import nfl_logos
+from common.logo_store import draw_logo
 
 from alerts.models import PossessionAlert
 from common.config import PANEL_WIDTH, PANEL_HEIGHT
@@ -36,16 +36,19 @@ def _quarter_text(quarter):
 
     return ""
 
-def draw_team_logo(draw, team_abbreviation, x_start, y_start):
-    logo_data = getattr(nfl_logos, f"LOGO_{team_abbreviation}", None)
-    
-    if not logo_data:
-        return  
-        
-    for y, row in enumerate(logo_data):
-        for x, rgb_color in enumerate(row):
-            if rgb_color != (0, 0, 0):
-                draw.point((x_start + x, y_start + y), fill=rgb_color)
+def draw_team_logo(
+    image,
+    team_abbreviation,
+    x_start,
+    y_start,
+):
+    return draw_logo(
+        destination=image,
+        league="nfl",
+        identifier=team_abbreviation,
+        x=x_start,
+        y=y_start,
+    )
 
 def _field_position_text(alert):
     side = str(alert.yardline_side or "").upper()
@@ -105,8 +108,8 @@ def _create_team_frame(alert):
     left_logo_x = 1
     right_logo_x = (DISPLAY_WIDTH - logo_size - 1)
 
-    draw_team_logo(draw, alert.team, left_logo_x, logo_y)
-    draw_team_logo(draw, alert.team, right_logo_x, logo_y)
+    draw_team_logo(image, alert.team, left_logo_x, logo_y)
+    draw_team_logo(image, alert.team, right_logo_x, logo_y)
 
     return image, draw
 
