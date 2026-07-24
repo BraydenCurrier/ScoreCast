@@ -205,7 +205,7 @@ def get_teams_with_logo_variants(
     Example:
     {
         "ARI": ["current", "classic"],
-        "LAD": ["current", "city_connect"]
+        "LAD": ["current", "city_connect"],
     }
     """
 
@@ -218,9 +218,15 @@ def get_teams_with_logo_variants(
 
     league_dir = LOGO_ROOT / normalized_league
 
-    results = {}
+    if not league_dir.is_dir():
+        return {}
 
-    for entry in sorted(league_dir.iterdir()):
+    results: dict[str, list[str]] = {}
+
+    for entry in sorted(
+        league_dir.iterdir(),
+        key=lambda path: path.name.lower(),
+    ):
         if not entry.is_dir():
             continue
 
