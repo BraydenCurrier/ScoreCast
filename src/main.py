@@ -132,6 +132,25 @@ def odds_signature(odds):
         odds.under_price,
     )
 
+def logo_variants_signature(settings):
+    logo_variants = settings.get(
+        "logo_variants",
+        {},
+    )
+
+    return tuple(
+        sorted(
+            (
+                str(league).lower(),
+                str(team).upper(),
+                str(variant).lower(),
+            )
+            for league, teams in logo_variants.items()
+            if isinstance(teams, dict)
+            for team, variant in teams.items()
+        )
+    )
+
 def is_cfb_game(game):
     return game.__class__.__name__ == "CollegeFootballGame" 
 
@@ -207,21 +226,21 @@ def get_game_step(game):
     return get_game_width(game) + CARD_SPACING
 
 
-def draw_game(image, draw, game, odds, x):
+def draw_game(image, draw, game, odds, x, settings):
     if is_cfb_game(game):
-        draw_cfb_strip(image, draw, game, x)
+        draw_cfb_strip(image, draw, game, x, settings)
     elif is_nba_game(game):
-        draw_nba_strip(image, draw, game, odds, x)
+        draw_nba_strip(image, draw, game, odds, x, settings)
     elif is_nfl_game(game):
-        draw_nfl_strip(image, draw, game, odds, x)
+        draw_nfl_strip(image, draw, game, odds, x, settings)
     elif is_soccer_game(game):
         draw_soccer_strip(draw, game, odds, x)
     elif is_nhl_game(game):
-        draw_nhl_strip(image, game, odds, x)
+        draw_nhl_strip(image, draw, game, odds, x, settings)
     elif is_notification_card(game):
         draw_notification_card(draw, game, x)
     else:
-        draw_mlb_strip(image, draw, game, odds, x)
+        draw_mlb_strip(image, draw, game, odds, x, settings)
 
 
 def get_limited_notification_cards(settings):
@@ -291,10 +310,11 @@ def render_error_card(game, error):
 
     return image
 
-def render_card(game, odds):
+def render_card(game, odds, settings):
     key = (
         game_signature(game),
         odds_signature(odds),
+        logo_variants_signature(settings),
     )
 
     cached = _card_cache.get(key)
@@ -313,7 +333,7 @@ def render_card(game, odds):
     draw = ImageDraw.Draw(image)
 
     try:
-        draw_game(image, draw, game, odds, 0)
+        draw_game(image, draw, game, odds, 0, settings)
 
     except Exception as error:
         print(
@@ -340,6 +360,7 @@ def rebuild_visible_games_if_needed(settings):
         tuple(game_signature(g) for g in current_games),
         tuple(settings.get("hidden_games", [])),
         tuple(settings.get("game_order", [])),
+        logo_variants_signature(settings),
     )
 
     if signature == _cache_signature:
@@ -662,6 +683,7 @@ while True:
             render_card(
                 game,
                 odds,
+                settings,
             ),
             (x, 0),
         )

@@ -3,7 +3,7 @@ from PIL import Image, ImageDraw
 from common.config import PANEL_WIDTH, PANEL_HEIGHT
 from common.fonts import print_3x5, get_3x5_width, print_4x5, get_4x5_width, print_4x5_centered, print_clock, print_gfx_5x7, gfx_5x7_width, draw_text_right
 from nfl.colors import RED, WHITE, GREY, YELLOW, GRASS_GREEN, BALL_BROWN, team_color
-from common.logo_store import draw_logo
+from common.logo_store import draw_logo, get_selected_logo_variant
 
 LOGO_SIZE = 30
 CARD_WIDTH = 64
@@ -81,15 +81,23 @@ def draw_possession_football(draw, x, y):
 def draw_team_logo(
     image,
     team_abbreviation,
-    x_start,
-    y_start,
+    x,
+    y,
+    settings,
 ):
+    variant = get_selected_logo_variant(
+        settings,
+        "nfl",
+        team_abbreviation,
+    )
+
     return draw_logo(
         destination=image,
         league="nfl",
         identifier=team_abbreviation,
-        x=x_start,
-        y=y_start,
+        x=x,
+        y=y,
+        variant=variant,
     )
 
 def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, home_team, home_color):
@@ -234,12 +242,12 @@ def render_football_game_onto(draw, game, odds, offset_x):
         else:
             draw_field_tracker(draw, 4 + offset_x, 29, game.yardline_number, "OPP", game.possession, game.home, home_color);
 
-def render_game_strip_onto(image, draw, game, odds, offset_x):
+def render_game_strip_onto(image, draw, game, odds, offset_x, settings):
     # away logo
-    draw_team_logo(image, game.away, offset_x, 1)
+    draw_team_logo(image, game.away, offset_x, 1, settings)
 
     # score card
     render_football_game_onto(draw, game, odds, offset_x + LOGO_SIZE)
 
     # home logo
-    draw_team_logo(image, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1)    
+    draw_team_logo(image, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1, settings)    

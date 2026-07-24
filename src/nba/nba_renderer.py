@@ -1,5 +1,5 @@
 from common.fonts import print_3x5, get_3x5_width, print_4x5, get_4x5_width, print_4x5_centered, print_gfx_5x7, gfx_5x7_width, draw_text_right, print_clock
-from common.logo_store import draw_logo
+from common.logo_store import draw_logo, get_selected_logo_variant
 
 WHITE = (255, 255, 255)
 YELLOW = (255, 235, 0)
@@ -28,13 +28,21 @@ def draw_team_logo(
     team_abbreviation,
     x_start,
     y_start,
+    settings,
 ):
+    variant = get_selected_logo_variant(
+        settings,
+        "nba",
+        team_abbreviation,
+    )
+
     return draw_logo(
         destination=image,
         league="nba",
         identifier=team_abbreviation,
         x=x_start,
         y=y_start,
+        variant=variant,
     )
 
 def render_basketball_game_onto(draw, game, odds, offset_x):
@@ -73,12 +81,12 @@ def render_basketball_game_onto(draw, game, odds, offset_x):
             draw_text_right(draw, game.home_score, 60 + offset_x, 13, YELLOW)
 
 
-def render_game_strip_onto(image, draw, game, odds, offset_x):
+def render_game_strip_onto(image, draw, game, odds, offset_x, settings):
     # away logo
-    draw_team_logo(image, game.away, offset_x, 1)
+    draw_team_logo(image, game.away, offset_x, 1, settings)
 
     # score card
     render_basketball_game_onto(draw, game, odds, offset_x + LOGO_SIZE)
 
     # home logo
-    draw_team_logo(image, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1)
+    draw_team_logo(image, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1, settings)
