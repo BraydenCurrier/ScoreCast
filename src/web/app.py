@@ -103,14 +103,107 @@ def page_header(active_page="games"):
     </div>
 
     <div class="tabs">
-        <a class="tab {games_active}" href="/games">Games</a>
-        <a class="tab {fantasy_active}" href="/fantasy">Fantasy</a>
-        <a class="tab {alerts_active}" href="/alerts">Alerts</a>
-        <a class="tab {logos_active}" href="/logos">Logos</a>
-        <a class="tab {settings_active}" href="/settings">Settings</a>
+        <a class="tab {games_active}" href="/games" ontouchend="window.location.assign(this.href); return false;">Games</a>
+        <a class="tab {fantasy_active}" href="/fantasy" ontouchend="window.location.assign(this.href); return false;">Fantasy</a>
+        <a class="tab {alerts_active}" href="/alerts" ontouchend="window.location.assign(this.href); return false;">Alerts</a>
+        <a class="tab {logos_active}" href="/logos" ontouchend="window.location.assign(this.href); return false;">Logos</a>
+        <a class="tab {settings_active}" href="/settings" ontouchend="window.location.assign(this.href); return false;">Settings</a>
     </div>
     """
 
+def page_head(title: str) -> str:
+    return f"""
+    <head>
+        <meta charset="utf-8">
+
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1, viewport-fit=cover"
+        >
+
+        <title>{escape(title)}</title>
+
+        <meta name="theme-color" content="#0e1110">
+
+        <meta
+            name="apple-mobile-web-app-capable"
+            content="yes"
+        >
+
+        <meta
+            name="mobile-web-app-capable"
+            content="yes"
+        >
+
+        <meta
+            name="apple-mobile-web-app-title"
+            content="ScoreCast"
+        >
+
+        <meta
+            name="apple-mobile-web-app-status-bar-style"
+            content="black"
+        >
+
+        <link
+            rel="manifest"
+            href="/static/manifest.webmanifest"
+        >
+
+        <link
+            rel="apple-touch-icon"
+            sizes="180x180"
+            href="/static/icons/apple-touch-icon.png"
+        >
+
+        <link
+            rel="icon"
+            type="image/png"
+            sizes="64x64"
+            href="/static/icons/favicon-64.png"
+        >
+
+        <link
+            rel="icon"
+            type="image/png"
+            sizes="32x32"
+            href="/static/icons/favicon-32.png"
+        >
+
+        <link
+            rel="icon"
+            type="image/png"
+            sizes="16x16"
+            href="/static/icons/favicon-16.png"
+        >
+
+        <link
+            rel="shortcut icon"
+            href="/static/favicon.ico"
+        >
+
+        <link
+            rel="mask-icon"
+            href="/static/safari-pinned-tab.svg"
+            color="#55f18b"
+        >
+
+        <meta property="og:type" content="website">
+        <meta property="og:title" content="ScoreCast">
+
+        <meta
+            property="og:description"
+            content="Live sports on your LED matrix."
+        >
+
+        <meta
+            property="og:image"
+            content="/static/social/scorecast-og-1200x630.png"
+        >
+
+        {page_styles()}
+    </head>
+    """
 
 def page_styles():
     return """
@@ -119,11 +212,24 @@ def page_styles():
             box-sizing: border-box;
         }
 
+        html {
+            min-height: 100%;
+            background: #0b0b0f;
+            -webkit-text-size-adjust: 100%;
+        }
+
         body {
+            min-height: 100%;
             margin: 0;
+            padding-top: env(safe-area-inset-top);
+            padding-right: env(safe-area-inset-right);
+            padding-bottom: env(safe-area-inset-bottom);
+            padding-left: env(safe-area-inset-left);
             font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif;
             background: #0b0b0f;
             color: white;
+            overscroll-behavior-y: none;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .page {
@@ -159,6 +265,8 @@ def page_styles():
         }
 
         .tabs {
+            position: relative;
+            z-index: 10;
             display: grid;
             grid-template-columns: repeat(2, 1fr);
             gap: 10px;
@@ -166,6 +274,10 @@ def page_styles():
         }
 
         .tab {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 48px;
             flex: 1;
             text-align: center;
             text-decoration: none;
@@ -176,11 +288,25 @@ def page_styles():
             border-radius: 14px;
             font-size: 15px;
             font-weight: 700;
+            cursor: pointer;
+            touch-action: manipulation;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
         }
 
         .tab.active {
             background: #0a84ff;
             border-color: #0a84ff;
+        }
+
+        a,
+        button,
+        input,
+        select,
+        textarea {
+            touch-action: manipulation;
         }
 
         .card {
@@ -612,7 +738,7 @@ def login():
 <html>
 <head>
     <title>Scoreboard Login</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     {page_styles()}
 </head>
 <body>
@@ -701,7 +827,7 @@ def games():
 <html>
 <head>
     <title>Scoreboard Games</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     {page_styles()}
 </head>
 
@@ -2048,7 +2174,7 @@ def fantasy_page():
     <title>Scoreboard Fantasy</title>
     <meta
         name="viewport"
-        content="width=device-width, initial-scale=1"
+        content="width=device-width, initial-scale=1, viewport-fit=cover"
     >
     {page_styles()}
 </head>
@@ -2372,7 +2498,7 @@ def logos_page():
     <title>Scoreboard Logos</title>
     <meta
         name="viewport"
-        content="width=device-width, initial-scale=1"
+        content="width=device-width, initial-scale=1, viewport-fit=cover"
     >
     {page_styles()}
 </head>
@@ -2643,7 +2769,7 @@ def settings_page():
 <html>
 <head>
     <title>Scoreboard Settings</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     {page_styles()}
 </head>
 
