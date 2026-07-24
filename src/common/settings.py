@@ -34,6 +34,20 @@ DEFAULT_SETTINGS = {
         "details_frame_seconds": 4.0,
     },
 
+    "logo_variants": {
+        "nfl": {
+            "ARI": "current",
+            "DEN": "1993",
+            "LAR": "classic",
+            "MIA": "2002",
+            "NE": "classic",
+            "PHI": "classic",
+            "PIT": "classic",
+            "TEN": "classic",
+            "WSH": "1983",
+        }
+    },
+
     "music": {
         "enabled": False,
         "provider": "spotify",

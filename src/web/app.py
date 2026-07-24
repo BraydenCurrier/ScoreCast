@@ -5,9 +5,10 @@ from pathlib import Path
 from functools import wraps
 from html import escape
 
-from flask import Flask, request, redirect, session, jsonify, url_for
+from flask import Flask, abort, request, redirect, send_file, session, jsonify, url_for
 
 from common.settings import get_settings, update_settings
+from common.logo_store import get_logo_variant_path, get_logo_variants, get_selected_logo_variant, get_teams_with_logo_variants
 
 from fantasy.api import connect_sleeper_user, get_user_leagues
 
@@ -86,9 +87,10 @@ def login_required(f):
 
 def page_header(active_page="games"):
     games_active = "active" if active_page == "games" else ""
-    alerts_active = "active" if active_page == "alerts" else ""
-    settings_active = "active" if active_page == "settings" else ""
     fantasy_active = "active" if active_page == "fantasy" else ""
+    alerts_active = "active" if active_page == "alerts" else ""
+    logos_active = "active" if active_page == "logos" else ""
+    settings_active = "active" if active_page == "settings" else ""
 
     return f"""
     <div class="header">
@@ -104,6 +106,7 @@ def page_header(active_page="games"):
         <a class="tab {games_active}" href="/games">Games</a>
         <a class="tab {fantasy_active}" href="/fantasy">Fantasy</a>
         <a class="tab {alerts_active}" href="/alerts">Alerts</a>
+        <a class="tab {logos_active}" href="/logos">Logos</a>
         <a class="tab {settings_active}" href="/settings">Settings</a>
     </div>
     """
@@ -419,6 +422,113 @@ def page_styles():
 
         .alert-option input {
             transform: scale(1.1);
+        }
+
+                .logo-team-row {
+            display: grid;
+            grid-template-columns: 78px minmax(0, 1fr);
+            gap: 14px;
+            align-items: center;
+            padding: 14px 0;
+            border-bottom: 1px solid #2c2c35;
+        }
+
+        .logo-team-row:last-child {
+            border-bottom: 0;
+        }
+
+        .logo-preview-box {
+            width: 72px;
+            height: 72px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #3a3a45;
+            border-radius: 14px;
+            background-color: #0f0f14;
+            background-image:
+                linear-gradient(
+                    45deg,
+                    #24242c 25%,
+                    transparent 25%
+                ),
+                linear-gradient(
+                    -45deg,
+                    #24242c 25%,
+                    transparent 25%
+                ),
+                linear-gradient(
+                    45deg,
+                    transparent 75%,
+                    #24242c 75%
+                ),
+                linear-gradient(
+                    -45deg,
+                    transparent 75%,
+                    #24242c 75%
+                );
+            background-size: 16px 16px;
+            background-position:
+                0 0,
+                0 8px,
+                8px -8px,
+                -8px 0;
+        }
+
+        .logo-preview {
+            display: block;
+            width: 60px;
+            height: 60px;
+            object-fit: contain;
+            image-rendering: pixelated;
+        }
+
+        .logo-team-controls {
+            min-width: 0;
+        }
+
+        .logo-team-name {
+            font-size: 17px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .logo-variant-select {
+            width: 100%;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid #444;
+            background: #0f0f14;
+            color: white;
+            font-size: 15px;
+        }
+
+        .logo-success {
+            background: rgba(48, 209, 88, 0.14);
+            border: 1px solid rgba(48, 209, 88, 0.45);
+            color: #7ee893;
+            border-radius: 14px;
+            padding: 14px 16px;
+            margin-bottom: 16px;
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        @media (max-width: 390px) {
+            .logo-team-row {
+                grid-template-columns: 64px minmax(0, 1fr);
+                gap: 10px;
+            }
+
+            .logo-preview-box {
+                width: 60px;
+                height: 60px;
+            }
+
+            .logo-preview {
+                width: 52px;
+                height: 52px;
+            }
         }
 
         @media (max-width: 600px) {
@@ -2049,6 +2159,435 @@ def test_possession_alert(
         return "Could not queue alert.", 400
 
     return redirect("/alerts")
+
+@app.route(
+    "/logo-preview/<league>/<team>/<variant>"
+)
+@login_required
+def logo_preview(
+    league: str,
+    team: str,
+    variant: str,
+):
+    logo_path = get_logo_variant_path(
+        league=league,
+        identifier=team,
+        variant=variant,
+    )
+
+    if logo_path is None:
+        abort(404)
+
+    return send_file(
+        logo_path,
+        mimetype="image/png",
+        max_age=60,
+    )
+
+@app.route("/logos")
+@login_required
+def logos_page():
+    settings = get_settings()
+
+    league_labels = {
+        "mlb": "MLB",
+        "nfl": "NFL",
+        "cfb": "College Football",
+        "nba": "NBA",
+        "nhl": "NHL",
+        "soccer": "Soccer",
+    }
+
+    teams_by_league = {}
+
+    for league in league_labels:
+        teams = get_teams_with_logo_variants(
+            league,
+        )
+
+        if teams:
+            teams_by_league[league] = teams
+
+    requested_league = (
+        request.args.get("league", "")
+        .strip()
+        .lower()
+    )
+
+    if requested_league in teams_by_league:
+        selected_league = requested_league
+    elif teams_by_league:
+        selected_league = next(iter(teams_by_league))
+    else:
+        selected_league = ""
+
+    league_options = ""
+
+    for league, label in league_labels.items():
+        if league not in teams_by_league:
+            continue
+
+        selected = (
+            "selected"
+            if league == selected_league
+            else ""
+        )
+
+        league_options += f"""
+        <option
+            value="{escape(league, quote=True)}"
+            {selected}
+        >
+            {escape(label)}
+        </option>
+        """
+
+    team_rows = ""
+
+    if selected_league:
+        league_teams = teams_by_league.get(
+            selected_league,
+            {},
+        )
+
+        for team, variants in sorted(
+            league_teams.items()
+        ):
+            team = str(team).upper()
+
+            selected_variant = (
+                get_selected_logo_variant(
+                    settings,
+                    selected_league,
+                    team,
+                )
+            )
+
+            if selected_variant not in variants:
+                selected_variant = "current"
+
+            variant_options = ""
+
+            for variant in variants:
+                variant = str(variant)
+
+                selected = (
+                    "selected"
+                    if variant == selected_variant
+                    else ""
+                )
+
+                variant_label = (
+                    variant
+                    .replace("_", " ")
+                    .replace("-", " ")
+                    .title()
+                )
+
+                variant_options += f"""
+                <option
+                    value="{escape(variant, quote=True)}"
+                    {selected}
+                >
+                    {escape(variant_label)}
+                </option>
+                """
+
+            safe_team = escape(
+                team,
+                quote=True,
+            )
+            safe_league = escape(
+                selected_league,
+                quote=True,
+            )
+            safe_variant = escape(
+                str(selected_variant),
+                quote=True,
+            )
+
+            preview_url = url_for(
+                "logo_preview",
+                league=selected_league,
+                team=team,
+                variant=selected_variant,
+            )
+
+            team_rows += f"""
+            <div class="logo-team-row">
+                <div class="logo-preview-box">
+                    <img
+                        class="logo-preview"
+                        id="logo-preview-{safe_team}"
+                        src="{preview_url}"
+                        alt="{safe_team} logo preview"
+                    >
+                </div>
+
+                <div class="logo-team-controls">
+                    <div class="logo-team-name">
+                        {safe_team}
+                    </div>
+
+                    <select
+                        class="logo-variant-select"
+                        name="logo:{safe_team}"
+                        data-league="{safe_league}"
+                        data-team="{safe_team}"
+                        data-preview-id="
+                            logo-preview-{safe_team}
+                        "
+                    >
+                        {variant_options}
+                    </select>
+                </div>
+            </div>
+            """
+
+    if not team_rows:
+        team_rows = """
+        <div class="empty">
+            No teams with alternate logos were found.
+        </div>
+        """
+
+    saved_message = ""
+
+    if request.args.get("saved") == "1":
+        saved_message = """
+        <div class="logo-success">
+            Logo selections saved.
+        </div>
+        """
+
+    safe_selected_league = escape(
+        selected_league,
+        quote=True,
+    )
+
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Scoreboard Logos</title>
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+    {page_styles()}
+</head>
+
+<body>
+    <div class="page">
+        {page_header("logos")}
+        {saved_message}
+
+        <div class="card">
+            <div class="card-title">
+                League
+            </div>
+
+            {
+                f'''
+                <select
+                    id="logo_league"
+                    class="select-input"
+                >
+                    {league_options}
+                </select>
+
+                <div class="hint">
+                    Only leagues containing teams with
+                    alternate logos are listed.
+                </div>
+                '''
+                if league_options
+                else '''
+                <div class="empty">
+                    No alternate logos were found.
+                </div>
+                '''
+            }
+        </div>
+
+        <form method="POST" action="/save_logos">
+            <input
+                type="hidden"
+                name="league"
+                value="{safe_selected_league}"
+            >
+
+            <div class="card">
+                <div class="card-title">
+                    Team Logos
+                </div>
+
+                {team_rows}
+            </div>
+
+            {
+                '''
+                <button
+                    class="save-button"
+                    type="submit"
+                >
+                    Save Logos
+                </button>
+                '''
+                if selected_league
+                else ""
+            }
+        </form>
+    </div>
+
+    <script>
+        const leagueSelector =
+            document.getElementById(
+                "logo_league"
+            );
+
+        if (leagueSelector) {{
+            leagueSelector.addEventListener(
+                "change",
+                function () {{
+                    const league =
+                        encodeURIComponent(
+                            leagueSelector.value
+                        );
+
+                    window.location.href =
+                        "/logos?league=" + league;
+                }}
+            );
+        }}
+
+        document.querySelectorAll(
+            ".logo-variant-select"
+        ).forEach(function (selector) {{
+            selector.addEventListener(
+                "change",
+                function () {{
+                    const league =
+                        encodeURIComponent(
+                            selector.dataset.league
+                        );
+
+                    const team =
+                        encodeURIComponent(
+                            selector.dataset.team
+                        );
+
+                    const variant =
+                        encodeURIComponent(
+                            selector.value
+                        );
+
+                    const previewId = (
+                        selector.dataset.previewId
+                        || ""
+                    ).trim();
+
+                    const preview =
+                        document.getElementById(
+                            previewId
+                        );
+
+                    if (!preview) {{
+                        return;
+                    }}
+
+                    preview.src =
+                        "/logo-preview/"
+                        + league
+                        + "/"
+                        + team
+                        + "/"
+                        + variant
+                        + "?cache="
+                        + Date.now();
+
+                    preview.alt =
+                        selector.dataset.team
+                        + " "
+                        + selector.value
+                        + " logo preview";
+                }}
+            );
+        }});
+    </script>
+</body>
+</html>
+    """
+
+@app.route(
+    "/save_logos",
+    methods=["POST"],
+)
+@login_required
+def save_logos():
+    league = (
+        request.form.get("league", "")
+        .strip()
+        .lower()
+    )
+
+    available_teams = (
+        get_teams_with_logo_variants(
+            league,
+        )
+    )
+
+    if not available_teams:
+        abort(400)
+
+    settings = get_settings()
+
+    logo_variants = settings.get(
+        "logo_variants",
+        {},
+    )
+
+    if not isinstance(logo_variants, dict):
+        logo_variants = {}
+
+    league_selections = logo_variants.get(
+        league,
+        {},
+    )
+
+    if not isinstance(league_selections, dict):
+        league_selections = {}
+
+    for team, variants in available_teams.items():
+        team = str(team).upper()
+
+        selected_variant = (
+            request.form.get(
+                f"logo:{team}",
+                "",
+            )
+            .strip()
+            .lower()
+        )
+
+        if selected_variant not in variants:
+            continue
+
+        league_selections[team] = selected_variant
+
+    logo_variants[league] = league_selections
+
+    update_settings({
+        "logo_variants": logo_variants,
+    })
+
+    return redirect(
+        url_for(
+            "logos_page",
+            league=league,
+            saved="1",
+        )
+    )
 
 @app.route("/settings")
 @login_required

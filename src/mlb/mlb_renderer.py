@@ -2,7 +2,7 @@ from PIL import Image, ImageDraw
 
 from common.config import PANEL_WIDTH, PANEL_HEIGHT
 from mlb.colors import YELLOW, WHITE, GREY, RED, team_color
-from common.logo_store import draw_logo
+from common.logo_store import draw_logo, get_selected_logo_variant
 from common.fonts import print_3x5, get_3x5_width, print_4x5, get_4x5_width, print_4x5_centered, print_gfx_5x7, gfx_5x7_width, draw_text_right
 
 LOGO_SIZE = 30
@@ -53,13 +53,21 @@ def draw_team_logo(
     team_abbreviation,
     x_start,
     y_start,
+    settings,
 ):
+    variant = get_selected_logo_variant(
+        settings,
+        "mlb",
+        team_abbreviation,
+    )
+
     return draw_logo(
         destination=image,
         league="mlb",
         identifier=team_abbreviation,
         x=x_start,
         y=y_start,
+        variant=variant,
     )
 
 def render_baseball_game_onto(draw, game, odds, offset_x):
@@ -120,12 +128,12 @@ def render_baseball_game_onto(draw, game, odds, offset_x):
     print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 2 + offset_x, 25, GREY)
     print_3x5(draw, f"{game.home_wins}-{game.home_losses}", 43 + offset_x, 25, GREY)
 
-def render_game_strip_onto(image, draw, game, odds, offset_x):
+def render_game_strip_onto(image, draw, game, odds, offset_x, settings):
     # away logo
-    draw_team_logo(image, game.away, offset_x, 1)
+    draw_team_logo(image, game.away, offset_x, 1, settings)
 
     # score card
     render_baseball_game_onto(draw, game, odds, offset_x + LOGO_SIZE)
 
     # home logo
-    draw_team_logo(image, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1)
+    draw_team_logo(image, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1, settings)
