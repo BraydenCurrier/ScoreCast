@@ -26,6 +26,8 @@ class FootballGame:
     yardline_side: str
     yardline_number: int
 
+    broadcast: str = ""
+
     date: str = "5-6-26"
     week: int = 0
     event_id: str = ""
