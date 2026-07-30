@@ -3,7 +3,7 @@ from PIL import Image, ImageDraw
 from common.config import PANEL_WIDTH, PANEL_HEIGHT
 from common.fonts import print_3x5, get_3x5_width, print_4x5, get_4x5_width, print_4x5_centered, print_clock, print_gfx_5x7, gfx_5x7_width, draw_text_right
 from nfl.colors import RED, WHITE, GREY, YELLOW, GRASS_GREEN, BALL_BROWN, team_color
-from common.logo_store import draw_logo, get_selected_logo_variant
+from common.logo_store import draw_logo, get_selected_logo_variant, load_logo
 
 LOGO_SIZE = 30
 CARD_WIDTH = 64
@@ -100,6 +100,41 @@ def draw_team_logo(
         variant=variant,
     )
 
+def draw_broadcast_logo(
+    image,
+    team_abbreviation,
+    x,
+    y,
+    settings,
+):
+    variant = get_selected_logo_variant(
+        settings,
+        "broadcast",
+        team_abbreviation,
+    )
+
+    try:
+        logo = load_logo(
+            league="broadcast",
+            identifier=team_abbreviation,
+            variant=variant,
+        )
+    except (
+        FileNotFoundError,
+        ValueError,
+        OSError,
+    ):
+        return False
+
+    return draw_logo(
+        destination=image,
+        league="broadcast",
+        identifier=team_abbreviation,
+        x=x - logo.width // 2,
+        y=y - logo.height // 2,
+        variant=variant,
+    )
+
 def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, home_team, home_color):
     GRASS = (0, 180, 30)
     LINE_COLOR = (200, 200, 200)
@@ -187,7 +222,7 @@ def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, 
     draw.line([(rx + 1, y + 3), (rx + 1, y + 5)], fill=POST_YELLOW) 
 
 
-def render_football_game_onto(draw, game, odds, offset_x):
+def render_football_game_onto(image, draw, game, odds, offset_x, settings):
 
     away_color = team_color(game.away)
     home_color = team_color(game.home)
@@ -201,9 +236,11 @@ def render_football_game_onto(draw, game, odds, offset_x):
         print_4x5_centered(draw, game.start_time, 31 + offset_x, 2, WHITE)
         #week
         weekNumber = "Week " + str(game.week)
-        print_4x5_centered(draw, weekNumber, 32 + offset_x, 11, WHITE)
+        print_4x5(draw, weekNumber, offset_x, 11, WHITE)
         #date
-        print_4x5_centered(draw, game.date, 32 + offset_x, 20, WHITE)
+        print_4x5(draw, game.date, 35 + offset_x, 11, WHITE)
+        draw_broadcast_logo(image, game.broadcast, 31 + offset_x, 24, settings)
+
     else:
         # quarter
         print_4x5(draw, "Q" + str(game.quarter), 27 + offset_x, 2, WHITE)
@@ -247,7 +284,7 @@ def render_game_strip_onto(image, draw, game, odds, offset_x, settings):
     draw_team_logo(image, game.away, offset_x, 1, settings)
 
     # score card
-    render_football_game_onto(draw, game, odds, offset_x + LOGO_SIZE)
+    render_football_game_onto(image, draw, game, odds, offset_x + LOGO_SIZE, settings)
 
     # home logo
     draw_team_logo(image, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1, settings)    
