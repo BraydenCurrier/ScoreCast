@@ -3,13 +3,25 @@ from PIL import Image, ImageDraw
 from common.config import PANEL_WIDTH, PANEL_HEIGHT
 from common.fonts import print_3x5, get_3x5_width, print_3x5_right, print_4x5, get_4x5_width, print_4x5_centered, print_4x5_right, print_clock, print_gfx_5x7, gfx_5x7_width, draw_text_right
 from cfb.colors import RED, WHITE, GREY, YELLOW, GRASS_GREEN, BALL_BROWN, team_color
-from common.logo_store import draw_logo, get_selected_logo_variant
+from common.logo_store import draw_logo, get_selected_logo_variant, load_logo
 
 LOGO_SIZE = 30     
 # changed score card width to accomadate longer 4 character team abbreviations
 CARD_WIDTH = 76   
 GAME_GAP = 5
 GAME_WIDTH = LOGO_SIZE + CARD_WIDTH + LOGO_SIZE 
+
+BROADCAST_IDS = {
+    "SEC Network": "SECN",
+    "SEC Network+": "SECN_PLUS",
+    "ACC Network": "ACCN",
+    "Peacock": "NBC",
+    "SECN+": "SECN_PLUS",
+    "ESPN+": "ESPN_PLUS",
+    "NFL Network": "NFL_NETWORK",
+    "NFL Net": "NFL_NETWORK",
+    "TNT, HBO Max": "TNT",
+}
 
 def game_id(game):
     return f"{game.away}@{game.home}"
@@ -97,6 +109,56 @@ def draw_team_logo(
         y=y_start,
         variant=variant,
     )
+
+def draw_broadcast_logo(
+    image,
+    team_abbreviation,
+    x,
+    y,
+    settings,
+):
+    if not team_abbreviation:
+        return False
+
+    broadcast = team_abbreviation.strip()
+    logo_identifier = BROADCAST_IDS.get(
+        team_abbreviation,
+        team_abbreviation.replace("+", "_PLUS")
+    )
+
+    try:
+        variant = get_selected_logo_variant(
+            settings,
+            "broadcast",
+            logo_identifier,
+        )
+
+        logo = load_logo(
+            league="broadcast",
+            identifier=logo_identifier,
+            variant=variant,
+        )
+
+        return draw_logo(
+            destination=image,
+            league="broadcast",
+            identifier=logo_identifier,
+            x=x - logo.width // 2,
+            y=y - logo.height // 2,
+            variant=variant,
+        )
+
+    except (FileNotFoundError, ValueError, OSError, KeyError) as exc:
+        # Optional text fallback.
+        draw = ImageDraw.Draw(image)
+        draw.text(
+            (x, y),
+            broadcast,
+            fill="white",
+            anchor="mm",
+        )
+
+        return False
             
 def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, home_team, home_color):
     GRASS = (0, 180, 30)
@@ -185,7 +247,7 @@ def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, 
     draw.line([(rx + 1, y + 3), (rx + 1, y + 5)], fill=POST_YELLOW) 
 
 
-def render_football_game_onto(draw, game, offset_x):
+def render_football_game_onto(image, draw, game, offset_x, settings):
 
     away_color = team_color(game.away)
     home_color = team_color(game.home)
@@ -201,11 +263,14 @@ def render_football_game_onto(draw, game, offset_x):
         print_4x5_right(draw, "#" + str(game.home_rank), 73 + offset_x, 10, YELLOW)
 
     if(game.status == "STATUS_SCHEDULED"):
-        # print scheduled game time, week number, and date
-        print_4x5_centered(draw, game.start_time, 38 + offset_x, 2, WHITE)
+        #start time
+        print_4x5_centered(draw, game.start_time, 37 + offset_x, 2, WHITE)
+        #week
         weekNumber = "Week " + str(game.week)
-        print_4x5_centered(draw, weekNumber, 38 + offset_x, 11, WHITE)
-        print_4x5_centered(draw, game.date, 38 + offset_x, 20, WHITE)
+        print_4x5(draw, weekNumber, 6 + offset_x, 11, WHITE)
+        #date
+        print_4x5(draw, game.date, 41 + offset_x, 11, WHITE)
+        draw_broadcast_logo(image, game.broadcast, 37 + offset_x, 24, settings)
     else:
         # print quarter and game clock
         print_4x5(draw, "Q" + str(game.quarter), 33 + offset_x, 2, WHITE)
@@ -246,7 +311,7 @@ def render_game_strip_onto(image, draw, game, offset_x, settings):
     draw_team_logo(image, game.away, offset_x, 1, settings)
 
     # score card
-    render_football_game_onto(draw, game, offset_x + LOGO_SIZE)
+    render_football_game_onto(image, draw, game, offset_x + LOGO_SIZE, settings)
 
     # home logo
     draw_team_logo(image, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1, settings)
