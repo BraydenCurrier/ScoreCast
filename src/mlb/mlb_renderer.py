@@ -1,9 +1,6 @@
-from PIL import Image, ImageDraw
-
-from common.config import PANEL_WIDTH, PANEL_HEIGHT
 from mlb.colors import YELLOW, WHITE, GREY, RED, team_color
 from common.logo_store import draw_logo, get_selected_logo_variant
-from common.fonts import print_3x5, get_3x5_width, print_4x5, get_4x5_width, print_4x5_centered, print_gfx_5x7, gfx_5x7_width, draw_text_right
+from common.fonts import print_3x5, get_3x5_width, print_4x5, print_gfx_5x7, draw_text_right
 
 LOGO_SIZE = 30
 CARD_WIDTH = 64
@@ -70,7 +67,7 @@ def draw_team_logo(
         variant=variant,
     )
 
-def render_baseball_game_onto(draw, game, odds, offset_x):
+def render_baseball_game_onto(draw, game, offset_x):
     # print away team
     print_gfx_5x7(draw, game.away, 3 + offset_x, 2, team_color(game.away))
 
@@ -83,25 +80,6 @@ def render_baseball_game_onto(draw, game, odds, offset_x):
         centered_x = (64 - width) // 2
         print_3x5(draw, game.start_time, centered_x + offset_x, 2, YELLOW)
 
-        if odds:
-            odds_text = ""
-
-            if odds.spread is not None:
-                odds_text = f"{game.away} {odds.spread:+g}"
-
-            elif odds.total is not None:
-                odds_text = f"O/U {odds.total:g}"
-
-            elif odds.moneyline_away is not None:
-                odds_text = f"{game.away} {odds.moneyline_away:+d}"
-
-            print_gfx_5x7(
-                draw,
-                odds_text,
-                x + 2,
-                25,
-                WHITE
-            )
     else:
         # print inning and base diamond
         draw_inning(draw, 27 + offset_x, 19, game.inning, game.top_inning, YELLOW)
@@ -128,12 +106,12 @@ def render_baseball_game_onto(draw, game, odds, offset_x):
     print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 2 + offset_x, 25, GREY)
     print_3x5(draw, f"{game.home_wins}-{game.home_losses}", 43 + offset_x, 25, GREY)
 
-def render_game_strip_onto(image, draw, game, odds, offset_x, settings):
+def render_game_strip_onto(image, draw, game, offset_x, settings):
     # away logo
     draw_team_logo(image, game.away, offset_x, 1, settings)
 
     # score card
-    render_baseball_game_onto(draw, game, odds, offset_x + LOGO_SIZE)
+    render_baseball_game_onto(draw, game, offset_x + LOGO_SIZE)
 
     # home logo
     draw_team_logo(image, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1, settings)

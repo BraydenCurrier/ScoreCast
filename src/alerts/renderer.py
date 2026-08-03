@@ -3,38 +3,11 @@ import time
 from PIL import Image, ImageDraw
 from common.logo_store import draw_logo
 
-from alerts.models import PossessionAlert
 from common.config import PANEL_WIDTH, PANEL_HEIGHT
-from common.fonts import print_4x5, get_4x5_width, print_4x5_centered, print_gfx_5x7, gfx_5x7_width
+from common.fonts import print_gfx_5x7, gfx_5x7_width
 
 DISPLAY_WIDTH = PANEL_WIDTH
 DISPLAY_HEIGHT = PANEL_HEIGHT
-
-
-def _ordinal_down(down):
-    values = {
-        1: "1ST",
-        2: "2ND",
-        3: "3RD",
-        4: "4TH",
-    }
-
-    return values.get(int(down or 0), "")
-
-
-def _quarter_text(quarter):
-    quarter = int(quarter or 0)
-
-    if 1 <= quarter <= 4:
-        return f"Q{quarter}"
-
-    if quarter == 5:
-        return "OT"
-
-    if quarter > 5:
-        return f"OT{quarter - 4}"
-
-    return ""
 
 def draw_team_logo(
     image,
@@ -71,21 +44,6 @@ def _field_position_text(alert):
 
     return f"{side} {number}"
 
-
-def _down_distance_text(alert):
-    down = _ordinal_down(alert.down)
-
-    distance = int(alert.distance or 0)
-
-    if down and distance > 0:
-        return f"{down}&{distance}"
-
-    if down:
-        return down
-
-    return "DOWN PENDING"
-
-
 def _draw_centered_5x7(draw, text, y, color):
     text = str(text).upper()
 
@@ -94,9 +52,6 @@ def _draw_centered_5x7(draw, text, y, color):
     x = (DISPLAY_WIDTH - width) // 2
 
     print_gfx_5x7(draw, text, x, y, color)
-
-def _draw_centered_4x5(draw, text, y, color):
-    print_4x5_centered(draw, str(text).upper(), DISPLAY_WIDTH // 2, y, color)
 
 def _create_team_frame(alert):
     image = Image.new("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT), alert.primary)
@@ -112,33 +67,6 @@ def _create_team_frame(alert):
     draw_team_logo(image, alert.team, right_logo_x, logo_y)
 
     return image, draw
-
-def _render_scaled_pixel_text(text, foreground, background):
-    text = str(text).upper().strip()
-
-    if not text:
-        text = " "
-
-    text_width = gfx_5x7_width(text)
-    source_height = 7
-
-    source = Image.new("RGB", (max(1, text_width + 2), source_height + 2), background)
-    source_draw = ImageDraw.Draw(source)
-    print_gfx_5x7(source_draw, text, 1, 1, foreground)
-
-    scale_x = max(1, DISPLAY_WIDTH // source.width)
-    scale_y = max(1, DISPLAY_HEIGHT // source.height)
-    scale = max(1, min(scale_x, scale_y))
-    scaled = source.resize((source.width * scale, source.height * scale), Image.Resampling.NEAREST)
-
-    image = Image.new("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT), background)
-
-    x = (DISPLAY_WIDTH - scaled.width) // 2
-    y = (DISPLAY_HEIGHT - scaled.height) // 2
-    image.paste(scaled, (x, y))
-
-    return image
-
 
 def _render_chant_frame(alert, chant_index):
     image, draw = _create_team_frame(alert)

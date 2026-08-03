@@ -6,7 +6,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 from updater.config import (
@@ -19,7 +18,6 @@ from updater.config import (
     RELEASES_DIR,
     REPOSITORY_DIR,
     SERVICE_NAME,
-    SETTINGS_DIR,
     SYSTEM_PYTHON,
     VENVS_DIR,
 )

@@ -2,7 +2,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from threading import RLock
 import time
-from typing import Deque, Dict, Iterable, Optional
+from typing import Optional
 
 from alerts.models import PossessionAlert
 from alerts.teams import get_team_alert

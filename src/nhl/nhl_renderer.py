@@ -1,4 +1,4 @@
-from common.fonts import print_3x5, get_3x5_width, print_4x5, get_4x5_width, print_4x5_centered, print_gfx_5x7, gfx_5x7_width, draw_text_right, print_clock
+from common.fonts import print_3x5, get_3x5_width, print_4x5_centered, print_gfx_5x7, draw_text_right, print_clock
 from common.logo_store import draw_logo, get_selected_logo_variant
 
 WHITE = (255, 255, 255)
@@ -45,7 +45,7 @@ def draw_team_logo(
         variant=variant,
     )
 
-def render_hockey_game_onto(draw, game, odds, offset_x):
+def render_hockey_game_onto(draw, game, offset_x):
     # away team
     print_gfx_5x7(draw, game.away, 3 + offset_x, 2, WHITE)
 
@@ -78,12 +78,12 @@ def render_hockey_game_onto(draw, game, odds, offset_x):
             draw_text_right(draw, game.home_score, 60 + offset_x, 13, YELLOW)
 
 
-def render_game_strip_onto(image, draw, game, odds, offset_x, settings):
+def render_game_strip_onto(image, draw, game, offset_x, settings):
     # away logo
     draw_team_logo(image, game.away, offset_x, 1, settings)
 
     # score card
-    render_hockey_game_onto(draw, game, odds, offset_x + LOGO_SIZE)
+    render_hockey_game_onto(draw, game, offset_x + LOGO_SIZE)
 
     # home logo
     draw_team_logo(image, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1, settings)

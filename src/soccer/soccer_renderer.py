@@ -1,4 +1,4 @@
-from common.fonts import print_3x5, get_3x5_width, print_4x5, get_4x5_width, print_4x5_centered, print_gfx_5x7, gfx_5x7_width, draw_text_right
+from common.fonts import print_3x5, get_3x5_width, print_4x5_centered, print_gfx_5x7, draw_text_right
 from soccer import soccer_logos
 
 WHITE = (255, 255, 255)
@@ -34,7 +34,7 @@ def draw_team_logo(draw, team_abbreviation, x_start, y_start):
             if rgb_color != (0, 0, 0):
                 draw.point((x_start + x, y_start + y), fill=rgb_color)
 
-def render_soccer_game_onto(draw, game, odds, offset_x):
+def render_soccer_game_onto(draw, game, offset_x):
     # away team
     print_gfx_5x7(draw, game.away, 3 + offset_x, 2, WHITE)
 
@@ -63,12 +63,12 @@ def render_soccer_game_onto(draw, game, odds, offset_x):
     stage_name = game.stage.replace("-", " ").upper()
     print_4x5_centered(draw, stage_name, 32 + offset_x, 24, WHITE)
 
-def render_game_strip_onto(draw, game, odds, offset_x):
+def render_game_strip_onto(draw, game, offset_x):
     # away logo
     draw_team_logo(draw, game.away, offset_x, 1)
 
     # score card
-    render_soccer_game_onto(draw, game, odds, offset_x + LOGO_SIZE)
+    render_soccer_game_onto(draw, game, offset_x + LOGO_SIZE)
 
     # home logo
     draw_team_logo(draw, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1)

@@ -35,10 +35,6 @@ from nba.nba_renderer import render_game_strip_onto as draw_nba_strip
 from nhl.api import get_today_games as get_live_nhl
 from nhl.nhl_renderer import render_game_strip_onto as draw_nhl_strip
 
-from notifications.models import NotificationCard
-from notifications.renderer import render_notification_onto as draw_notification_card
-from notifications.manager import NotificationManager
-
 from mlb.test_data import TEST_GAMES_MLB
 from nfl.test_data import TEST_GAMES_NFL
 from soccer.test_data import TEST_GAMES_SOCCER
@@ -46,11 +42,27 @@ from cfb.test_data import TEST_GAMES_CFB
 from nba.test_data import TEST_GAMES_NBA
 from nhl.test_data import TEST_GAMES_NHL
 
+TEST_GAMES_BY_SPORT = {
+    "mlb": TEST_GAMES_MLB,
+    "nfl": TEST_GAMES_NFL,
+    "soccer": TEST_GAMES_SOCCER,
+    "cfb": TEST_GAMES_CFB,
+    "nba": TEST_GAMES_NBA,
+    "nhl": TEST_GAMES_NHL,
+    "fantasy": [],
+}
+
+SPORT_DISPLAY_ORDER = (
+    "mlb",
+    "nfl",
+    "soccer",
+    "cfb",
+    "nba",
+    "nhl",
+    "fantasy",
+)
+
 from web.app import app, set_latest_games
-
-from odds.manager import OddsManager
-
-odds_manager = OddsManager()
 
 DEFAULT_FPS = 60
 MIN_FPS = 10
@@ -62,7 +74,6 @@ MATRIX_HEIGHT = 32
 CARD_SPACING = 15
 DEFAULT_CARD_WIDTH = 129
 CFB_CARD_WIDTH = 136
-NOTIFICATION_CARD_WIDTH = 273
 
 SETTINGS_POLL_INTERVAL = 0.5
 
@@ -73,11 +84,6 @@ _refresh_in_progress = False
 _card_cache = {}
 _visible_games_cache = []
 _cache_signature = None
-
-_odds_refresh_in_progress = False
-
-notification_manager = NotificationManager()
-_notification_refresh_in_progress = False
 
 SPORT_FETCHERS = {
     "mlb": get_live_mlb,
@@ -118,20 +124,6 @@ def fetch_all_sports():
 def game_signature(game):
     return (game.__class__.__name__, tuple(sorted(vars(game).items())))
 
-def odds_signature(odds):
-    if odds is None:
-        return None
-
-    return (
-        odds.moneyline_away,
-        odds.moneyline_home,
-        odds.spread,
-        odds.spread_price,
-        odds.total,
-        odds.over_price,
-        odds.under_price,
-    )
-
 def logo_variants_signature(settings):
     logo_variants = settings.get(
         "logo_variants",
@@ -166,16 +158,10 @@ def is_nba_game(game):
 def is_nhl_game(game):
     return game.__class__.__name__ == "HockeyGame"
 
-def is_notification_card(game):
-    return game.__class__.__name__ == "NotificationCard"
-
 def is_fantasy_game(game):
     return game.__class__.__name__ == "FantasyMatchup"
 
 def game_id(game):
-    if is_notification_card(game):
-        return f"notification:{game.source}:{game.title}:{game.created_at}"
-
     return f"{get_sport(game)}:{game.away}@{game.home}"
 
 def get_sport(game):
@@ -197,27 +183,11 @@ def get_sport(game):
     if is_fantasy_game(game):
         return "fantasy"
     
-    if is_notification_card(game):
-        return "notification"
-
     return "mlb"
-
-def refresh_odds_background():
-    global _odds_refresh_in_progress
-
-    try:
-        odds_manager.refresh_all()
-    except Exception as e:
-        print("Odds refresh failed:", e)
-    finally:
-        _odds_refresh_in_progress = False
 
 def get_game_width(game):
     if is_cfb_game(game):
         return CFB_CARD_WIDTH
-
-    if is_notification_card(game):
-        return NOTIFICATION_CARD_WIDTH
 
     return DEFAULT_CARD_WIDTH
 
@@ -226,40 +196,19 @@ def get_game_step(game):
     return get_game_width(game) + CARD_SPACING
 
 
-def draw_game(image, draw, game, odds, x, settings):
+def draw_game(image, draw, game, x, settings):
     if is_cfb_game(game):
         draw_cfb_strip(image, draw, game, x, settings)
     elif is_nba_game(game):
-        draw_nba_strip(image, draw, game, odds, x, settings)
+        draw_nba_strip(image, draw, game, x, settings)
     elif is_nfl_game(game):
-        draw_nfl_strip(image, draw, game, odds, x, settings)
+        draw_nfl_strip(image, draw, game, x, settings)
     elif is_soccer_game(game):
-        draw_soccer_strip(draw, game, odds, x)
+        draw_soccer_strip(draw, game, x)
     elif is_nhl_game(game):
-        draw_nhl_strip(image, draw, game, odds, x, settings)
-    elif is_notification_card(game):
-        draw_notification_card(draw, game, x)
+        draw_nhl_strip(image, draw, game, x, settings)
     else:
-        draw_mlb_strip(image, draw, game, odds, x, settings)
-
-
-def get_limited_notification_cards(settings):
-    raw_notifications = notification_manager.get_cards()
-    max_cards_setting = settings.get("notifications", {}).get("max_cards") or settings.get("max_cards", 3)
-    max_cards = int(max_cards_setting)
-    return raw_notifications[:max_cards]
-
-
-def replace_notifications_in_games(notification_cards):
-    global _games, _cache_signature
-
-    with _games_lock:
-        non_notification_games = [g for g in _games if not is_notification_card(g)]
-        _games = notification_cards + non_notification_games
-        set_latest_games(_games)
-
-    _cache_signature = None
-
+        draw_mlb_strip(image, draw, game, x, settings)
 
 def apply_saved_order(all_games, settings):
     saved_order = settings.get("game_order", [])
@@ -310,10 +259,9 @@ def render_error_card(game, error):
 
     return image
 
-def render_card(game, odds, settings):
+def render_card(game, settings):
     key = (
         game_signature(game),
-        odds_signature(odds),
         logo_variants_signature(settings),
     )
 
@@ -333,7 +281,7 @@ def render_card(game, odds, settings):
     draw = ImageDraw.Draw(image)
 
     try:
-        draw_game(image, draw, game, odds, 0, settings)
+        draw_game(image, draw, game, 0, settings)
 
     except Exception as error:
         print(
@@ -385,48 +333,34 @@ def rebuild_visible_games_if_needed(settings):
 
     return _visible_games_cache
 
+def combine_sports_results(sports_results):
+    combined_games = []
+
+    for sport in SPORT_DISPLAY_ORDER:
+        games = sports_results.get(sport)
+
+        if games:
+            combined_games.extend(games)
+        else:
+            combined_games.extend(
+                TEST_GAMES_BY_SPORT[sport]
+            )
+
+    return combined_games
 
 def refresh_games_background():
     global _games, _refresh_in_progress, _cache_signature
 
     try:
         sports_results, sports_errors = fetch_all_sports()
-
-        current_mlb = sports_results["mlb"] or TEST_GAMES_MLB
-        current_nfl = sports_results["nfl"] or TEST_GAMES_NFL
-        current_soccer = sports_results["soccer"] or TEST_GAMES_SOCCER
-        current_cfb = sports_results["cfb"] or TEST_GAMES_CFB
-        current_nba = sports_results["nba"] or TEST_GAMES_NBA
-        current_nhl = sports_results["nhl"] or TEST_GAMES_NHL
-        current_fantasy = sports_results["fantasy"]
-
-        settings = get_settings()
-
-        # try:
-        #     notification_manager.refresh()
-        #     raw_notifications = notification_manager.get_cards()
-        # except Exception as e:
-        #     print("Notification refresh failed during game pull:", e)
-        #     raw_notifications = []
-
-        # notification_cards = get_limited_notification_cards(settings)
-
-        combined_games = (
-            current_mlb
-            + current_nfl
-            + current_soccer
-            + current_cfb
-            + current_nba
-            + current_nhl
-            + current_fantasy
-        )
+        combined_games = combine_sports_results(sports_results)
 
         with _games_lock:
             _games = combined_games
             set_latest_games(combined_games)
 
         _cache_signature = None
-        print("Refreshed mixed live games and notifications successfully")
+        print("Refreshed live games successfully")
 
     except Exception as e:
         print("Games refresh failed:", e)
@@ -442,38 +376,8 @@ def run_web_server():
 
 
 def load_initial_games():
-    sports_results, sports_errors = fetch_all_sports()
-
-    initial_mlb = sports_results["mlb"] or TEST_GAMES_MLB
-    initial_nfl = sports_results["nfl"] or TEST_GAMES_NFL
-    initial_soccer = sports_results["soccer"] or TEST_GAMES_SOCCER
-    initial_cfb = sports_results["cfb"] or TEST_GAMES_CFB
-    initial_nba = sports_results["nba"] or TEST_GAMES_NBA
-    initial_nhl = sports_results["nhl"] or TEST_GAMES_NHL
-    initial_fantasy = sports_results["fantasy"]
-
-    return (
-        initial_mlb
-        + initial_nfl
-        + initial_soccer
-        + initial_cfb
-        + initial_nba
-        + initial_nhl
-        + initial_fantasy
-    )
-
-def refresh_notifications_background():
-    global _notification_refresh_in_progress
-
-    try:
-        settings = get_settings()
-        notification_manager.refresh()
-        notification_cards = get_limited_notification_cards(settings)
-        replace_notifications_in_games(notification_cards)
-    except Exception as e:
-        print("Notification refresh failed:", e)
-    finally:
-        _notification_refresh_in_progress = False
+    sports_results, _ = fetch_all_sports()
+    return combine_sports_results(sports_results)
 
 matrix = create_matrix()
 
@@ -494,22 +398,10 @@ threading.Thread(
 _games = load_initial_games()
 set_latest_games(_games)
 
-# threading.Thread(
-#     target=refresh_notifications_background,
-#     daemon=True,
-# ).start()
-
-threading.Thread(
-    target=odds_manager.refresh_all,
-    daemon=True,
-).start()
-
 current_game = 0
 scroll_x = 0.0
 
 last_refresh = time.monotonic()
-last_notification_refresh = time.monotonic()
-last_odds_refresh = time.monotonic()
 last_settings_poll = 0.0
 
 last_frame_time = time.monotonic()
@@ -554,42 +446,6 @@ while True:
         ).start()
 
         last_refresh = now
-
-    # odds_refresh_interval = (
-    #     settings
-    #     .get("odds", {})
-    #     .get("refresh_interval", 900)
-    # )
-
-    # if (
-    #     now - last_odds_refresh >= odds_refresh_interval
-    #     and not _odds_refresh_in_progress
-    # ):
-    #     _odds_refresh_in_progress = True
-
-    #     threading.Thread(
-    #         target=refresh_odds_background,
-    #         daemon=True,
-    #     ).start()
-
-    #     last_odds_refresh = now
-
-    # notification_refresh_interval = int(
-    #     settings.get("notifications", {}).get("refresh_interval", 60)
-    # )
-
-    # if (
-    #     now - last_notification_refresh >= notification_refresh_interval
-    #     and not _notification_refresh_in_progress
-    # ):
-    #     _notification_refresh_in_progress = True
-
-    #     threading.Thread(
-    #         target=refresh_notifications_background,
-    #         daemon=True,
-    #     ).start()
-
-    #     last_notification_refresh = now
 
     if brightness != last_brightness:
         matrix.brightness = brightness
@@ -670,19 +526,9 @@ while True:
 
         sport = get_sport(game)
 
-        odds = None
-
-        if not is_notification_card(game):
-            odds = odds_manager.get(
-                sport,
-                game.away,
-                game.home,
-            )
-
         frame_image.paste(
             render_card(
                 game,
-                odds,
                 settings,
             ),
             (x, 0),
