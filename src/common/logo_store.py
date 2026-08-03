@@ -21,42 +21,6 @@ SUPPORTED_LEAGUES = frozenset(
     }
 )
 
-def resolve_logo_path(
-    league: str,
-    identifier: str,
-    variant: str = "current",
-):
-    normalized_league = league.strip().lower()
-    normalized_identifier = identifier.strip().upper()
-    normalized_variant = variant.strip().lower() or "current"
-
-    league_dir = LOGO_ROOT / normalized_league
-
-    variant_path = (
-        league_dir
-        / normalized_identifier
-        / f"{normalized_variant}.png"
-    )
-
-    if variant_path.is_file():
-        return variant_path
-
-    current_path = (
-        league_dir
-        / normalized_identifier
-        / "current.png"
-    )
-
-    if current_path.is_file():
-        return current_path
-
-    legacy_path = league_dir / f"{normalized_identifier}.png"
-
-    if legacy_path.is_file():
-        return legacy_path
-
-    return None
-
 def normalize_identifier(value: str) -> str:
     identifier = str(value).strip().upper()
 
@@ -344,25 +308,3 @@ def draw_logo(
     )
 
     return True
-
-
-def preload_logo(
-    league: str,
-    identifier: str,
-) -> bool:
-    try:
-        load_logo(
-            league,
-            identifier,
-        )
-        return True
-    except (
-        FileNotFoundError,
-        ValueError,
-        OSError,
-    ):
-        return False
-
-
-def clear_logo_cache() -> None:
-    load_logo.cache_clear()

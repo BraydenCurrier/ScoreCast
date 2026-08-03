@@ -534,15 +534,6 @@ def _get_event_week(event, default_week=0):
 
     return default_week
 
-
-def clear_slate_cache():
-    """Force the next NFL fetch to reselect the nearest slate."""
-    with _slate_lock:
-        _slate_cache["selected_on"] = None
-        _slate_cache["start_date"] = None
-        _slate_cache["end_date"] = None
-        _slate_cache["event_ids"] = frozenset()
-
 def _get_broadcast(event, competition):
     """
     Return a readable broadcast string such as:

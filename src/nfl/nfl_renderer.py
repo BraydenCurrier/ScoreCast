@@ -1,8 +1,5 @@
-from PIL import Image, ImageDraw
-
-from common.config import PANEL_WIDTH, PANEL_HEIGHT
-from common.fonts import print_3x5, get_3x5_width, print_4x5, get_4x5_width, print_4x5_centered, print_clock, print_gfx_5x7, gfx_5x7_width, draw_text_right
-from nfl.colors import RED, WHITE, GREY, YELLOW, GRASS_GREEN, BALL_BROWN, team_color
+from common.fonts import print_3x5, get_3x5_width, print_4x5, print_4x5_centered, print_clock, print_gfx_5x7, draw_text_right
+from nfl.colors import WHITE, YELLOW, BALL_BROWN, team_color
 from common.logo_store import draw_logo, get_selected_logo_variant, load_logo
 
 LOGO_SIZE = 30
@@ -222,7 +219,7 @@ def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, 
     draw.line([(rx + 1, y + 3), (rx + 1, y + 5)], fill=POST_YELLOW) 
 
 
-def render_football_game_onto(image, draw, game, odds, offset_x, settings):
+def render_football_game_onto(image, draw, game, offset_x, settings):
 
     away_color = team_color(game.away)
     home_color = team_color(game.home)
@@ -279,12 +276,12 @@ def render_football_game_onto(image, draw, game, odds, offset_x, settings):
         else:
             draw_field_tracker(draw, 4 + offset_x, 29, game.yardline_number, "OPP", game.possession, game.home, home_color);
 
-def render_game_strip_onto(image, draw, game, odds, offset_x, settings):
+def render_game_strip_onto(image, draw, game, offset_x, settings):
     # away logo
     draw_team_logo(image, game.away, offset_x, 1, settings)
 
     # score card
-    render_football_game_onto(image, draw, game, odds, offset_x + LOGO_SIZE, settings)
+    render_football_game_onto(image, draw, game, offset_x + LOGO_SIZE, settings)
 
     # home logo
     draw_team_logo(image, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1, settings)    

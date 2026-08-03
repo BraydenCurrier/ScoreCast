@@ -1,4 +1,3 @@
-import json
 import subprocess
 from pathlib import Path
 
@@ -8,7 +7,7 @@ from html import escape
 from flask import Flask, abort, request, redirect, send_file, session, jsonify, url_for
 
 from common.settings import get_settings, update_settings
-from common.logo_store import get_logo_variant_path, get_logo_variants, get_selected_logo_variant, get_teams_with_logo_variants
+from common.logo_store import get_logo_variant_path, get_selected_logo_variant, get_teams_with_logo_variants
 
 from fantasy.api import connect_sleeper_user, get_user_leagues
 
@@ -688,18 +687,12 @@ def get_game_league(game):
     
     if class_name == "HockeyGame":
         return "nhl", "NHL"
-
-    if class_name == "NotificationCard":
-        return "notification", "Notification"
     
     return "mlb", "MLB"
 
 def get_game_id(game):
-    if get_game_league(game) == ("notification", "Notification"):
-        return f"notification:{getattr(game, 'provider', 'unknown')}:{getattr(game, 'source', 'unknown')}:{getattr(game, 'title', 'unknown')}"
-    else:
-        league_key, _ = get_game_league(game)
-        return f"{league_key}:{game.away}@{game.home}"
+    league_key, _ = get_game_league(game)
+    return f"{league_key}:{game.away}@{game.home}"
 
 def get_display_status(game, league_key):
     status = getattr(game, "status", "")
@@ -782,9 +775,6 @@ def games():
     game_rows = ""
 
     for game in latest_games:
-        if get_game_league(game) == ("notification", "Notification"):
-            continue
-
         game_id = get_game_id(game)
         checked = "" if game_id in hidden else "checked"
         league_key, league_label = get_game_league(game)

@@ -250,19 +250,6 @@ def get_3x5_width(text):
 
     return total - 1 if total > 0 else 0
 
-def print_3x5_right(draw, text, right_x, y, color):
-    text = str(text)
-
-    width = get_3x5_width(text)
-
-    print_3x5(
-        draw,
-        text,
-        right_x - width,
-        y,
-        color
-    )
-
 def print_gfx_5x7(draw, text, x, y, color):
     cursor_x = x
 

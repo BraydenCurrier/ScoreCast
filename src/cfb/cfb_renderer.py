@@ -1,12 +1,10 @@
-from PIL import Image, ImageDraw
+from PIL import ImageDraw
 
-from common.config import PANEL_WIDTH, PANEL_HEIGHT
-from common.fonts import print_3x5, get_3x5_width, print_3x5_right, print_4x5, get_4x5_width, print_4x5_centered, print_4x5_right, print_clock, print_gfx_5x7, gfx_5x7_width, draw_text_right
-from cfb.colors import RED, WHITE, GREY, YELLOW, GRASS_GREEN, BALL_BROWN, team_color
+from common.fonts import print_3x5, get_3x5_width, print_4x5, print_4x5_centered, print_4x5_right, print_clock, print_gfx_5x7, draw_text_right
+from cfb.colors import WHITE, YELLOW, BALL_BROWN, team_color
 from common.logo_store import draw_logo, get_selected_logo_variant, load_logo
 
 LOGO_SIZE = 30     
-# changed score card width to accomadate longer 4 character team abbreviations
 CARD_WIDTH = 76   
 GAME_GAP = 5
 GAME_WIDTH = LOGO_SIZE + CARD_WIDTH + LOGO_SIZE 

@@ -1,5 +1,4 @@
 from mlb.models import BaseballGame
-from nfl.models import FootballGame
 
 TEST_GAMES_MLB = [
     BaseballGame("LAD", "TB", "Live", "8:10", 5, 4, 46, 28, 39, 35, 9, True, True, False, False, 2),
