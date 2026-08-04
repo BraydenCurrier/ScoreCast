@@ -18,6 +18,8 @@ BROADCAST_IDS = {
     "ESPN+": "ESPN_PLUS",
     "NFL Network": "NFL_NETWORK",
     "NFL Net": "NFL_NETWORK",
+    "USA Net": "USA",
+    "MW+": "MW_PLUS",
     "TNT, HBO Max": "TNT",
 }
 
