@@ -1,9 +1,10 @@
 from datetime import datetime
+import json
+import subprocess
 from zoneinfo import ZoneInfo
 
-import requests
-
 from nba.models import BasketballGame
+
 
 NBA_SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/"
@@ -11,15 +12,64 @@ NBA_SCOREBOARD_URL = (
 )
 
 LOCAL_TIMEZONE = "America/Chicago"
-CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 HTTP_TIMEOUT = (3.05, 10)
 
-_session = requests.Session()
-_session.headers.update({
-    "User-Agent": "P4SportsTicker/1.0",
-    "Accept": "application/json",
-})
+
+def fetch_nba_scoreboard():
+    command = [
+        "curl",
+        "--silent",
+        "--show-error",
+        "--fail-with-body",
+        "--location",
+        "--compressed",
+        "--max-time",
+        str(HTTP_TIMEOUT[1]),
+        "--header",
+        "Accept: application/json",
+        NBA_SCOREBOARD_URL,
+    ]
+
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "curl is required but is not installed"
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        response_text = (
+            exc.stdout
+            or exc.stderr
+            or "No response body"
+        ).strip()
+
+        raise RuntimeError(
+            "NBA ESPN request failed: "
+            f"{response_text[:300]}"
+        ) from exc
+
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "NBA ESPN endpoint returned invalid JSON: "
+            f"{result.stdout[:300]}"
+        ) from exc
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            "Unexpected NBA ESPN response type: "
+            f"{type(data).__name__}"
+        )
+
+    return data
+
 
 def format_local_time(date_string):
     utc_dt = datetime.fromisoformat(
@@ -51,40 +101,82 @@ def get_record(team):
     if not records:
         return 0, 0
 
-    summary = records[0]["summary"]
-
-    wins, losses = summary.split("-")
-
-    return int(wins), int(losses)
-
-
-def get_today_games():
-    response = _session.get(
-        NBA_SCOREBOARD_URL,
-        timeout=HTTP_TIMEOUT,
-        verify=CA_BUNDLE,
+    summary = records[0].get(
+        "summary",
+        "0-0",
     )
 
-    response.raise_for_status()
+    try:
+        wins, losses = summary.split("-")
+        return int(wins), int(losses)
+    except (TypeError, ValueError):
+        return 0, 0
 
-    data = response.json()
+def _get_broadcast(event, competition):
+    """
+    Return a readable broadcast string such as:
+    "ESPN", "ABC", or "ESPN, ABC".
+    """
+    broadcast_names = []
+    seen_names = set()
+
+    broadcast_sources = [
+        competition.get("broadcasts", []),
+        event.get("broadcasts", []),
+    ]
+
+    for broadcasts in broadcast_sources:
+        if not isinstance(broadcasts, list):
+            continue
+
+        for broadcast in broadcasts:
+            if not isinstance(broadcast, dict):
+                continue
+
+            names = broadcast.get("names", [])
+
+            if isinstance(names, str):
+                names = [names]
+
+            if not isinstance(names, list):
+                continue
+
+            for name in names:
+                cleaned_name = str(name or "").strip()
+
+                if not cleaned_name:
+                    continue
+
+                normalized_name = cleaned_name.upper()
+
+                if normalized_name in seen_names:
+                    continue
+
+                seen_names.add(normalized_name)
+                broadcast_names.append(cleaned_name)
+
+    return ", ".join(broadcast_names)
+
+def get_today_games():
+    data = fetch_nba_scoreboard()
 
     games = []
 
     for event in data.get("events", []):
-
         competition = event["competitions"][0]
 
         competitors = competition["competitors"]
 
         away = next(
-            c for c in competitors
-            if c["homeAway"] == "away"
+            competitor
+            for competitor in competitors
+            if competitor["homeAway"] == "away"
         )
 
         home = next(
-            c for c in competitors
-            if c["homeAway"] == "home"
+            competitor
+            for competitor in competitors
+            if competitor["homeAway"] == "home"
         )
 
         away_team = away["team"]["abbreviation"]
@@ -94,7 +186,6 @@ def get_today_games():
         home_wins, home_losses = get_record(home)
 
         status = competition["status"]
-
         state = status["type"]["state"]
 
         if state == "pre":
@@ -105,7 +196,10 @@ def get_today_games():
         elif state == "in":
             game_status = "Live"
             quarter = status.get("period", 0)
-            clock = status.get("displayClock", "")
+            clock = status.get(
+                "displayClock",
+                "",
+            )
 
         else:
             game_status = "Final"
@@ -119,11 +213,24 @@ def get_today_games():
 
                 status=game_status,
 
-                start_time=format_local_time(event["date"]),
-                date=format_local_date(event["date"]),
+                start_time=format_local_time(
+                    event["date"]
+                ),
+                date=format_local_date(
+                    event["date"]
+                ),
 
-                away_score=int(away["score"]),
-                home_score=int(home["score"]),
+                broadcast=_get_broadcast(
+                    event,
+                    competition,
+                ),
+
+                away_score=int(
+                    away.get("score", 0)
+                ),
+                home_score=int(
+                    home.get("score", 0)
+                ),
 
                 away_wins=away_wins,
                 away_losses=away_losses,

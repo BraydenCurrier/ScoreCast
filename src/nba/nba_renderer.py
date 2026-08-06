@@ -1,4 +1,4 @@
-from common.fonts import print_3x5, get_3x5_width, print_4x5_centered, print_gfx_5x7, draw_text_right, print_clock
+from common.fonts import print_3x5, get_3x5_width, print_3x5_right, print_4x5_centered, print_gfx_5x7, draw_text_right, print_clock
 from common.logo_store import draw_logo, get_selected_logo_variant
 
 WHITE = (255, 255, 255)
@@ -45,25 +45,61 @@ def draw_team_logo(
         variant=variant,
     )
 
-def render_basketball_game_onto(draw, game, offset_x):
+def draw_broadcast_logo(
+    image,
+    team_abbreviation,
+    x,
+    y,
+    settings,
+):
+    variant = get_selected_logo_variant(
+        settings,
+        "broadcast",
+        team_abbreviation,
+    )
+
+    try:
+        logo = load_logo(
+            league="broadcast",
+            identifier=team_abbreviation,
+            variant=variant,
+        )
+    except (
+        FileNotFoundError,
+        ValueError,
+        OSError,
+    ):
+        return False
+
+    return draw_logo(
+        destination=image,
+        league="broadcast",
+        identifier=team_abbreviation,
+        x=x - logo.width // 2,
+        y=y - logo.height // 2,
+        variant=variant,
+    )
+
+def render_basketball_game_onto(image, draw, game, offset_x, settings):
     # team Away
     print_gfx_5x7(draw, game.away, 3 + offset_x, 2, WHITE)
 
     # team Home
     draw_text_right(draw, game.home, 61 + offset_x, 2, WHITE)
 
-    # print records
-    print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 2 + offset_x, 25, GREY)
-    print_3x5(draw, f"{game.home_wins}-{game.home_losses}", 43 + offset_x, 25, GREY)
-
     # preview or live/final
-    if game.status == "SCHEDULED":
+    if game.status == "Scheduled":
         # calculate center
         width = get_3x5_width(game.start_time)
         centered_x = (64 - width) // 2
         # print start time and date
         print_3x5(draw, game.start_time, centered_x + offset_x, 2, YELLOW)
-        print_4x5_centered(draw, game.date, 32 + offset_x, 14, WHITE)
+        print_4x5_centered(draw, game.date, 32 + offset_x, 11, WHITE)
+        # print records
+        print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 2 + offset_x, 22, GREY)
+        print_3x5_right(draw, f"{game.home_wins}-{game.home_losses}", 60 + offset_x, 22, GREY)
+        if game.broadcast:
+            draw_broadcast_logo(image, game.broadcast, 31 + offset_x, 24, settings)
     else:
         # print quarter and clock
         print_4x5_centered(draw, "Q" + str(game.quarter), 32 + offset_x, 2, YELLOW)
@@ -86,7 +122,7 @@ def render_game_strip_onto(image, draw, game, offset_x, settings):
     draw_team_logo(image, game.away, offset_x, 1, settings)
 
     # score card
-    render_basketball_game_onto(draw, game, offset_x + LOGO_SIZE)
+    render_basketball_game_onto(image, draw, game, offset_x + LOGO_SIZE, settings)
 
     # home logo
     draw_team_logo(image, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1, settings)
