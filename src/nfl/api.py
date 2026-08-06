@@ -1,10 +1,10 @@
 from datetime import datetime, timedelta
+import json
 import re
+import subprocess
 import threading
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
-
-
-import requests
 
 from nfl.models import FootballGame
 
@@ -15,20 +15,12 @@ NFL_SCHEDULE_URL = (
 )
 
 LOCAL_TIMEZONE = "America/Chicago"
-CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+##CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 HTTP_TIMEOUT = (3.05, 10)
 
 NFL_SEARCH_DAYS = 45
 NFL_SLATE_DAYS = 6
-
-_session = requests.Session()
-_session.headers.update({
-    "User-Agent": "ScoreCast/1.0",
-    "Accept": "application/json",
-})
-
-_session_lock = threading.Lock()
 
 _slate_lock = threading.Lock()
 _slate_refresh_lock = threading.Lock()
@@ -296,16 +288,63 @@ def _fetch_events_between(start_date, end_date):
         "limit": 1000,
     }
 
-    with _session_lock:
-        response = _session.get(
-            NFL_SCHEDULE_URL,
-            params=params,
-            timeout=HTTP_TIMEOUT,
-            verify=CA_BUNDLE,
+    request_url = (
+        f"{NFL_SCHEDULE_URL}?"
+        f"{urlencode(params)}"
+    )
+
+    command = [
+        "curl",
+        "--silent",
+        "--show-error",
+        "--fail-with-body",
+        "--location",
+        "--compressed",
+        "--max-time",
+        str(HTTP_TIMEOUT[1]),
+        "--header",
+        "Accept: application/json",
+        request_url,
+    ]
+
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "curl is required but is not installed"
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        response_text = (
+            exc.stdout
+            or exc.stderr
+            or "No response body"
+        ).strip()
+
+        raise RuntimeError(
+            "NFL ESPN request failed: "
+            f"{response_text[:300]}"
+        ) from exc
+
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "NFL ESPN endpoint returned invalid JSON: "
+            f"{result.stdout[:300]}"
+        ) from exc
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            "Unexpected NFL ESPN response type: "
+            f"{type(data).__name__}"
         )
 
-    response.raise_for_status()
-    return response.json()
+    return data
 
 
 def _get_event_slate_key(event):

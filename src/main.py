@@ -23,9 +23,6 @@ from mlb.mlb_renderer import render_game_strip_onto as draw_mlb_strip
 from nfl.api import get_today_games as get_live_nfl
 from nfl.nfl_renderer import render_game_strip_onto as draw_nfl_strip
 
-from soccer.api import get_today_games as get_live_soccer
-from soccer.soccer_renderer import render_game_strip_onto as draw_soccer_strip
-
 from cfb.api import get_today_games as get_live_cfb
 from cfb.cfb_renderer import render_game_strip_onto as draw_cfb_strip
 
@@ -37,7 +34,6 @@ from nhl.nhl_renderer import render_game_strip_onto as draw_nhl_strip
 
 from mlb.test_data import TEST_GAMES_MLB
 from nfl.test_data import TEST_GAMES_NFL
-from soccer.test_data import TEST_GAMES_SOCCER
 from cfb.test_data import TEST_GAMES_CFB
 from nba.test_data import TEST_GAMES_NBA
 from nhl.test_data import TEST_GAMES_NHL
@@ -45,7 +41,6 @@ from nhl.test_data import TEST_GAMES_NHL
 TEST_GAMES_BY_SPORT = {
     "mlb": TEST_GAMES_MLB,
     "nfl": TEST_GAMES_NFL,
-    "soccer": TEST_GAMES_SOCCER,
     "cfb": TEST_GAMES_CFB,
     "nba": TEST_GAMES_NBA,
     "nhl": TEST_GAMES_NHL,
@@ -55,7 +50,6 @@ TEST_GAMES_BY_SPORT = {
 SPORT_DISPLAY_ORDER = (
     "mlb",
     "nfl",
-    "soccer",
     "cfb",
     "nba",
     "nhl",
@@ -88,7 +82,6 @@ _cache_signature = None
 SPORT_FETCHERS = {
     "mlb": get_live_mlb,
     "nfl": get_live_nfl,
-    "soccer": get_live_soccer,
     "cfb": get_live_cfb,
     "nba": get_live_nba,
     "nhl": get_live_nhl,
@@ -149,9 +142,6 @@ def is_cfb_game(game):
 def is_nfl_game(game):
     return game.__class__.__name__ == "FootballGame"
 
-def is_soccer_game(game):
-    return game.__class__.__name__ == "SoccerGame"
-
 def is_nba_game(game):
     return game.__class__.__name__ == "BasketballGame"
 
@@ -170,9 +160,6 @@ def get_sport(game):
 
     if is_nfl_game(game):
         return "nfl"
-
-    if is_soccer_game(game):
-        return "soccer"
 
     if is_nba_game(game):
         return "nba"
@@ -203,8 +190,6 @@ def draw_game(image, draw, game, x, settings):
         draw_nba_strip(image, draw, game, x, settings)
     elif is_nfl_game(game):
         draw_nfl_strip(image, draw, game, x, settings)
-    elif is_soccer_game(game):
-        draw_soccer_strip(draw, game, x)
     elif is_nhl_game(game):
         draw_nhl_strip(image, draw, game, x, settings)
     else:
@@ -321,7 +306,6 @@ def rebuild_visible_games_if_needed(settings):
         visible_games = (
             TEST_GAMES_MLB
             + TEST_GAMES_NFL
-            + TEST_GAMES_SOCCER
             + TEST_GAMES_CFB
             + TEST_GAMES_NBA
             + TEST_GAMES_NHL

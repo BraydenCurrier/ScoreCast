@@ -1,7 +1,8 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import requests
+import json
+import subprocess
 
 from cfb.models import CollegeFootballGame 
 
@@ -20,15 +21,9 @@ DEFAULT_CONFERENCE_GROUPS = ["80"]
 
 NCAAF_SCHEDULE_URL = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
 LOCAL_TIMEZONE = "America/Chicago"
-CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+##CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 HTTP_TIMEOUT = (3.05, 10)
-
-_session = requests.Session()
-_session.headers.update({
-    "User-Agent": "P4SportsTicker/1.0",
-    "Accept": "application/json",
-})
 
 def get_selected_conference_groups():
     settings = get_settings()
@@ -57,21 +52,55 @@ def get_selected_conference_groups():
     return selected
 
 def fetch_scoreboard_group(group_id):
-    params = {
-        "groups": str(group_id),
-        "limit": 200,
-    }
-
-    response = _session.get(
-        NCAAF_SCHEDULE_URL,
-        params=params,
-        timeout=HTTP_TIMEOUT,
-        verify=CA_BUNDLE,
+    url = (
+        f"{NCAAF_SCHEDULE_URL}"
+        f"?groups={str(group_id)}"
+        "&limit=200"
     )
 
-    response.raise_for_status()
+    command = [
+        "curl",
+        "--silent",
+        "--show-error",
+        "--fail-with-body",
+        "--location",
+        "--max-time",
+        str(HTTP_TIMEOUT[1]),
+        "--header",
+        "Accept: application/json",
+        url,
+    ]
 
-    data = response.json()
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "curl is not installed on this system"
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        response_text = (
+            exc.stdout
+            or exc.stderr
+            or "No response body"
+        ).strip()
+
+        raise RuntimeError(
+            "CFB curl request failed: "
+            f"{response_text[:300]}"
+        ) from exc
+
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "CFB endpoint returned invalid JSON: "
+            f"{result.stdout[:300]}"
+        ) from exc
 
     if not isinstance(data, dict):
         raise ValueError(

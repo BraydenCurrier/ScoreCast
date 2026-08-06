@@ -1,5 +1,5 @@
-from common.fonts import print_3x5, get_3x5_width, print_4x5, print_4x5_centered, print_clock, print_gfx_5x7, draw_text_right
-from nfl.colors import WHITE, YELLOW, BALL_BROWN, team_color
+from common.fonts import print_3x5, get_3x5_width, print_3x5_right, print_4x5, print_4x5_centered, print_clock, print_gfx_5x7, draw_text_right
+from nfl.colors import GREY, WHITE, YELLOW, BALL_BROWN, team_color
 from common.logo_store import draw_logo, get_selected_logo_variant, load_logo
 
 LOGO_SIZE = 30
@@ -237,6 +237,9 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
         #date
         print_4x5(draw, game.date, 35 + offset_x, 11, WHITE)
         draw_broadcast_logo(image, game.broadcast, 31 + offset_x, 24, settings)
+        # records
+        print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 2 + offset_x, 22, GREY)
+        print_3x5_right(draw, f"{game.home_wins}-{game.home_losses}", 60 + offset_x, 22, GREY)
 
     else:
         # quarter

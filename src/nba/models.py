@@ -18,5 +18,7 @@ class BasketballGame:
     home_wins: int = 0
     home_losses: int = 0
 
+    broadcast: str = ""
+
     quarter: int = 0
     clock: str = ""

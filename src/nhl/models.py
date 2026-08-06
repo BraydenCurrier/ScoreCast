@@ -24,6 +24,8 @@ class HockeyGame:
     period: int = 0
     clock: str = ""
 
+    broadcast: str = ""
+
     intermission: bool = False
     shootout: bool = False
     overtime: bool = False

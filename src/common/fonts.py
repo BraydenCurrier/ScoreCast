@@ -239,6 +239,11 @@ def print_3x5(draw, text, x, y, color):
         elif c == " ":
             current_x += 3
 
+def print_3x5_right(draw, text, x, y, color):
+    width = get_3x5_width(text)
+    start_x = x - width
+    print_3x5(draw, text, start_x, y, color)
+
 def get_3x5_width(text):
     total = 0
 

@@ -1,6 +1,6 @@
 from mlb.colors import YELLOW, WHITE, GREY, RED, team_color
 from common.logo_store import draw_logo, get_selected_logo_variant
-from common.fonts import print_3x5, get_3x5_width, print_4x5, print_gfx_5x7, draw_text_right
+from common.fonts import print_3x5, get_3x5_width, print_3x5_right, print_4x5, print_gfx_5x7, draw_text_right
 
 LOGO_SIZE = 30
 CARD_WIDTH = 64
@@ -104,7 +104,7 @@ def render_baseball_game_onto(draw, game, offset_x):
 
     # print records
     print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 2 + offset_x, 25, GREY)
-    print_3x5(draw, f"{game.home_wins}-{game.home_losses}", 43 + offset_x, 25, GREY)
+    print_3x5_right(draw, f"{game.home_wins}-{game.home_losses}", 60 + offset_x, 25, GREY)
 
 def render_game_strip_onto(image, draw, game, offset_x, settings):
     # away logo
