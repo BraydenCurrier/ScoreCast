@@ -3,7 +3,7 @@ from nfl.colors import GREY, WHITE, YELLOW, BALL_BROWN, team_color
 from common.logo_store import draw_logo, get_selected_logo_variant, load_logo
 
 LOGO_SIZE = 30
-CARD_WIDTH = 64
+CARD_WIDTH = 70
 GAME_GAP = 5
 GAME_WIDTH = LOGO_SIZE + CARD_WIDTH + LOGO_SIZE
 
@@ -246,21 +246,21 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
 
     #teams
     print_gfx_5x7(draw, game.away, 2 + offset_x, 2, away_color)
-    print_gfx_5x7(draw, game.home, 44 + offset_x, 2, home_color)
+    print_gfx_5x7(draw, game.home, 50 + offset_x, 2, home_color)
 
     if(game.status == "STATUS_SCHEDULED"):
         #start time
-        print_4x5_centered(draw, game.start_time, 31 + offset_x, 2, WHITE)
+        print_4x5_centered(draw, game.start_time, 34 + offset_x, 2, WHITE)
         #week
         weekNumber = "Week " + str(game.week)
         print_4x5(draw, weekNumber, 2 + offset_x, 11, WHITE)
         #date
-        print_4x5(draw, game.date, 35 + offset_x, 11, WHITE)
+        print_4x5(draw, game.date, 41 + offset_x, 11, WHITE)
         if game.broadcast:
-                    draw_broadcast_logo(image, game.broadcast, 31 + offset_x, 24, settings)
+                    draw_broadcast_logo(image, game.broadcast, 34 + offset_x, 24, settings)
         # records
         print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 2 + offset_x, 22, GREY)
-        print_3x5_right(draw, f"{game.home_wins}-{game.home_losses}", 60 + offset_x, 22, GREY)
+        print_3x5_right(draw, f"{game.home_wins}-{game.home_losses}", 66 + offset_x, 22, GREY)
 
     else:
         # quarter
