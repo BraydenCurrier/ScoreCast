@@ -52,33 +52,48 @@ def draw_broadcast_logo(
     y,
     settings,
 ):
-    variant = get_selected_logo_variant(
-        settings,
-        "broadcast",
+    if not team_abbreviation:
+        return False
+
+    broadcast = team_abbreviation.strip()
+    logo_identifier = BROADCAST_IDS.get(
         team_abbreviation,
+        team_abbreviation.replace("+", "_PLUS")
     )
 
     try:
+        variant = get_selected_logo_variant(
+            settings,
+            "broadcast",
+            logo_identifier,
+        )
+
         logo = load_logo(
             league="broadcast",
-            identifier=team_abbreviation,
+            identifier=logo_identifier,
             variant=variant,
         )
-    except (
-        FileNotFoundError,
-        ValueError,
-        OSError,
-    ):
-        return False
 
-    return draw_logo(
-        destination=image,
-        league="broadcast",
-        identifier=team_abbreviation,
-        x=x - logo.width // 2,
-        y=y - logo.height // 2,
-        variant=variant,
-    )
+        return draw_logo(
+            destination=image,
+            league="broadcast",
+            identifier=logo_identifier,
+            x=x - logo.width // 2,
+            y=y - logo.height // 2,
+            variant=variant,
+        )
+
+    except (FileNotFoundError, ValueError, OSError, KeyError) as exc:
+        # Optional text fallback.
+        draw = ImageDraw.Draw(image)
+        draw.text(
+            (x, y),
+            broadcast,
+            fill="white",
+            anchor="mm",
+        )
+
+        return False
 
 def render_basketball_game_onto(image, draw, game, offset_x, settings):
     # team Away
