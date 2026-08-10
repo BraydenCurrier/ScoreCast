@@ -302,30 +302,61 @@ def rebuild_visible_games_if_needed(settings):
     ordered_games = apply_saved_order(current_games, settings)
     visible_games = get_visible_games(ordered_games, settings)
 
-    if not visible_games:
-        visible_games = (
-            TEST_GAMES_MLB
-            + TEST_GAMES_NFL
-            + TEST_GAMES_CFB
-            + TEST_GAMES_NBA
-            + TEST_GAMES_NHL
-        )
-
     _visible_games_cache = visible_games
     _cache_signature = signature
     _card_cache = {}
 
     return _visible_games_cache
 
-def combine_sports_results(sports_results):
+def combine_sports_results(
+    sports_results,
+    sports_errors=None,
+    previous_games=None,
+    use_test_fallback=False,
+):
     combined_games = []
 
-    for sport in SPORT_DISPLAY_ORDER:
-        games = sports_results.get(sport)
+    sports_errors = sports_errors or {}
+    previous_games = previous_games or []
 
+    previous_by_sport = {
+        sport: []
+        for sport in SPORT_DISPLAY_ORDER
+    }
+
+    for game in previous_games:
+        sport = get_sport(game)
+
+        if sport in previous_by_sport:
+            previous_by_sport[sport].append(game)
+
+    for sport in SPORT_DISPLAY_ORDER:
+        games = sports_results.get(sport, [])
+
+        if sport in sports_errors:
+            # API failed: keep the last known good data.
+            previous = previous_by_sport.get(sport, [])
+
+            if previous:
+                print(
+                    f"{sport.upper()} refresh failed; "
+                    "keeping previous data."
+                )
+                combined_games.extend(previous)
+
+            elif use_test_fallback:
+                combined_games.extend(
+                    TEST_GAMES_BY_SPORT[sport]
+                )
+
+            continue
+
+        # Successful request.
         if games:
             combined_games.extend(games)
-        else:
+
+        elif use_test_fallback:
+            # Only use test data during startup.
             combined_games.extend(
                 TEST_GAMES_BY_SPORT[sport]
             )
@@ -336,18 +367,42 @@ def refresh_games_background():
     global _games, _refresh_in_progress, _cache_signature
 
     try:
+        with _games_lock:
+            previous_games = _games.copy()
+
         sports_results, sports_errors = fetch_all_sports()
-        combined_games = combine_sports_results(sports_results)
+
+        combined_games = combine_sports_results(
+            sports_results,
+            sports_errors=sports_errors,
+            previous_games=previous_games,
+            use_test_fallback=False,
+        )
 
         with _games_lock:
             _games = combined_games
             set_latest_games(combined_games)
 
         _cache_signature = None
-        print("Refreshed live games successfully")
+
+        if sports_errors:
+            failed_sports = ", ".join(
+                sport.upper()
+                for sport in sports_errors
+            )
+
+            print(
+                "Refresh completed with failures for "
+                f"{failed_sports}; previous data retained."
+            )
+        else:
+            print("Refreshed live games successfully")
 
     except Exception as e:
-        print("Games refresh failed:", e)
+        print(
+            "Games refresh failed; keeping previous data:",
+            e,
+        )
 
     finally:
         _refresh_in_progress = False
@@ -360,8 +415,14 @@ def run_web_server():
 
 
 def load_initial_games():
-    sports_results, _ = fetch_all_sports()
-    return combine_sports_results(sports_results)
+    sports_results, sports_errors = fetch_all_sports()
+
+    return combine_sports_results(
+        sports_results,
+        sports_errors=sports_errors,
+        previous_games=[],
+        use_test_fallback=True,
+    )
 
 matrix = create_matrix()
 
