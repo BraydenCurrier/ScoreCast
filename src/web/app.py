@@ -1177,10 +1177,7 @@ def alerts_page():
             <label class="game-row alert-team-label">
                 <input
                     type="checkbox"
-                    name="
-                        possession_team:
-                        {safe_abbreviation}
-                    "
+                    name="possession_team:{safe_abbreviation}"
                     {team_checked}
                 >
 

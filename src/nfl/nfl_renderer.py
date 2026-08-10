@@ -7,6 +7,11 @@ CARD_WIDTH = 64
 GAME_GAP = 5
 GAME_WIDTH = LOGO_SIZE + CARD_WIDTH + LOGO_SIZE
 
+BROADCAST_IDS = {
+    "NFL Net": "NFL_Network",
+    "ESPN Unlmtd": "ESPN_PLUS",
+}
+
 def game_id(game):
     return f"{game.away}@{game.home}"
 
@@ -104,33 +109,48 @@ def draw_broadcast_logo(
     y,
     settings,
 ):
-    variant = get_selected_logo_variant(
-        settings,
-        "broadcast",
+    if not team_abbreviation:
+        return False
+
+    broadcast = team_abbreviation.strip()
+    logo_identifier = BROADCAST_IDS.get(
         team_abbreviation,
+        team_abbreviation.replace("+", "_PLUS")
     )
 
     try:
+        variant = get_selected_logo_variant(
+            settings,
+            "broadcast",
+            logo_identifier,
+        )
+
         logo = load_logo(
             league="broadcast",
-            identifier=team_abbreviation,
+            identifier=logo_identifier,
             variant=variant,
         )
-    except (
-        FileNotFoundError,
-        ValueError,
-        OSError,
-    ):
-        return False
 
-    return draw_logo(
-        destination=image,
-        league="broadcast",
-        identifier=team_abbreviation,
-        x=x - logo.width // 2,
-        y=y - logo.height // 2,
-        variant=variant,
-    )
+        return draw_logo(
+            destination=image,
+            league="broadcast",
+            identifier=logo_identifier,
+            x=x - logo.width // 2,
+            y=y - logo.height // 2,
+            variant=variant,
+        )
+
+    except (FileNotFoundError, ValueError, OSError, KeyError) as exc:
+        # Optional text fallback.
+        draw = ImageDraw.Draw(image)
+        draw.text(
+            (x, y),
+            broadcast,
+            fill="white",
+            anchor="mm",
+        )
+
+        return False
 
 def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, home_team, home_color):
     GRASS = (0, 180, 30)
@@ -233,10 +253,11 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
         print_4x5_centered(draw, game.start_time, 31 + offset_x, 2, WHITE)
         #week
         weekNumber = "Week " + str(game.week)
-        print_4x5(draw, weekNumber, offset_x, 11, WHITE)
+        print_4x5(draw, weekNumber, 2 + offset_x, 11, WHITE)
         #date
         print_4x5(draw, game.date, 35 + offset_x, 11, WHITE)
-        draw_broadcast_logo(image, game.broadcast, 31 + offset_x, 24, settings)
+        if game.broadcast:
+                    draw_broadcast_logo(image, game.broadcast, 31 + offset_x, 24, settings)
         # records
         print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 2 + offset_x, 22, GREY)
         print_3x5_right(draw, f"{game.home_wins}-{game.home_losses}", 60 + offset_x, 22, GREY)
