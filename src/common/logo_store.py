@@ -18,6 +18,7 @@ SUPPORTED_LEAGUES = frozenset(
         "cfb",
         "soccer",
         "broadcast",
+        "pitchers",
     }
 )
 
