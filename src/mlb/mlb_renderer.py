@@ -67,7 +67,29 @@ def draw_team_logo(
         variant=variant,
     )
 
-def render_baseball_game_onto(draw, game, offset_x):
+def draw_team_pitcher(
+    image,
+    team_abbreviation,
+    x_start,
+    y_start,
+    settings,
+):
+    variant = get_selected_logo_variant(
+        settings,
+        "pitchers",
+        team_abbreviation,
+    )
+
+    return draw_logo(
+        destination=image,
+        league="pitchers",
+        identifier=team_abbreviation,
+        x=x_start,
+        y=y_start,
+        variant=variant,
+    )
+
+def render_baseball_game_onto(image, draw, game, offset_x, settings):
     # print away team
     print_gfx_5x7(draw, game.away, 3 + offset_x, 2, team_color(game.away))
 
@@ -79,7 +101,7 @@ def render_baseball_game_onto(draw, game, offset_x):
         width = get_3x5_width(game.start_time)
         centered_x = (64 - width) // 2
         print_3x5(draw, game.start_time, centered_x + offset_x, 2, YELLOW)
-
+        #draw_team_pitcher(image, "SKUBAL", 3 + offset_x, 11, settings)
     else:
         # print inning and base diamond
         draw_inning(draw, 27 + offset_x, 19, game.inning, game.top_inning, YELLOW)
@@ -111,7 +133,7 @@ def render_game_strip_onto(image, draw, game, offset_x, settings):
     draw_team_logo(image, game.away, offset_x, 1, settings)
 
     # score card
-    render_baseball_game_onto(draw, game, offset_x + LOGO_SIZE)
+    render_baseball_game_onto(image, draw, game, offset_x + LOGO_SIZE, settings)
 
     # home logo
     draw_team_logo(image, game.home, offset_x + LOGO_SIZE + CARD_WIDTH, 1, settings)
