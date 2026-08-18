@@ -141,15 +141,6 @@ def draw_broadcast_logo(
         )
 
     except (FileNotFoundError, ValueError, OSError, KeyError) as exc:
-        # Optional text fallback.
-        draw = ImageDraw.Draw(image)
-        draw.text(
-            (x, y),
-            broadcast,
-            fill="white",
-            anchor="mm",
-        )
-
         return False
 
 def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, home_team, home_color):
@@ -277,7 +268,7 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
         if game.possession == game.away:
             draw_possession_football(draw, 8 + offset_x, 10)
         else:
-            draw_possession_football(draw, 50 + offset_x, 10)
+            draw_possession_football(draw, 56 + offset_x, 10)
         
         # yardline
         yard = game.yardline_side + " " + str(game.yardline_number)
@@ -290,15 +281,15 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
             print_gfx_5x7(draw, str(game.away_score), 5 + offset_x, 14, YELLOW)
 
         if game.home_score < 10:
-            draw_text_right(draw, game.home_score, 55 + offset_x, 14, YELLOW)
+            draw_text_right(draw, game.home_score, 61 + offset_x, 14, YELLOW)
         else:
-            draw_text_right(draw, game.home_score, 58 + offset_x, 14, YELLOW)
+            draw_text_right(draw, game.home_score, 64 + offset_x, 14, YELLOW)
 
         # football field
         if game.possession == game.yardline_side:
-            draw_field_tracker(draw, 4 + offset_x, 29, game.yardline_number, "OWN", game.possession, game.home, home_color);
+            draw_field_tracker(draw, 4 + offset_x, 32, game.yardline_number, "OWN", game.possession, game.home, home_color);
         else:
-            draw_field_tracker(draw, 4 + offset_x, 29, game.yardline_number, "OPP", game.possession, game.home, home_color);
+            draw_field_tracker(draw, 4 + offset_x, 32, game.yardline_number, "OPP", game.possession, game.home, home_color);
 
 def render_game_strip_onto(image, draw, game, offset_x, settings):
     # away logo
