@@ -1,5 +1,6 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from common.timezone import get_local_timezone
 
 import json
 import subprocess
@@ -20,7 +21,6 @@ CFB_CONFERENCES = {
 DEFAULT_CONFERENCE_GROUPS = ["80"]
 
 NCAAF_SCHEDULE_URL = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
-LOCAL_TIMEZONE = "America/Chicago"
 ##CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 HTTP_TIMEOUT = (3.05, 10)
@@ -138,7 +138,7 @@ def format_local_time(utc_time_str):
     )
 
     local_dt = utc_dt.astimezone(
-        ZoneInfo(LOCAL_TIMEZONE)
+        get_local_timezone()
     )
 
     return local_dt.strftime("%-I:%M")

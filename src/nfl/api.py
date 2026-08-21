@@ -5,6 +5,7 @@ import subprocess
 import threading
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
+from common.timezone import get_local_timezone
 
 from nfl.models import FootballGame
 
@@ -14,7 +15,6 @@ NFL_SCHEDULE_URL = (
     "sports/football/nfl/scoreboard"
 )
 
-LOCAL_TIMEZONE = "America/Chicago"
 ##CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 HTTP_TIMEOUT = (3.05, 10)
@@ -68,7 +68,7 @@ def format_local_time(utc_time_str):
         return str(utc_time_str)
 
     local_dt = utc_dt.astimezone(
-        ZoneInfo(LOCAL_TIMEZONE)
+        get_local_timezone()
     )
 
     return local_dt.strftime("%-I:%M")
@@ -246,7 +246,7 @@ def _format_event_date(raw_date_string):
         )
 
         local_date = parsed_date.astimezone(
-            ZoneInfo(LOCAL_TIMEZONE)
+            get_local_timezone()
         )
 
         return local_date.strftime(
@@ -274,7 +274,7 @@ def _parse_event_datetime(event):
 def _get_local_today():
     """Return the current date in ScoreCast's configured timezone."""
     return datetime.now(
-        ZoneInfo(LOCAL_TIMEZONE)
+        get_local_timezone()
     ).date()
 
 
@@ -376,7 +376,7 @@ def _select_next_slate(events):
     """
     utc_timezone = ZoneInfo("UTC")
     now_utc = datetime.now(
-        ZoneInfo(LOCAL_TIMEZONE)
+        get_local_timezone()
     ).astimezone(utc_timezone)
 
     upcoming_events = []
@@ -477,7 +477,7 @@ def _find_next_slate_dates(today):
     if not events:
         return None, None, frozenset()
 
-    local_timezone = ZoneInfo(LOCAL_TIMEZONE)
+    local_timezone = get_local_timezone()
     event_dates = []
     event_ids = set()
 
