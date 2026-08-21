@@ -2,6 +2,7 @@ from datetime import datetime
 import json
 import subprocess
 from zoneinfo import ZoneInfo
+from common.timezone import get_local_timezone
 
 from nhl.models import HockeyGame
 
@@ -11,7 +12,6 @@ NHL_SCOREBOARD_URL = (
     "sports/hockey/nhl/scoreboard"
 )
 
-LOCAL_TIMEZONE = "America/Chicago"
 
 HTTP_TIMEOUT = (3.05, 10)
 
@@ -77,7 +77,7 @@ def format_local_time(date_string):
     )
 
     local_dt = utc_dt.astimezone(
-        ZoneInfo(LOCAL_TIMEZONE)
+        get_local_timezone()
     )
 
     return local_dt.strftime("%-I:%M")
@@ -89,7 +89,7 @@ def format_local_date(date_string):
     )
 
     local_dt = utc_dt.astimezone(
-        ZoneInfo(LOCAL_TIMEZONE)
+        get_local_timezone()
     )
 
     return local_dt.strftime("%b %-d")

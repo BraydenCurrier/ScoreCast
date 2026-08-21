@@ -1,12 +1,12 @@
 from datetime import datetime
-from zoneinfo import ZoneInfo
+
+from common.timezone import get_local_timezone
 
 import requests
 
 from mlb.models import BaseballGame
 
 MLB_SCHEDULE_URL = "https://statsapi.mlb.com/api/v1/schedule"
-LOCAL_TIMEZONE = "America/Chicago"
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 HTTP_TIMEOUT = (3.05, 10)
@@ -38,7 +38,7 @@ def format_local_time(utc_time_str):
     )
 
     local_dt = utc_dt.astimezone(
-        ZoneInfo(LOCAL_TIMEZONE)
+        get_local_timezone()
     )
 
     return local_dt.strftime("%-I:%M")
@@ -55,7 +55,7 @@ def get_record(team_data):
 
 def get_today_games():
     today = datetime.now(
-        ZoneInfo(LOCAL_TIMEZONE)
+        get_local_timezone()
     ).strftime("%Y-%m-%d")
 
     params = {
