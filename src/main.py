@@ -12,6 +12,7 @@ from common.matrix import create_matrix
 from common.settings import get_settings
 
 from fantasy.api import get_today_games as get_live_fantasy
+from fantasy.renderer import render_game_strip_onto as draw_fantasy_strip
 
 from alerts.manager import possession_alert_manager
 from alerts.renderer import render_possession_alert
@@ -37,6 +38,7 @@ from nfl.test_data import TEST_GAMES_NFL
 from cfb.test_data import TEST_GAMES_CFB
 from nba.test_data import TEST_GAMES_NBA
 from nhl.test_data import TEST_GAMES_NHL
+from fantasy.test_data import TEST_GAMES_FANTASY
 
 TEST_GAMES_BY_SPORT = {
     "mlb": TEST_GAMES_MLB,
@@ -44,7 +46,7 @@ TEST_GAMES_BY_SPORT = {
     "cfb": TEST_GAMES_CFB,
     "nba": TEST_GAMES_NBA,
     "nhl": TEST_GAMES_NHL,
-    "fantasy": [],
+    "fantasy": TEST_GAMES_FANTASY,
 }
 
 SPORT_DISPLAY_ORDER = (
@@ -192,6 +194,8 @@ def draw_game(image, draw, game, x, settings):
         draw_nfl_strip(image, draw, game, x, settings)
     elif is_nhl_game(game):
         draw_nhl_strip(image, draw, game, x, settings)
+    elif is_fantasy_game(game):
+        draw_fantasy_strip(image, draw, game, x, settings)
     else:
         draw_mlb_strip(image, draw, game, x, settings)
 

@@ -66,6 +66,7 @@ MICRO_FONT = [
     [0x0, 0x0, 0x7, 0x0, 0x0],  # 10: -
     [0x0, 0x2, 0x0, 0x2, 0x0],  # 11: :
     [0x5, 0x7, 0x5, 0x7, 0x5],  # 12: #
+    [0x0, 0x0, 0x0, 0x0, 0x2],  # 13: .
 ]
 
 GFX_5X7 = {
@@ -112,6 +113,7 @@ GFX_5X7 = {
     # Symbols
     "-": [0x08, 0x08, 0x08, 0x08, 0x08],
     " ": [0x00, 0x00, 0x00, 0x00, 0x00],
+    ".": [0x00, 0x60, 0x60, 0x00, 0x00],
 }
 
 def draw_4x5_char(draw, x, y, char, color):
@@ -211,7 +213,7 @@ def print_clock(draw, clock_string, center_x, y, color):
     print_4x5(draw, seconds_str, seconds_start_x, y, color)
 
 def draw_3x5_glyph(draw, x, y, index, color):
-    if index < 0 or index > 12:
+    if index < 0 or index > 13:
         return
 
     for row in range(5):
@@ -219,6 +221,7 @@ def draw_3x5_glyph(draw, x, y, index, color):
         for col in range(3):
             if (row_data >> (2 - col)) & 1:
                 draw.point((x + col, y + row), fill=color)
+
 
 def print_3x5(draw, text, x, y, color):
     current_x = x
@@ -235,6 +238,9 @@ def print_3x5(draw, text, x, y, color):
             current_x += 4
         elif c == "#":
             draw_3x5_glyph(draw, current_x, y, 12, color)
+            current_x += 4
+        elif c == ".":
+            draw_3x5_glyph(draw, current_x, y, 13, color)
             current_x += 4
         elif c == " ":
             current_x += 3

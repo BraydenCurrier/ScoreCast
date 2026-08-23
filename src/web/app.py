@@ -687,6 +687,9 @@ def get_game_league(game):
     
     if class_name == "HockeyGame":
         return "nhl", "NHL"
+
+    if class_name == "FantasyMatchup":
+        return "fantasy", "FANTASY"
     
     return "mlb", "MLB"
 
@@ -847,6 +850,7 @@ def games():
                         <option value="soccer">Soccer</option>
                         <option value="nba">NBA</option>
                         <option value="nhl">NHL</option>
+                        <option value="fantasy">Fantasy</option>
                     </select>
 
                     <button type="button" class="secondary-button" onclick="selectVisibleGames()">All</button>

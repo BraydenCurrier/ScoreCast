@@ -27,3 +27,8 @@ class FantasyMatchup:
 
     away_owner: str = ""
     home_owner: str = ""
+
+    away_abbrev: str = ""
+    home_abbrev: str = ""
+    away_logo: str = ""
+    home_logo: str = ""
