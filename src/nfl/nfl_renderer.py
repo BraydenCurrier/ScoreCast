@@ -287,9 +287,9 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
 
         # football field
         if game.possession == game.yardline_side:
-            draw_field_tracker(draw, 4 + offset_x, 32, game.yardline_number, "OWN", game.possession, game.home, home_color);
+            draw_field_tracker(draw, 4 + offset_x, 29, game.yardline_number, "OWN", game.possession, game.home, home_color);
         else:
-            draw_field_tracker(draw, 4 + offset_x, 32, game.yardline_number, "OPP", game.possession, game.home, home_color);
+            draw_field_tracker(draw, 4 + offset_x, 29, game.yardline_number, "OPP", game.possession, game.home, home_color);
 
 def render_game_strip_onto(image, draw, game, offset_x, settings):
     # away logo
