@@ -24,6 +24,14 @@ DEFAULT_SETTINGS = {
     "hidden_games": [],
     "game_order": [],
 
+    "favorite_teams": {
+        "mlb": [],
+        "nfl": [],
+        "cfb": [],
+        "nba": [],
+        "nhl": [],
+    },
+
     "alerts": {
         "enabled": False,
         "possession_teams": [],

@@ -219,9 +219,73 @@ def get_target_fps(settings):
         min(MAX_FPS, fps),
     )
 
+def get_favorite_teams(
+    settings,
+    sport
+):
+    favorites = settings.get(
+        "favorite_teams",
+        {}
+    )
+
+    if not isinstance(
+        favorites,
+        dict
+    ):
+        return set()
+
+    values = favorites.get(
+        sport,
+        []
+    )
+
+    if isinstance(values, str):
+        values = [values]
+
+    return {
+        str(team).strip().upper()
+        for team in values
+        if str(team).strip()
+    }
+
+def is_favorite_game(
+    game,
+    settings
+):
+    sport = get_sport(game)
+
+    favorites = get_favorite_teams(
+        settings,
+        sport
+    )
+
+    if not favorites:
+        return False
+
+    away = str(
+        getattr(
+            game,
+            "away",
+            ""
+        )
+    ).strip().upper()
+
+    home = str(
+        getattr(
+            game,
+            "home",
+            ""
+        )
+    ).strip().upper()
+
+    return (
+        away in favorites
+        or home in favorites
+    )
+
 def get_visible_games(all_games, settings):
     hidden = set(settings.get("hidden_games", []))
-    return [game for game in all_games if game_id(game) not in hidden]
+    return [game for game in all_games if game_id(game) not in hidden or is_favorite_game(game, settings)]
 
 def render_error_card(game, error):
     card_width = get_game_width(game)
@@ -297,6 +361,10 @@ def rebuild_visible_games_if_needed(settings):
         tuple(game_signature(g) for g in current_games),
         tuple(settings.get("hidden_games", [])),
         tuple(settings.get("game_order", [])),
+        tuple(
+            (league, tuple(teams if isinstance(teams, list) else [teams]))
+            for league, teams in sorted(settings.get("favorite_teams", {}).items())
+        ),
         logo_variants_signature(settings),
     )
 
