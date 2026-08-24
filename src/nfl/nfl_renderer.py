@@ -191,7 +191,7 @@ def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, 
         draw.line([scrimmage_x, y, scrimmage_x, y + field_height - 1], fill=BALL_COLOR)
         
         # draw football
-        fx = scrimmage_x
+        fx = scrimmage_x + 4
         fy = y - 3
         
         draw_possession_football(draw, fx - 4, fy)
@@ -209,7 +209,7 @@ def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, 
         draw.line([scrimmage_x, y, scrimmage_x, y + field_height - 1], fill=BALL_COLOR)
         
         # draw football
-        fx = scrimmage_x - 4
+        fx = scrimmage_x
         fy = y - 3
         
         draw_possession_football(draw, fx - 4, fy)
@@ -255,24 +255,24 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
 
     else:
         # quarter
-        print_4x5(draw, "Q" + str(game.quarter), 27 + offset_x, 2, WHITE)
+        print_4x5(draw, "Q" + str(game.quarter), 30 + offset_x, 2, WHITE)
 
         # time
-        print_clock(draw, game.clock, 33 + offset_x, 8, YELLOW)
+        print_clock(draw, game.clock, 36 + offset_x, 8, YELLOW)
+        if game.yardline_number is not 0:
+            # down and distance
+            downAndDistance = ordinal_down(game.down) + "&" + str(game.distance) 
+            print_4x5_centered(draw, downAndDistance, 35 + offset_x, 14, WHITE)
 
-        # down and distance
-        downAndDistance = ordinal_down(game.down) + "&" + str(game.distance) 
-        print_4x5_centered(draw, downAndDistance, 32 + offset_x, 14, WHITE)
+            # yardline
+            yard = game.yardline_side + " " + str(game.yardline_number)
+            print_4x5_centered(draw, yard, 35 + offset_x, 20, WHITE)
 
         # possession
         if game.possession == game.away:
             draw_possession_football(draw, 8 + offset_x, 10)
         else:
             draw_possession_football(draw, 56 + offset_x, 10)
-        
-        # yardline
-        yard = game.yardline_side + " " + str(game.yardline_number)
-        print_4x5_centered(draw, yard, 32 + offset_x, 20, WHITE)
 
         # print scores centered
         if game.away_score < 10:
@@ -287,9 +287,9 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
 
         # football field
         if game.possession == game.yardline_side:
-            draw_field_tracker(draw, 4 + offset_x, 29, game.yardline_number, "OWN", game.possession, game.home, home_color);
+            draw_field_tracker(draw, 7 + offset_x, 29, game.yardline_number, "OWN", game.possession, game.home, home_color);
         else:
-            draw_field_tracker(draw, 4 + offset_x, 29, game.yardline_number, "OPP", game.possession, game.home, home_color);
+            draw_field_tracker(draw, 7 + offset_x, 29, game.yardline_number, "OPP", game.possession, game.home, home_color);
 
 def render_game_strip_onto(image, draw, game, offset_x, settings):
     # away logo
