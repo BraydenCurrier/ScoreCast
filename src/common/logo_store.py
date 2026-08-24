@@ -41,7 +41,6 @@ def normalize_identifier(value: str) -> str:
 
     return identifier
 
-
 @lru_cache(maxsize=512)
 def load_logo(
     league: str,
@@ -160,6 +159,46 @@ def get_logo_variants(
         variants.sort()
 
     return variants
+
+def get_teams_with_logos(league: str) -> list[str]:
+    """Return every team identifier with an available logo for a league."""
+
+    normalized_league = str(
+        league
+    ).strip().lower()
+
+    if normalized_league not in SUPPORTED_LEAGUES:
+        raise ValueError(
+            f"Unsupported league: {league!r}"
+        )
+
+    league_dir = (
+        LOGO_ROOT
+        / normalized_league
+    )
+
+    if not league_dir.is_dir():
+        return []
+
+    identifiers: set[str] = set()
+
+    for entry in league_dir.iterdir():
+
+        if entry.is_dir():
+            identifiers.add(
+                entry.name.upper()
+            )
+
+        elif (
+            entry.is_file()
+            and entry.suffix.lower()
+            == ".png"
+        ):
+            identifiers.add(
+                entry.stem.upper()
+            )
+
+    return sorted(identifiers)
 
 def get_teams_with_logo_variants(
     league: str,

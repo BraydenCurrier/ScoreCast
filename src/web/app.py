@@ -7,7 +7,7 @@ from html import escape
 from flask import Flask, abort, request, redirect, send_file, session, jsonify, url_for
 
 from common.settings import get_settings, update_settings
-from common.logo_store import get_logo_variant_path, get_selected_logo_variant, get_teams_with_logo_variants
+from common.logo_store import get_logo_variant_path, get_selected_logo_variant, get_teams_with_logo_variants, get_teams_with_logos
 
 from fantasy.api import connect_sleeper_user, get_user_leagues
 
@@ -30,6 +30,29 @@ CFB_CONFERENCE_OPTIONS = [
     ("1", "ACC"),
     ("4", "Big 12"),
     ("17", "Mountain West"),
+]
+
+FAVORITE_LEAGUES = [
+    (
+        "mlb",
+        "MLB"
+    ),
+    (
+        "nfl",
+        "NFL"
+    ),
+    (
+        "cfb",
+        "College Football"
+    ),
+    (
+        "nba",
+        "NBA"
+    ),
+    (
+        "nhl",
+        "NHL"
+    ),
 ]
 
 UPDATE_SERVICE_NAME = "scorecast-update.service"
@@ -90,6 +113,7 @@ def page_header(active_page="games"):
     alerts_active = "active" if active_page == "alerts" else ""
     logos_active = "active" if active_page == "logos" else ""
     settings_active = "active" if active_page == "settings" else ""
+    favorites_active = "active" if active_page == "favorites" else ""
 
     return f"""
     <div class="header">
@@ -107,6 +131,7 @@ def page_header(active_page="games"):
         <a class="tab {alerts_active}" href="/alerts" ontouchend="window.location.assign(this.href); return false;">Alerts</a>
         <a class="tab {logos_active}" href="/logos" ontouchend="window.location.assign(this.href); return false;">Logos</a>
         <a class="tab {settings_active}" href="/settings" ontouchend="window.location.assign(this.href); return false;">Settings</a>
+        <a class="tab {favorites_active}" href="/favorites" ontouchend="window.location.assign(this.href); return false;">Favorites</a>
     </div>
     """
 
@@ -353,6 +378,79 @@ def page_styles():
             background: #0f0f14;
             color: white;
             font-size: 15px;
+        }
+
+        .favorite-grid {
+            display: grid;
+            grid-template-columns:
+                repeat(
+                    3,
+                    minmax(0, 1fr)
+                );
+            gap: 8px;
+        }
+
+        .favorite-option {
+            position: relative;
+            display: block;
+        }
+
+        .favorite-option input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .favorite-option span {
+            display: flex;
+            min-height: 42px;
+            align-items: center;
+            justify-content: center;
+
+            border: 1px solid #3a3a45;
+            border-radius: 12px;
+
+            background: #0f0f14;
+            color: #ddd;
+
+            font-size: 14px;
+            font-weight: 700;
+
+            text-align: center;
+
+            padding: 9px 6px;
+
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .favorite-option
+        input:checked + span {
+            background: #0a84ff;
+            border-color: #0a84ff;
+            color: white;
+        }
+
+        .favorite-option
+        input:focus-visible + span {
+            outline: 2px solid white;
+            outline-offset: 2px;
+        }
+
+        .favorite-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        @media (max-width: 380px) {
+            .favorite-grid {
+                grid-template-columns:
+                    repeat(
+                        2,
+                        minmax(0, 1fr)
+                    );
+            }
         }
 
         .control {
@@ -697,6 +795,80 @@ def get_game_id(game):
     league_key, _ = get_game_league(game)
     return f"{league_key}:{game.away}@{game.home}"
 
+def get_favorite_teams(
+    settings,
+    league_key
+):
+    favorites = settings.get(
+        "favorite_teams",
+        {}
+    )
+
+    if not isinstance(
+        favorites,
+        dict
+    ):
+        return set()
+
+    values = favorites.get(
+        league_key,
+        []
+    )
+
+    if isinstance(values, str):
+        values = [values]
+
+    return {
+        str(team).strip().upper()
+        for team in values
+        if str(team).strip()
+    }
+
+def is_favorite_game(
+    game,
+    settings
+):
+    league_key, _ = (
+        get_game_league(game)
+    )
+
+    favorites = (
+        get_favorite_teams(
+            settings,
+            league_key
+        )
+    )
+
+    if not favorites:
+        return False
+
+    away = str(
+        getattr(
+            game,
+            "away",
+            ""
+        )
+    ).strip().upper()
+
+    home = str(
+        getattr(
+            game,
+            "home",
+            ""
+        )
+    ).strip().upper()
+
+    return (
+        away in favorites
+        or home in favorites
+    )
+
+def get_favorite_team_options(league_key):
+    try:
+        return get_teams_with_logos(league_key)
+    except (ValueError, OSError):
+        return []
+
 def get_display_status(game, league_key):
     status = getattr(game, "status", "")
 
@@ -779,7 +951,23 @@ def games():
 
     for game in latest_games:
         game_id = get_game_id(game)
-        checked = "" if game_id in hidden else "checked"
+
+        favorite_game = (
+            is_favorite_game(
+                game,
+                settings
+            )
+        )
+
+        checked = (
+            "checked"
+            if (
+                favorite_game
+                or game_id not in hidden
+            )
+            else ""
+        )
+
         league_key, league_label = get_game_league(game)
         display_status = get_display_status(game, league_key)
 
@@ -793,11 +981,12 @@ def games():
         game_rows += f"""
         <div class="game-row-container" draggable="true" data-id="{safe_game_id}" data-league="{league_key}">
             <label class="game-row">
-                <input type="checkbox" name="game" value="{safe_game_id}" {checked}>
+                <input type="checkbox" name="game" value="{safe_game_id}" {checked} {"disabled" if favorite_game else ""}> 
+                {f'<input type="hidden" name="game" value="{safe_game_id}">' if favorite_game else ''}
                 <div class="game-info">
                     <div class="matchup">{safe_away} @ {safe_home}</div>
                     <div class="details">
-                        {away_score} - {home_score} · {safe_status}
+                        {away_score} - {home_score} · {safe_status}{" · Favorite" if favorite_game else ""}
                     </div>
                 </div>
 
@@ -3282,6 +3471,323 @@ def settings_page():
 </html>
     """
 
+@app.route("/favorites")
+@login_required
+def favorites_page():
+    settings = get_settings()
+
+    favorite_settings = (
+        settings.get(
+            "favorite_teams",
+            {}
+        )
+    )
+
+    rows = ""
+
+    for (
+        league_key,
+        league_label
+    ) in FAVORITE_LEAGUES:
+
+        selected_values = (
+            favorite_settings.get(
+                league_key,
+                []
+            )
+        )
+
+        if isinstance(
+            selected_values,
+            str
+        ):
+            selected_values = [
+                selected_values
+            ]
+
+        selected = {
+            str(team)
+            .strip()
+            .upper()
+            for team
+            in selected_values
+            if str(team).strip()
+        }
+
+        team_options = (
+            get_favorite_team_options(
+                league_key
+            )
+        )
+
+        option_rows = ""
+
+        for team in team_options:
+            normalized_team = (
+                str(team)
+                .strip()
+                .upper()
+            )
+
+            safe_team = escape(
+                normalized_team,
+                quote=True
+            )
+
+            checked = (
+                "checked"
+                if normalized_team
+                in selected
+                else ""
+            )
+
+            option_rows += f"""
+            <label
+                class="favorite-option"
+            >
+                <input
+                    type="checkbox"
+                    name="favorite_{league_key}"
+                    value="{safe_team}"
+                    {checked}
+                >
+
+                <span>
+                    {escape(normalized_team)}
+                </span>
+            </label>
+            """
+
+        if not option_rows:
+            option_rows = """
+            <div class="empty">
+                No teams are currently
+                available for this league.
+            </div>
+            """
+
+        rows += f"""
+        <div class="control">
+
+            <div class="control-top">
+                <label>
+                    {escape(league_label)}
+                </label>
+            </div>
+
+            <div class="favorite-grid">
+                {option_rows}
+            </div>
+
+            <div
+                class="favorite-actions"
+            >
+                <button
+                    class="secondary-button"
+                    type="button"
+                    onclick="
+                        setLeagueFavorites(
+                            '{league_key}',
+                            true
+                        )
+                    "
+                >
+                    Select All
+                </button>
+
+                <button
+                    class="secondary-button"
+                    type="button"
+                    onclick="
+                        setLeagueFavorites(
+                            '{league_key}',
+                            false
+                        )
+                    "
+                >
+                    Clear
+                </button>
+            </div>
+
+            <div class="hint">
+                Every loaded game involving
+                any selected team is always
+                selected on the ticker.
+            </div>
+
+        </div>
+        """
+
+    return f"""
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+    <title>
+        Scoreboard Favorites
+    </title>
+
+    <meta
+        name="viewport"
+        content="
+            width=device-width,
+            initial-scale=1,
+            viewport-fit=cover
+        "
+    >
+
+    {page_styles()}
+
+</head>
+
+<body>
+
+    <div class="page">
+
+        {page_header("favorites")}
+
+        <form
+            method="POST"
+            action="/save_favorites"
+        >
+
+            <div class="card">
+
+                <div class="card-title">
+                    Favorite Teams
+                </div>
+
+                <div
+                    class="hint"
+                    style="
+                        margin-bottom:
+                        16px;
+                    "
+                >
+                    Select as many favorite
+                    teams as you want in
+                    each league. Whenever
+                    one of those teams has
+                    a loaded game,
+                    ScoreCast keeps that
+                    matchup selected
+                    automatically.
+                </div>
+
+                {rows}
+
+            </div>
+
+            <button
+                class="save-button"
+                type="submit"
+            >
+                Save Favorites
+            </button>
+
+        </form>
+
+    </div>
+
+    <script>
+
+        function setLeagueFavorites(
+            league,
+            checked
+        ) {{
+
+            document
+                .querySelectorAll(
+                    'input[name="favorite_'
+                    + league
+                    + '"]'
+                )
+                .forEach(
+                    function(input) {{
+
+                        input.checked =
+                            checked;
+
+                    }}
+                );
+
+        }}
+
+    </script>
+
+</body>
+
+</html>
+    """
+
+@app.route(
+    "/save_favorites",
+    methods=["POST"]
+)
+@login_required
+def save_favorites():
+
+    favorites = {}
+
+    for (
+        league_key,
+        _
+    ) in FAVORITE_LEAGUES:
+
+        submitted_teams = (
+            request.form.getlist(
+                f"favorite_{league_key}"
+            )
+        )
+
+        valid_options = {
+            option.upper()
+            for option
+            in get_favorite_team_options(
+                league_key
+            )
+        }
+
+        selected_teams = []
+        seen = set()
+
+        for team in submitted_teams:
+
+            normalized_team = (
+                str(team)
+                .strip()
+                .upper()
+            )
+
+            if (
+                normalized_team
+                and normalized_team
+                in valid_options
+                and normalized_team
+                not in seen
+            ):
+                selected_teams.append(
+                    normalized_team
+                )
+
+                seen.add(
+                    normalized_team
+                )
+
+        favorites[
+            league_key
+        ] = selected_teams
+
+    update_settings({
+        "favorite_teams":
+            favorites,
+    })
+
+    return redirect(
+        "/favorites"
+    )
 
 @app.route("/save_games", methods=["POST"])
 @login_required
@@ -3293,8 +3799,26 @@ def save_games():
         for game in latest_games
     ]
 
+    settings = get_settings()
+
+    favorite_game_ids = {
+        get_game_id(game)
+        for game in latest_games
+        if is_favorite_game(game, settings)
+    }
+
+    visible_games = list(dict.fromkeys(
+        visible_games
+        + [
+            game_id
+            for game_id in all_game_ids
+            if game_id in favorite_game_ids
+        ]
+    ))
+
     hidden_games = [
-        game_id for game_id in all_game_ids
+        game_id
+        for game_id in all_game_ids
         if game_id not in visible_games
     ]
 
