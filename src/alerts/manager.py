@@ -181,8 +181,6 @@ class PossessionAlertManager:
         play_id = str(getattr(game, "last_play_id", "") or "").strip()
         play_text = str(getattr(game, "last_play_text", "") or "").strip()
 
-        scoring_play = bool(getattr(game, "scoring_play", False))
-
         if (state.away_score is None or state.home_score is None):
             state.away_score = away_score
             state.home_score = home_score
@@ -199,7 +197,7 @@ class PossessionAlertManager:
 
         new_scoring_event = (score_changed and scoring_signature != state.last_scoring_signature)
 
-        if (enabled and new_scoring_event and (scoring_play or self._looks_like_scoring_play(play_text))):
+        if (enabled and new_scoring_event):
             scoring_team = ""
             points = 0
 
