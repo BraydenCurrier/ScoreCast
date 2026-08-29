@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw
 from common.matrix import create_matrix
 from common.settings import get_settings
 
-from fantasy.api import get_today_games as get_live_fantasy
+from fantasy.api import get_today_games as get_live_fantasy, refresh_fantasy_avatars_on_startup
 from fantasy.renderer import render_game_strip_onto as draw_fantasy_strip
 
 from alerts.manager import possession_alert_manager
@@ -511,6 +511,8 @@ threading.Thread(
     daemon=True,
     name="possession-watcher",
 ).start()
+
+refresh_fantasy_avatars_on_startup()
 
 _games = load_initial_games()
 set_latest_games(_games)
