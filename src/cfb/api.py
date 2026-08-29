@@ -166,6 +166,90 @@ def safe_int(value, default=0):
     except (TypeError, ValueError):
         return default
 
+def _normalize_field_side(side, home_team, away_team):
+    raw_side = str(side or "").strip().upper()
+
+    if not raw_side:
+        return ""
+
+    for team in [home_team, away_team]:
+        aliases = {
+            str(team.get("abbreviation", "")).strip().upper(),
+            str(team.get("shortDisplayName", "")).strip().upper(),
+            str(team.get("name", "")).strip().upper(),
+            get_team_abbr(team).strip().upper(),
+        }
+
+        if raw_side in aliases:
+            return get_team_abbr(team)
+
+    return raw_side
+
+def _parse_possession_text(possession_text, home_team, away_team):
+    text = str(possession_text or "").strip()
+
+    if not text:
+        return "", 0
+
+    if text == "50":
+        return "", 50
+
+    parts = text.rsplit(" ", 1)
+
+    if len(parts) != 2:
+        return "", 0
+
+    side_text, yard_text = parts
+    yardline_number = safe_int(yard_text, -1)
+
+    if yardline_number < 0 or yardline_number > 50:
+        return "", 0
+
+    yardline_side = _normalize_field_side(
+        side_text,
+        home_team,
+        away_team,
+    )
+
+    return yardline_side, yardline_number
+
+def _get_field_position(situation, home_team, away_team):
+    last_play = situation.get("lastPlay") or {}
+
+    if not isinstance(last_play, dict):
+        return "", 0
+
+    # ESPN's end.possessionText describes the current spot after the
+    # most recent play. start.possessionText is a useful fallback while
+    # the live feed is transitioning between plays.
+    for spot_name in ["end", "start"]:
+        spot = last_play.get(spot_name) or {}
+
+        if not isinstance(spot, dict):
+            continue
+
+        yardline_side, yardline_number = _parse_possession_text(
+            spot.get("possessionText"),
+            home_team,
+            away_team,
+        )
+
+        if yardline_number:
+            return yardline_side, yardline_number
+
+    # Some scoreboard responses expose possessionText directly on the
+    # situation object. Use it if the last-play object does not have one.
+    yardline_side, yardline_number = _parse_possession_text(
+        situation.get("possessionText"),
+        home_team,
+        away_team,
+    )
+
+    if yardline_number:
+        return yardline_side, yardline_number
+
+    return "", 0
+
 def _get_broadcast(event, competition):
     """
     Return a readable broadcast string such as:
@@ -275,12 +359,15 @@ def get_today_games():
         if possession_id:
             for comp in [home_data, away_data]:
                 if comp["id"] == str(possession_id):
-                    possession_abbr = comp["team"].get("abbreviation", "")
+                    possession_abbr = get_team_abbr(comp["team"])
 
-        # extract yardline side details
-        yardline_side = ""
-        if "lastPlay" in situation:
-            yardline_side = situation["lastPlay"].get("type", {}).get("text", "")[:3]
+        # extract the actual field side and yard line from ESPN's
+        # possessionText instead of using the last play type.
+        yardline_side, yardline_number = _get_field_position(
+            situation,
+            home_team,
+            away_team,
+        )
 
         raw_date_string = event.get("date", "")
         formatted_date = ""
@@ -325,7 +412,7 @@ def get_today_games():
                 distance=int(situation.get("distance", 0)),
 
                 yardline_side=yardline_side,
-                yardline_number=int(situation.get("yardline", 0)),
+                yardline_number=yardline_number,
                 date=formatted_date,
                 week=week_number,
             )
