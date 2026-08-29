@@ -208,7 +208,7 @@ def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, 
         draw.line([scrimmage_x, y, scrimmage_x, y + field_height - 1], fill=BALL_COLOR)
         
         # draw football
-        fx = scrimmage_x
+        fx = scrimmage_x + 4
         fy = y - 3
         
         draw_possession_football(draw, fx - 4, fy)
@@ -226,7 +226,7 @@ def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, 
         draw.line([scrimmage_x, y, scrimmage_x, y + field_height - 1], fill=BALL_COLOR)
         
         # draw football
-        fx = scrimmage_x - 4
+        fx = scrimmage_x
         fy = y - 3
         
         draw_possession_football(draw, fx - 4, fy)
@@ -275,20 +275,21 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
         # print quarter and game clock
         print_4x5(draw, "Q" + str(game.quarter), 33 + offset_x, 2, WHITE)
         print_clock(draw, game.clock, 39 + offset_x, 8, YELLOW)
+        
+        if game.possession:
+            # print down and distance 
+            downAndDistance = ordinal_down(game.down) + "&" + str(game.distance) 
+            print_4x5_centered(draw, downAndDistance, 38 + offset_x, 14, WHITE)
 
-        # print down and distance 
-        downAndDistance = ordinal_down(game.down) + "&" + str(game.distance) 
-        print_4x5_centered(draw, downAndDistance, 38 + offset_x, 14, WHITE)
+            # print yardline side and number
+            yard = game.yardline_side + " " + str(game.yardline_number)
+            print_4x5_centered(draw, yard, 38 + offset_x, 20, WHITE)
 
         # print possession football
         if game.possession == game.away:
             draw_possession_football(draw, 25 + offset_x, 3)
         else:
             draw_possession_football(draw, 46 + offset_x, 3)
-        
-        # print yardline side and number
-        yard = game.yardline_side + " " + str(game.yardline_number)
-        print_4x5_centered(draw, yard, 38 + offset_x, 20, WHITE)
 
         # print scores centered
         if game.away_score < 10:
