@@ -259,7 +259,7 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
 
         # time
         print_clock(draw, game.clock, 36 + offset_x, 8, YELLOW)
-        if game.yardline_number is not 0:
+        if game.yardline_number != 0:
             # down and distance
             downAndDistance = ordinal_down(game.down) + "&" + str(game.distance) 
             print_4x5_centered(draw, downAndDistance, 35 + offset_x, 14, WHITE)
