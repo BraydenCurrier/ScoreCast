@@ -1,11 +1,11 @@
 from PIL import ImageDraw
 
-from common.fonts import print_3x5, get_3x5_width, print_4x5, print_4x5_centered, print_4x5_right, print_clock, print_gfx_5x7, draw_text_right
-from cfb.colors import WHITE, YELLOW, BALL_BROWN, team_color
+from common.fonts import print_3x5, get_3x5_width, print_3x5_right, print_4x5, print_4x5_centered, print_4x5_right, print_clock, print_gfx_5x7, draw_text_right
+from cfb.colors import GREY, WHITE, YELLOW, BALL_BROWN, team_color
 from common.logo_store import draw_logo, get_selected_logo_variant, load_logo
 
 LOGO_SIZE = 30     
-CARD_WIDTH = 76   
+CARD_WIDTH = 102
 GAME_GAP = 5
 GAME_WIDTH = LOGO_SIZE + CARD_WIDTH + LOGO_SIZE 
 
@@ -150,13 +150,13 @@ def draw_broadcast_logo(
 
     except (FileNotFoundError, ValueError, OSError, KeyError) as exc:
         # Optional text fallback.
-        draw = ImageDraw.Draw(image)
-        draw.text(
-            (x, y),
-            broadcast,
-            fill="white",
-            anchor="mm",
-        )
+        #draw = ImageDraw.Draw(image)
+        #draw.text(
+            #(x, y),
+            #broadcast,
+            #fill="white",
+            #anchor="mm",
+        #)
 
         return False
             
@@ -253,59 +253,81 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
     home_color = team_color(game.home)
 
     # print team abbreviations
-    print_gfx_5x7(draw, game.away, 2 + offset_x, 2, away_color)
-    draw_text_right(draw, game.home, 73 + offset_x, 2, home_color)
+    print_gfx_5x7(draw, game.away, 15 + offset_x, 2, away_color)
+    draw_text_right(draw, game.home, 86 + offset_x, 2, home_color)
 
     # print ranks
     if(game.away_rank != None):
-        print_4x5(draw, "#" + str(game.away_rank), 2 + offset_x, 10, YELLOW)
+        print_4x5(draw, "#" + str(game.away_rank), offset_x, 3, YELLOW)
     if(game.home_rank != None):
-        print_4x5_right(draw, "#" + str(game.home_rank), 73 + offset_x, 10, YELLOW)
+        print_4x5_right(draw, "#" + str(game.home_rank), 101 + offset_x, 3, YELLOW)
 
     if(game.status == "STATUS_SCHEDULED"):
         #start time
-        print_4x5_centered(draw, game.start_time, 37 + offset_x, 2, WHITE)
+        print_4x5_centered(draw, game.start_time, 50 + offset_x, 2, WHITE)
         #week
         weekNumber = "Week " + str(game.week)
-        print_4x5(draw, weekNumber, 6 + offset_x, 11, WHITE)
+        print_4x5(draw, weekNumber, 19 + offset_x, 11, WHITE)
         #date
-        print_4x5(draw, game.date, 41 + offset_x, 11, WHITE)
-        draw_broadcast_logo(image, game.broadcast, 37 + offset_x, 24, settings)
+        print_4x5(draw, game.date, 54 + offset_x, 11, WHITE)
+        draw_broadcast_logo(image, game.broadcast, 50 + offset_x, 24, settings)
+
+        # records
+        print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 18 + offset_x, 22, GREY)
+        print_3x5_right(draw, f"{game.home_wins}-{game.home_losses}", 83 + offset_x, 22, GREY)
     else:
-        # print quarter and game clock
-        print_4x5(draw, "Q" + str(game.quarter), 33 + offset_x, 2, WHITE)
-        print_clock(draw, game.clock, 39 + offset_x, 8, YELLOW)
-        
-        if game.possession:
-            # print down and distance 
-            downAndDistance = ordinal_down(game.down) + "&" + str(game.distance) 
-            print_4x5_centered(draw, downAndDistance, 38 + offset_x, 14, WHITE)
+        if(game.status == "STATUS_FINAL" or game.status == "STATUS_FINAL_OVERTIME"):
+            # print scores centered
+            if game.away_score < 10:
+                print_gfx_5x7(draw, str(game.away_score), 21 + offset_x, 12, YELLOW)
+            else:
+                print_gfx_5x7(draw, str(game.away_score), 18 + offset_x, 12, YELLOW)
 
-            # print yardline side and number
-            yard = game.yardline_side + " " + str(game.yardline_number)
-            print_4x5_centered(draw, yard, 38 + offset_x, 20, WHITE)
+            if game.home_score < 10:
+                draw_text_right(draw, game.home_score, 80 + offset_x, 12, YELLOW)
+            else:
+                draw_text_right(draw, game.home_score, 84 + offset_x, 12, YELLOW)
+            
+            print_4x5_centered(draw, "FINAL", 52 + offset_x, 13, YELLOW)
 
-        # print possession football
-        if game.possession == game.away:
-            draw_possession_football(draw, 25 + offset_x, 3)
+            # records
+            print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 18 + offset_x, 22, GREY)
+            print_3x5_right(draw, f"{game.home_wins}-{game.home_losses}", 83 + offset_x, 22, GREY)
         else:
-            draw_possession_football(draw, 46 + offset_x, 3)
+            # print quarter and game clock
+            print_4x5(draw, "Q" + str(game.quarter), 46 + offset_x, 2, WHITE)
+            print_clock(draw, game.clock, 52 + offset_x, 8, YELLOW)
+            
+            if game.possession:
+                # print down and distance 
+                downAndDistance = ordinal_down(game.down) + "&" + str(game.distance) 
+                print_4x5_centered(draw, downAndDistance, 51 + offset_x, 14, WHITE)
 
-        # print scores centered
-        if game.away_score < 10:
-            print_gfx_5x7(draw, str(game.away_score), 8 + offset_x, 16, YELLOW)
-        else:
-            print_gfx_5x7(draw, str(game.away_score), 5 + offset_x, 16, YELLOW)
+                # print yardline side and number
+                yard = game.yardline_side + " " + str(game.yardline_number)
+                print_4x5_centered(draw, yard, 51 + offset_x, 20, WHITE)
 
-        if game.home_score < 10:
-            draw_text_right(draw, game.home_score, 67 + offset_x, 16, YELLOW)
-        else:
-            draw_text_right(draw, game.home_score, 71 + offset_x, 16, YELLOW)
+            # print possession football
+            if game.possession == game.away:
+                draw_possession_football(draw, 38 + offset_x, 3)
+            else:
+                draw_possession_football(draw, 59 + offset_x, 3)
 
-        if game.possession == game.yardline_side:
-            draw_field_tracker(draw, 10 + offset_x, 29, game.yardline_number, "OWN", game.possession, game.home, home_color)
-        else:
-            draw_field_tracker(draw, 10 + offset_x, 29, game.yardline_number, "OPP", game.possession, game.home, home_color)
+            # print scores centered
+            if game.away_score < 10:
+                print_gfx_5x7(draw, str(game.away_score), 21 + offset_x, 14, YELLOW)
+            else:
+                print_gfx_5x7(draw, str(game.away_score), 18 + offset_x, 14, YELLOW)
+
+            if game.home_score < 10:
+                draw_text_right(draw, game.home_score, 80 + offset_x, 14, YELLOW)
+            else:
+                draw_text_right(draw, game.home_score, 84 + offset_x, 14, YELLOW)
+
+            if game.possession == game.yardline_side:
+                draw_field_tracker(draw, 23 + offset_x, 29, game.yardline_number, "OWN", game.possession, game.home, home_color)
+            else:
+                draw_field_tracker(draw, 23 + offset_x, 29, game.yardline_number, "OPP", game.possession, game.home, home_color)
 
 def render_game_strip_onto(image, draw, game, offset_x, settings):
     # away logo

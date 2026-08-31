@@ -971,6 +971,14 @@ def games():
         league_key, league_label = get_game_league(game)
         display_status = get_display_status(game, league_key)
 
+        is_top_25 = (
+            league_key == "cfb"
+            and (
+                getattr(game, "away_rank", None) is not None
+                or getattr(game, "home_rank", None) is not None
+            )
+        )
+
         safe_game_id = escape(game_id, quote=True)
         safe_away = escape(str(game.away))
         safe_home = escape(str(game.home))
@@ -979,7 +987,7 @@ def games():
         home_score = escape(str(getattr(game, "home_score", 0)))
 
         game_rows += f"""
-        <div class="game-row-container" draggable="true" data-id="{safe_game_id}" data-league="{league_key}">
+        <div class="game-row-container" draggable="true" data-id="{safe_game_id}" data-league="{league_key}" data-top25="{"true" if is_top_25 else "false"}">
             <label class="game-row">
                 <input type="checkbox" name="game" value="{safe_game_id}" {checked} {"disabled" if favorite_game else ""}> 
                 {f'<input type="hidden" name="game" value="{safe_game_id}">' if favorite_game else ''}
@@ -1036,6 +1044,7 @@ def games():
                         <option value="mlb">MLB</option>
                         <option value="nfl">NFL</option>
                         <option value="cfb">CFB</option>
+                        <option value="top25">Top 25 CFB</option>
                         <option value="soccer">Soccer</option>
                         <option value="nba">NBA</option>
                         <option value="nhl">NHL</option>
@@ -1089,6 +1098,11 @@ def games():
                     matchesFilter = true;
                 }} else if (selectedFilter === "selected") {{
                     matchesFilter = isSelected;
+                }} else if (selectedFilter === "top25") {{
+                    matchesFilter = (
+                        rowLeague === "cfb"
+                        && row.dataset.top25 === "true"
+                    );
                 }} else {{
                     matchesFilter = rowLeague === selectedFilter;
                 }}

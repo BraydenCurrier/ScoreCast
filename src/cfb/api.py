@@ -21,9 +21,16 @@ CFB_CONFERENCES = {
 DEFAULT_CONFERENCE_GROUPS = ["80"]
 
 NCAAF_SCHEDULE_URL = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
+NCAAF_RANKINGS_URL = (
+    "https://ncaa-api.henrygd.me/"
+    "rankings/football/fbs/associated-press"
+)
 ##CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 HTTP_TIMEOUT = (3.05, 10)
+
+_rankings_cache = {}
+_rankings_cache_date = None
 
 def get_selected_conference_groups():
     settings = get_settings()
@@ -108,6 +115,160 @@ def fetch_scoreboard_group(group_id):
         )
 
     return data
+
+def _normalize_team_name(name):
+    name = str(name or "").strip().lower()
+
+    # Remove AP first-place vote counts:
+    # "Ohio State (40)" -> "Ohio State"
+    # "Miami (FL) (1)" -> "Miami (FL)"
+    if name.endswith(")"):
+        open_paren = name.rfind("(")
+
+        if open_paren != -1:
+            contents = name[
+                open_paren + 1:-1
+            ].strip()
+
+            if contents.isdigit():
+                name = name[:open_paren].strip()
+
+    # Normalize punctuation/spacing.
+    name = (
+        name
+        .replace(".", "")
+        .replace("-", " ")
+        .replace("'", "")
+    )
+
+    name = " ".join(name.split())
+
+    aliases = {
+        "southern cal": "usc",
+        "southern california": "usc",
+        "miami fl": "miami",
+        "miami (fl)": "miami",
+        "miami fla": "miami",
+        "texas a&m": "texas a&m",
+        "ole miss": "ole miss",
+    }
+
+    return aliases.get(name, name)
+
+
+def fetch_rankings():
+    global _rankings_cache
+    global _rankings_cache_date
+
+    today = datetime.now(
+        get_local_timezone()
+    ).date()
+
+    # Already fetched successfully today.
+    if (
+        _rankings_cache
+        and _rankings_cache_date == today
+    ):
+        return _rankings_cache
+
+    command = [
+        "curl",
+        "--silent",
+        "--show-error",
+        "--fail-with-body",
+        "--location",
+        "--max-time",
+        str(HTTP_TIMEOUT[1]),
+        "--header",
+        "Accept: application/json",
+        NCAAF_RANKINGS_URL,
+    ]
+
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        data = json.loads(result.stdout)
+
+    except Exception as error:
+        print(
+            f"CFB rankings fetch failed: {error}"
+        )
+
+        # If we previously had rankings, keep them.
+        return _rankings_cache
+
+    rankings = {}
+
+    for entry in data.get("data", []):
+        raw_rank = str(
+            entry.get("RANK", "")
+        ).strip()
+
+        # NCAA represents ties as "T14".
+        rank_text = raw_rank.lstrip(
+            "Tt"
+        )
+
+        rank = safe_int(
+            rank_text,
+            0,
+        )
+
+        school = (
+            entry.get("SCHOOL (1ST VOTES)")
+            or entry.get("SCHOOL")
+            or ""
+        )
+
+        team_name = _normalize_team_name(
+            school
+        )
+
+        if team_name and rank > 0:
+            rankings[team_name] = rank
+
+    if not rankings:
+        print(
+            "CFB rankings: AP poll returned "
+            "no usable teams"
+        )
+
+        return _rankings_cache
+
+    _rankings_cache = rankings
+    _rankings_cache_date = today
+
+    print(
+        "CFB rankings: loaded "
+        f"{len(rankings)} AP Top 25 teams"
+    )
+
+    return rankings
+
+def get_team_rank(team, rankings):
+    candidates = [
+        team.get("location"),
+        team.get("displayName"),
+        team.get("shortDisplayName"),
+        team.get("nickname"),
+        team.get("name"),
+        team.get("abbreviation"),
+    ]
+
+    for candidate in candidates:
+        normalized = _normalize_team_name(
+            candidate
+        )
+
+        if normalized in rankings:
+            return rankings[normalized]
+
+    return None
 
 def get_team_abbr(team):
     # Fetch the team's unique ESPN ID
@@ -298,6 +459,8 @@ def _get_broadcast(event, competition):
 def get_today_games():
     selected_groups = get_selected_conference_groups()
 
+    rankings = fetch_rankings()
+
     events_by_id = {}
     week_number = 0
 
@@ -345,13 +508,15 @@ def get_today_games():
         home_record = get_record(home_data)
         away_record = get_record(away_data)
 
-        # get rankings, default to 0 if not present
-        home_rank_raw = home_data.get("curatedRankings", {}).get("current", 0)
-        away_rank_raw = away_data.get("curatedRankings", {}).get("current", 0)
-        
-        # set to none if rank is 0 or not present
-        home_rank = int(home_rank_raw) if home_rank_raw > 0 else None
-        away_rank = int(away_rank_raw) if away_rank_raw > 0 else None
+        home_rank = get_team_rank(
+            home_team,
+            rankings,
+        )
+
+        away_rank = get_team_rank(
+            away_team,
+            rankings,
+        )
 
         # determine possession team abbreviation, default to empty string if not present
         possession_id = situation.get("possession")
