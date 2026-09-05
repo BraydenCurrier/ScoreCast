@@ -1,11 +1,13 @@
 from dataclasses import dataclass
+from typing import Optional
+
 
 @dataclass
 class CollegeFootballGame:
     away: str
     home: str
     status: str
-    
+
     start_time: str
 
     away_score: int
@@ -23,11 +25,14 @@ class CollegeFootballGame:
     down: int
     distance: int
 
+    # None means ESPN did not provide a usable field position.
+    # Zero is a real, valid yard-line value and must remain distinguishable
+    # from missing data.
     yardline_side: str
-    yardline_number: int
+    yardline_number: Optional[int]
 
-    away_rank: int
-    home_rank: int
+    away_rank: Optional[int]
+    home_rank: Optional[int]
 
     broadcast: str = ""
 

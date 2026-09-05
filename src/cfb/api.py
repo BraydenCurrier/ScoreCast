@@ -1,13 +1,12 @@
 from datetime import datetime
-from zoneinfo import ZoneInfo
-from common.timezone import get_local_timezone
 
 import json
 import subprocess
 
-from cfb.models import CollegeFootballGame 
-
+from cfb.models import CollegeFootballGame
 from common.settings import get_settings
+from common.timezone import get_local_timezone
+
 
 CFB_CONFERENCES = {
     "80": "All FBS",
@@ -20,22 +19,24 @@ CFB_CONFERENCES = {
 
 DEFAULT_CONFERENCE_GROUPS = ["80"]
 
-NCAAF_SCHEDULE_URL = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
+NCAAF_SCHEDULE_URL = (
+    "https://site.api.espn.com/apis/site/v2/sports/football/"
+    "college-football/scoreboard"
+)
 NCAAF_RANKINGS_URL = (
     "https://ncaa-api.henrygd.me/"
     "rankings/football/fbs/associated-press"
 )
-##CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 HTTP_TIMEOUT = (3.05, 10)
 
 _rankings_cache = {}
 _rankings_cache_date = None
 
+
 def get_selected_conference_groups():
     settings = get_settings()
     cfb_settings = settings.get("cfb", {})
-
     selected = cfb_settings.get(
         "selected_conferences",
         DEFAULT_CONFERENCE_GROUPS,
@@ -57,6 +58,7 @@ def get_selected_conference_groups():
         return ["80"]
 
     return selected
+
 
 def fetch_scoreboard_group(group_id):
     url = (
@@ -95,7 +97,6 @@ def fetch_scoreboard_group(group_id):
             or exc.stderr
             or "No response body"
         ).strip()
-
         raise RuntimeError(
             "CFB curl request failed: "
             f"{response_text[:300]}"
@@ -116,6 +117,7 @@ def fetch_scoreboard_group(group_id):
 
     return data
 
+
 def _normalize_team_name(name):
     name = str(name or "").strip().lower()
 
@@ -126,21 +128,17 @@ def _normalize_team_name(name):
         open_paren = name.rfind("(")
 
         if open_paren != -1:
-            contents = name[
-                open_paren + 1:-1
-            ].strip()
+            contents = name[open_paren + 1:-1].strip()
 
             if contents.isdigit():
                 name = name[:open_paren].strip()
 
-    # Normalize punctuation/spacing.
     name = (
         name
         .replace(".", "")
         .replace("-", " ")
         .replace("'", "")
     )
-
     name = " ".join(name.split())
 
     aliases = {
@@ -164,7 +162,6 @@ def fetch_rankings():
         get_local_timezone()
     ).date()
 
-    # Already fetched successfully today.
     if (
         _rankings_cache
         and _rankings_cache_date == today
@@ -191,15 +188,11 @@ def fetch_rankings():
             capture_output=True,
             text=True,
         )
-
         data = json.loads(result.stdout)
-
     except Exception as error:
         print(
             f"CFB rankings fetch failed: {error}"
         )
-
-        # If we previously had rankings, keep them.
         return _rankings_cache
 
     rankings = {}
@@ -209,15 +202,8 @@ def fetch_rankings():
             entry.get("RANK", "")
         ).strip()
 
-        # NCAA represents ties as "T14".
-        rank_text = raw_rank.lstrip(
-            "Tt"
-        )
-
-        rank = safe_int(
-            rank_text,
-            0,
-        )
+        rank_text = raw_rank.lstrip("Tt")
+        rank = safe_int(rank_text, 0)
 
         school = (
             entry.get("SCHOOL (1ST VOTES)")
@@ -225,9 +211,7 @@ def fetch_rankings():
             or ""
         )
 
-        team_name = _normalize_team_name(
-            school
-        )
+        team_name = _normalize_team_name(school)
 
         if team_name and rank > 0:
             rankings[team_name] = rank
@@ -237,7 +221,6 @@ def fetch_rankings():
             "CFB rankings: AP poll returned "
             "no usable teams"
         )
-
         return _rankings_cache
 
     _rankings_cache = rankings
@@ -250,6 +233,7 @@ def fetch_rankings():
 
     return rankings
 
+
 def get_team_rank(team, rankings):
     candidates = [
         team.get("location"),
@@ -261,43 +245,41 @@ def get_team_rank(team, rankings):
     ]
 
     for candidate in candidates:
-        normalized = _normalize_team_name(
-            candidate
-        )
+        normalized = _normalize_team_name(candidate)
 
         if normalized in rankings:
             return rankings[normalized]
 
     return None
 
+
 def get_team_abbr(team):
-    # Fetch the team's unique ESPN ID
     team_id = str(team.get("id", ""))
-    
-    # handle specific duoplicate team abbreviations, more to be added when discovered
+
+    # Duplicate/special ESPN abbreviations.
     if team_id == "2579":
         return "USCG"  # South Carolina Gamecocks
     if team_id == "30":
         return "USC"   # Southern California Trojans
 
-    # fallback to standard abbreviation if not one of the special cases
-    raw_abbr = team.get("abbreviation", team.get("name", "")[:3].upper())
-    
-    # handle specific overrides for team abbreviations, more to be added as needed
-    OVERRIDES = {
+    raw_abbr = team.get(
+        "abbreviation",
+        team.get("name", "")[:3].upper(),
+    )
+
+    overrides = {
         "TA&M": "TAMU",
         "M-OH": "MOH",
         "AFA": "AF",
     }
-    
-    return OVERRIDES.get(raw_abbr, raw_abbr)
+
+    return overrides.get(raw_abbr, raw_abbr)
 
 
 def format_local_time(utc_time_str):
     utc_dt = datetime.fromisoformat(
         utc_time_str.replace("Z", "+00:00")
     )
-
     local_dt = utc_dt.astimezone(
         get_local_timezone()
     )
@@ -307,10 +289,12 @@ def format_local_time(utc_time_str):
 
 def get_record(team_data):
     records = team_data.get("records", [])
+
     if not records:
         return {"wins": 0, "losses": 0}
-        
+
     summary = records[0].get("summary", "0-0")
+
     try:
         parts = summary.split("-")
         return {
@@ -327,6 +311,41 @@ def safe_int(value, default=0):
     except (TypeError, ValueError):
         return default
 
+
+def _get_home_away_competitors(competition):
+    """
+    Resolve ESPN competitors by the explicit homeAway field instead of
+    assuming array order.
+    """
+    competitors = competition.get("competitors", [])
+
+    home_data = next(
+        (
+            comp
+            for comp in competitors
+            if str(comp.get("homeAway", "")).lower() == "home"
+        ),
+        None,
+    )
+    away_data = next(
+        (
+            comp
+            for comp in competitors
+            if str(comp.get("homeAway", "")).lower() == "away"
+        ),
+        None,
+    )
+
+    # Keep a compatibility fallback in case ESPN omits homeAway.
+    if home_data is None and competitors:
+        home_data = competitors[0]
+
+    if away_data is None and len(competitors) > 1:
+        away_data = competitors[1]
+
+    return home_data, away_data
+
+
 def _normalize_field_side(side, home_team, away_team):
     raw_side = str(side or "").strip().upper()
 
@@ -337,6 +356,8 @@ def _normalize_field_side(side, home_team, away_team):
         aliases = {
             str(team.get("abbreviation", "")).strip().upper(),
             str(team.get("shortDisplayName", "")).strip().upper(),
+            str(team.get("displayName", "")).strip().upper(),
+            str(team.get("location", "")).strip().upper(),
             str(team.get("name", "")).strip().upper(),
             get_team_abbr(team).strip().upper(),
         }
@@ -346,11 +367,25 @@ def _normalize_field_side(side, home_team, away_team):
 
     return raw_side
 
-def _parse_possession_text(possession_text, home_team, away_team):
+
+def _parse_possession_text(
+    possession_text,
+    home_team,
+    away_team,
+):
+    """
+    Parse ESPN strings such as:
+      "UGA 35"
+      "TEXAS A&M 42"
+      "50"
+
+    None means no usable field position. Zero is a valid yard line and
+    therefore must not be used as the "missing" sentinel.
+    """
     text = str(possession_text or "").strip()
 
     if not text:
-        return "", 0
+        return "", None
 
     if text == "50":
         return "", 50
@@ -358,13 +393,13 @@ def _parse_possession_text(possession_text, home_team, away_team):
     parts = text.rsplit(" ", 1)
 
     if len(parts) != 2:
-        return "", 0
+        return "", None
 
     side_text, yard_text = parts
     yardline_number = safe_int(yard_text, -1)
 
     if yardline_number < 0 or yardline_number > 50:
-        return "", 0
+        return "", None
 
     yardline_side = _normalize_field_side(
         side_text,
@@ -374,42 +409,84 @@ def _parse_possession_text(possession_text, home_team, away_team):
 
     return yardline_side, yardline_number
 
-def _get_field_position(situation, home_team, away_team):
+
+def _get_field_position(
+    situation,
+    home_team,
+    away_team,
+):
+    """
+    ESPN moves situation data around while a live feed transitions between
+    plays. Prefer situation.possessionText when present because it describes
+    the current situation, then fall back to lastPlay.end/start.
+    """
+    if not isinstance(situation, dict):
+        return "", None
+
+    candidates = [
+        situation.get("possessionText"),
+    ]
+
     last_play = situation.get("lastPlay") or {}
 
-    if not isinstance(last_play, dict):
-        return "", 0
+    if isinstance(last_play, dict):
+        for spot_name in ("end", "start"):
+            spot = last_play.get(spot_name) or {}
 
-    # ESPN's end.possessionText describes the current spot after the
-    # most recent play. start.possessionText is a useful fallback while
-    # the live feed is transitioning between plays.
-    for spot_name in ["end", "start"]:
-        spot = last_play.get(spot_name) or {}
+            if isinstance(spot, dict):
+                candidates.append(
+                    spot.get("possessionText")
+                )
 
-        if not isinstance(spot, dict):
-            continue
-
-        yardline_side, yardline_number = _parse_possession_text(
-            spot.get("possessionText"),
+    for candidate in candidates:
+        side, number = _parse_possession_text(
+            candidate,
             home_team,
             away_team,
         )
 
-        if yardline_number:
-            return yardline_side, yardline_number
+        if number is not None:
+            return side, number
 
-    # Some scoreboard responses expose possessionText directly on the
-    # situation object. Use it if the last-play object does not have one.
-    yardline_side, yardline_number = _parse_possession_text(
-        situation.get("possessionText"),
-        home_team,
-        away_team,
-    )
+    return "", None
 
-    if yardline_number:
-        return yardline_side, yardline_number
 
-    return "", 0
+def _get_possession_abbr(
+    situation,
+    home_data,
+    away_data,
+):
+    """
+    ESPN normally provides situation.possession as a team/competitor ID.
+    Match against both competitor.id and competitor.team.id because either
+    representation can appear across ESPN feeds.
+    """
+    if not isinstance(situation, dict):
+        return ""
+
+    possession_id = str(
+        situation.get("possession") or ""
+    ).strip()
+
+    if not possession_id:
+        return ""
+
+    for competitor in (home_data, away_data):
+        if not competitor:
+            continue
+
+        team = competitor.get("team") or {}
+
+        possible_ids = {
+            str(competitor.get("id") or "").strip(),
+            str(team.get("id") or "").strip(),
+        }
+
+        if possession_id in possible_ids:
+            return get_team_abbr(team)
+
+    return ""
+
 
 def _get_broadcast(event, competition):
     """
@@ -456,9 +533,9 @@ def _get_broadcast(event, competition):
 
     return ", ".join(broadcast_names)
 
+
 def get_today_games():
     selected_groups = get_selected_conference_groups()
-
     rankings = fetch_rankings()
 
     events_by_id = {}
@@ -469,7 +546,7 @@ def get_today_games():
             data = fetch_scoreboard_group(group_id)
         except Exception as error:
             print(
-                f"CFB conference fetch failed "
+                "CFB conference fetch failed "
                 f"for group {group_id}: {error}"
             )
             continue
@@ -481,10 +558,11 @@ def get_today_games():
             )
 
         for event in data.get("events", []):
-            event_id = str(event.get("id", "")).strip()
+            event_id = str(
+                event.get("id", "")
+            ).strip()
 
             if not event_id:
-                # Emergency fallback when ESPN does not provide an ID.
                 event_id = (
                     f"{event.get('date', '')}:"
                     f"{event.get('name', '')}"
@@ -495,15 +573,25 @@ def get_today_games():
     games = []
 
     for event in events_by_id.values():
-        competition = event["competitions"][0]
-        status_info = event["status"]
-        situation = competition.get("situation", {})
+        competitions = event.get("competitions") or []
 
-        home_data = competition["competitors"][0]
-        away_data = competition["competitors"][1]
+        if not competitions:
+            continue
 
-        home_team = home_data["team"]
-        away_team = away_data["team"]
+        competition = competitions[0]
+        status_info = event.get("status") or {}
+        status_type = status_info.get("type") or {}
+        situation = competition.get("situation") or {}
+
+        home_data, away_data = _get_home_away_competitors(
+            competition
+        )
+
+        if not home_data or not away_data:
+            continue
+
+        home_team = home_data.get("team") or {}
+        away_team = away_data.get("team") or {}
 
         home_record = get_record(home_data)
         away_record = get_record(away_data)
@@ -512,26 +600,23 @@ def get_today_games():
             home_team,
             rankings,
         )
-
         away_rank = get_team_rank(
             away_team,
             rankings,
         )
 
-        # determine possession team abbreviation, default to empty string if not present
-        possession_id = situation.get("possession")
-        possession_abbr = ""
-        if possession_id:
-            for comp in [home_data, away_data]:
-                if comp["id"] == str(possession_id):
-                    possession_abbr = get_team_abbr(comp["team"])
-
-        # extract the actual field side and yard line from ESPN's
-        # possessionText instead of using the last play type.
-        yardline_side, yardline_number = _get_field_position(
+        possession_abbr = _get_possession_abbr(
             situation,
-            home_team,
-            away_team,
+            home_data,
+            away_data,
+        )
+
+        yardline_side, yardline_number = (
+            _get_field_position(
+                situation,
+                home_team,
+                away_team,
+            )
         )
 
         raw_date_string = event.get("date", "")
@@ -539,9 +624,17 @@ def get_today_games():
 
         if raw_date_string:
             try:
-                clean_date = raw_date_string.replace("Z", "")
+                clean_date = raw_date_string.replace(
+                    "Z",
+                    "+00:00",
+                )
                 dt = datetime.fromisoformat(clean_date)
-                formatted_date = dt.strftime("%b %d").upper()
+                local_dt = dt.astimezone(
+                    get_local_timezone()
+                )
+                formatted_date = local_dt.strftime(
+                    "%b %d"
+                ).upper()
             except ValueError:
                 formatted_date = raw_date_string
 
@@ -549,35 +642,63 @@ def get_today_games():
             CollegeFootballGame(
                 away=get_team_abbr(away_team),
                 home=get_team_abbr(home_team),
-                
+
                 away_rank=away_rank,
                 home_rank=home_rank,
 
-                status=status_info["type"]["name"],
-                start_time=format_local_time(event["date"]),
+                # Keep ESPN's native STATUS_* value. The renderer
+                # normalizes it in one place.
+                status=str(
+                    status_type.get("name", "")
+                ),
+                start_time=(
+                    format_local_time(event["date"])
+                    if event.get("date")
+                    else ""
+                ),
 
                 broadcast=_get_broadcast(
                     event,
                     competition,
                 ),
 
-                away_score=safe_int(away_data.get("score")),
-                home_score=safe_int(home_data.get("score")),
+                away_score=safe_int(
+                    away_data.get("score")
+                ),
+                home_score=safe_int(
+                    home_data.get("score")
+                ),
 
                 away_wins=away_record["wins"],
                 away_losses=away_record["losses"],
                 home_wins=home_record["wins"],
                 home_losses=home_record["losses"],
 
-                quarter=int(status_info.get("period", 0)),
-                clock=status_info.get("displayClock", ""),
+                quarter=safe_int(
+                    status_info.get("period"),
+                    0,
+                ),
+                clock=str(
+                    status_info.get(
+                        "displayClock",
+                        "",
+                    )
+                    or ""
+                ),
 
                 possession=possession_abbr,
-                down=int(situation.get("down", 0)),
-                distance=int(situation.get("distance", 0)),
+                down=safe_int(
+                    situation.get("down"),
+                    0,
+                ),
+                distance=safe_int(
+                    situation.get("distance"),
+                    0,
+                ),
 
                 yardline_side=yardline_side,
                 yardline_number=yardline_number,
+
                 date=formatted_date,
                 week=week_number,
             )
