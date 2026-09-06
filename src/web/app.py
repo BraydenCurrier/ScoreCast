@@ -3587,7 +3587,6 @@ def settings_page():
             );
         }}
 
-        let updateStatusTimer = null;
         let scoreCastWasRestarting = false;
 
         async function loadUpdateStatus() {{
