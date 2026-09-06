@@ -371,9 +371,9 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
 
             # print possession football
             if game.possession == game.away:
-                draw_possession_football(draw, 38 + offset_x, 3)
+                draw_possession_football(draw, 40 + offset_x, 3)
             elif game.possession == game.home:
-                draw_possession_football(draw, 59 + offset_x, 3)
+                draw_possession_football(draw, 57 + offset_x, 3)
 
             # print scores centered
             if game.away_score < 10:

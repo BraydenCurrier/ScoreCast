@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import time
+import threading
+import queue
+import uuid
+
 import argparse
 import fcntl
 import os
@@ -135,16 +140,156 @@ def version_key(tag: str) -> tuple[int, int, int]:
 def fetch_repository() -> None:
     write_status(
         "checking",
-        "Checking GitHub for updates.",
+        "Connecting to GitHub.",
+        progress=5,
+        step="Checking repository",
     )
 
     log("Fetching branches and tags.")
 
-    run_git(
+    command = [
+        "/usr/bin/git",
+        f"--git-dir={REPOSITORY_DIR}",
         "fetch",
+        "--progress",
         "--prune",
         "--tags",
         "origin",
+    ]
+
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+
+    output = []
+    progress_queue = queue.Queue()
+
+    def reader():
+        try:
+            while True:
+                char = process.stderr.read(1)
+
+                if char == "":
+                    break
+
+                progress_queue.put(char)
+        finally:
+            progress_queue.put(None)
+
+    thread = threading.Thread(
+        target=reader,
+        daemon=True,
+    )
+
+    thread.start()
+
+    line = ""
+    last_write = 0.0
+    finished = False
+
+    while not finished:
+        try:
+            char = progress_queue.get(
+                timeout=0.25
+            )
+        except queue.Empty:
+            char = ""
+
+        if char is None:
+            finished = True
+
+        elif char in ("\r", "\n"):
+            if line:
+                output.append(line)
+
+                if len(output) > 40:
+                    output.pop(0)
+
+                match = re.search(
+                    r"(Receiving objects|Resolving deltas):\s*(\d+)%",
+                    line,
+                )
+
+                if (
+                    match
+                    and time.monotonic()
+                    - last_write
+                    >= 0.2
+                ):
+                    fraction = (
+                        int(match.group(2))
+                        / 100
+                    )
+
+                    if (
+                        match.group(1)
+                        == "Receiving objects"
+                    ):
+                        progress = (
+                            5
+                            + int(
+                                fraction * 12
+                            )
+                        )
+                    else:
+                        progress = (
+                            17
+                            + int(
+                                fraction * 3
+                            )
+                        )
+
+                    write_status(
+                        "checking",
+                        line.strip(),
+                        progress=progress,
+                        step=(
+                            "Checking repository"
+                        ),
+                        progress_kind=(
+                            "transfer"
+                        ),
+                    )
+
+                    last_write = (
+                        time.monotonic()
+                    )
+
+            line = ""
+
+        else:
+            line += char
+
+    if line:
+        output.append(line)
+
+    stdout = process.stdout.read()
+
+    returncode = process.wait()
+
+    thread.join(timeout=1)
+
+    if returncode != 0:
+        raise UpdateError(
+            "Git fetch failed: "
+            + (
+                "\n".join(
+                    output[-8:]
+                )
+                or stdout
+                or str(returncode)
+            )
+        )
+
+    write_status(
+        "checking",
+        "Repository check complete.",
+        progress=20,
+        step="Checking repository",
     )
 
 
@@ -269,8 +414,10 @@ def create_release(
 
     write_status(
         "downloading",
-        f"Downloading ScoreCast {version}.",
+        f"Preparing ScoreCast {version}.",
         version,
+        progress=22,
+        step="Preparing release",
     )
 
     log(
@@ -283,6 +430,14 @@ def create_release(
         "--detach",
         str(release_path),
         tag,
+    )
+
+    write_status(
+        "downloading",
+        "Release files ready.",
+        version,
+        progress=35,
+        step="Preparing release",
     )
 
     return release_path
@@ -390,9 +545,13 @@ def create_release_venv(
 
     write_status(
         "installing",
-        f"Creating environment for "
-        f"ScoreCast {version}.",
+        (
+            f"Creating environment for "
+            f"ScoreCast {version}."
+        ),
         version,
+        progress=40,
+        step="Creating environment",
     )
 
     log(
@@ -410,8 +569,24 @@ def create_release_venv(
         ]
     )
 
+    write_status(
+        "installing",
+        "Installing Python tooling.",
+        version,
+        progress=48,
+        step="Installing dependencies",
+    )
+
     pip_path = (
         venv_path / "bin" / "pip"
+    )
+
+    write_status(
+        "installing",
+        "Installing ScoreCast dependencies.",
+        version,
+        progress=58,
+        step="Installing dependencies",
     )
 
     requirements_path = (
@@ -451,6 +626,14 @@ def create_release_venv(
         / "python"
     )
 
+    write_status(
+        "installing",
+        "Preparing RGB matrix support.",
+        version,
+        progress=70,
+        step="Installing dependencies",
+    )
+
     log(
         "Copying RGB matrix Python binding."
     )
@@ -458,6 +641,14 @@ def create_release_venv(
     copy_rgbmatrix_binding(
         current_python,
         python_path,
+    )
+
+    write_status(
+        "installing",
+        "Dependencies installed.",
+        version,
+        progress=78,
+        step="Installing dependencies",
     )
 
     return venv_path
@@ -515,6 +706,14 @@ def rollback(
         f"Update failed: {reason}"
     )
     log("Rolling back.")
+
+    write_status(
+        "rolling_back",
+        "Restoring the previous release.",
+        attempted_version,
+        progress=95,
+        step="Restoring previous release",
+    )
 
     replace_symlink(
         CURRENT_LINK,
@@ -600,6 +799,8 @@ def install_update(
         "validating",
         f"Validating ScoreCast {version}.",
         version,
+        progress=80,
+        step="Validating release",
     )
 
     log(
@@ -609,6 +810,14 @@ def install_update(
     validate_release(
         release_path,
         python_path,
+    )
+
+    write_status(
+        "validating",
+        "Release validation passed.",
+        version,
+        progress=90,
+        step="Validating release",
     )
 
     replace_symlink(
@@ -635,6 +844,8 @@ def install_update(
         "restarting",
         f"Restarting ScoreCast {version}.",
         version,
+        progress=95,
+        step="Restarting display",
     )
 
     try:
@@ -725,6 +936,14 @@ def main() -> int:
     lock_handle = acquire_lock()
 
     try:
+        write_status(
+            "checking",
+            "Starting update.",
+            progress=0,
+            step="Preparing update",
+            run_id=uuid.uuid4().hex,
+        )
+
         (
             latest_tag,
             latest_version,

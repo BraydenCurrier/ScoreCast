@@ -67,6 +67,7 @@ ACTIVE_UPDATE_STATES = {
     "installing",
     "validating",
     "restarting",
+    "rolling_back",
 }
 
 def is_update_service_active() -> bool:
@@ -92,10 +93,26 @@ def is_update_service_active() -> bool:
     ):
         return False
 
+def get_scorecast_version() -> str:
+    """Return the version of the installed ScoreCast release."""
+    current_link = Path("/opt/scorecast/current")
+
+    try:
+        release_path = current_link.resolve(strict=True)
+        version = release_path.name
+
+        if version:
+            return version.removeprefix("v")
+
+    except (OSError, RuntimeError):
+        pass
+
+    return "Development"
+
+
 def set_latest_games(games):
     global latest_games
     latest_games = games
-
 
 def login_required(f):
     @wraps(f)
@@ -368,6 +385,39 @@ def page_styles():
             gap: 10px;
             margin-bottom: 14px;
             align-items: center;
+        }
+
+        .game-filter-controls {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex: 1 1 100%;
+            min-width: 0;
+        }
+
+        .league-filter-select {
+            width: 190px;
+            flex: 0 0 190px;
+        }
+
+        .live-filter {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            min-height: 44px;
+            color: white;
+            font-size: 15px;
+            font-weight: 600;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+
+        .live-filter input {
+            width: 20px;
+            height: 20px;
+            margin: 0;
+            cursor: pointer;
+            accent-color: #0a84ff;
         }
 
         .select-input {
@@ -760,9 +810,104 @@ def page_styles():
                 align-items: stretch;
             }
 
+            .game-filter-controls {
+                width: 100%;
+                flex-direction: row;
+                align-items: center;
+            }
+
+            .league-filter-select {
+                width: 165px;
+                flex: 0 0 165px;
+            }
+
+            .live-filter {
+                flex: 0 0 auto;
+            }
+
             .alert-options {
                 grid-template-columns: 1fr;
             }
+        }
+        .update-progress {
+            margin-top: 18px;
+            padding: 16px;
+            border: 1px solid #34343e;
+            border-radius: 14px;
+            background: #101015;
+        }
+
+        .update-progress-heading {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .update-progress-heading strong {
+            font-size: 18px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .update-progress-track {
+            height: 14px;
+            border-radius: 999px;
+            overflow: hidden;
+            background: #34343e;
+        }
+
+        .update-progress-fill {
+            height: 100%;
+            width: 0;
+            border-radius: 999px;
+            background: #55f18b;
+            transition: width 0.3s ease;
+        }
+
+        .update-progress-failed {
+            background: #ff9f0a;
+        }
+
+        .update-progress-note {
+            margin-top: 10px;
+            color: #a5a5b0;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        @media (
+            prefers-reduced-motion: reduce
+        ) {
+            .update-progress-fill {
+                transition: none;
+            }
+        }
+
+        .settings-version {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 0;
+            margin-bottom: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .settings-version-label {
+            color: #a5a5b0;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .settings-version-value {
+            color: #f5f5f7;
+            font-size: 14px;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
         }
     </style>
     """
@@ -869,6 +1014,25 @@ def get_favorite_team_options(league_key):
     except (ValueError, OSError):
         return []
 
+def is_game_live(game):
+    status = str(
+        getattr(game, "status", "")
+    ).strip().upper()
+
+    if not status:
+        return False
+
+    not_live_statuses = {
+        "STATUS_SCHEDULED",
+        "SCHEDULED",
+        "STATUS_FINAL",
+        "FINAL",
+        "STATUS_PREVIEW",
+        "PREVIEW",
+    }
+
+    return status not in not_live_statuses
+
 def get_display_status(game, league_key):
     status = getattr(game, "status", "")
 
@@ -970,6 +1134,7 @@ def games():
 
         league_key, league_label = get_game_league(game)
         display_status = get_display_status(game, league_key)
+        is_live = is_game_live(game)
 
         is_top_25 = (
             league_key == "cfb"
@@ -987,7 +1152,7 @@ def games():
         home_score = escape(str(getattr(game, "home_score", 0)))
 
         game_rows += f"""
-        <div class="game-row-container" draggable="true" data-id="{safe_game_id}" data-league="{league_key}" data-top25="{"true" if is_top_25 else "false"}">
+        <div class="game-row-container" draggable="true" data-id="{safe_game_id}" data-league="{league_key}" data-top25="{"true" if is_top_25 else "false"}" data-live="{"true" if is_live else "false"}">
             <label class="game-row">
                 <input type="checkbox" name="game" value="{safe_game_id}" {checked} {"disabled" if favorite_game else ""}> 
                 {f'<input type="hidden" name="game" value="{safe_game_id}">' if favorite_game else ''}
@@ -1051,6 +1216,15 @@ def games():
                         <option value="fantasy">Fantasy</option>
                     </select>
 
+                    <label class="live-filter">
+                        <input
+                            type="checkbox"
+                            id="live_games_only"
+                            onchange="filterGames()"
+                        >
+                        <span>Live Games</span>
+                    </label>
+
                     <button type="button" class="secondary-button" onclick="selectVisibleGames()">All</button>
                     <button type="button" class="secondary-button" onclick="deselectVisibleGames()">None</button>
                 </div>
@@ -1078,9 +1252,18 @@ def games():
 
             const selectedFilter = getCurrentLeagueFilter();
 
+            const liveCheckbox = document.getElementById(
+                "live_games_only"
+            );
+
+            const liveOnly = liveCheckbox
+                ? liveCheckbox.checked
+                : false;
+
             document.querySelectorAll(".game-row-container").forEach(function(row) {{
                 const text = row.innerText.toLowerCase();
                 const rowLeague = row.dataset.league;
+                const rowIsLive = row.dataset.live === "true";
 
                 const checkbox = row.querySelector(
                     'input[type="checkbox"][name="game"]'
@@ -1107,8 +1290,15 @@ def games():
                     matchesFilter = rowLeague === selectedFilter;
                 }}
 
+                const matchesLive = (
+                    !liveOnly
+                    || rowIsLive
+                );
+
                 row.style.display = (
-                    matchesSearch && matchesFilter
+                    matchesSearch
+                    && matchesFilter
+                    && matchesLive
                 ) ? "" : "none";
             }});
         }}
@@ -2912,6 +3102,7 @@ def save_logos():
 @app.route("/settings")
 @login_required
 def settings_page():
+    software_version = get_scorecast_version()
     settings = get_settings()
 
     cfb_settings = settings.get("cfb", {})
@@ -3076,6 +3267,16 @@ def settings_page():
                     Software Update
                 </div>
 
+                <div class="settings-version">
+                    <div class="settings-version-label">
+                        Software Version
+                    </div>
+
+                    <div class="settings-version-value">
+                        ScoreCast v{escape(software_version)}
+                    </div>
+                </div>
+
                 <div class="hint">
                     Install the latest stable ScoreCast
                     release from GitHub.
@@ -3106,30 +3307,40 @@ def settings_page():
 
                 <div
                     id="update_progress_container"
-                    style="
-                        display: none;
-                        margin-top: 12px;
-                    "
+                    class="update-progress"
+                    style="display:none;"
                 >
+                    <div class="update-progress-heading">
+                        <span id="update_progress_step">
+                            Preparing update
+                        </span>
+
+                        <strong id="update_progress_percent">
+                            0%
+                        </strong>
+                    </div>
+
                     <div
-                        style="
-                            width: 100%;
-                            height: 8px;
-                            border-radius: 999px;
-                            overflow: hidden;
-                            background: rgba(255, 255, 255, 0.1);
-                        "
+                        id="update_progress_track"
+                        class="update-progress-track"
+                        role="progressbar"
+                        aria-label="Update progress"
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                        aria-valuenow="0"
                     >
                         <div
                             id="update_progress_bar"
-                            style="
-                                width: 10%;
-                                height: 100%;
-                                border-radius: 999px;
-                                background: currentColor;
-                                transition: width 0.3s ease;
-                            "
+                            class="update-progress-fill"
                         ></div>
+                    </div>
+
+                    <div
+                        id="update_progress_note"
+                        class="update-progress-note"
+                    >
+                        Progress is based on completed
+                        installation steps.
                     </div>
                 </div>
 
@@ -3156,10 +3367,11 @@ def settings_page():
             idle: "Ready",
             checking: "Checking GitHub",
             available: "Update Available",
-            downloading: "Downloading Update",
+            downloading: "Preparing Release",
             installing: "Installing Dependencies",
             validating: "Validating Release",
             restarting: "Restarting ScoreCast",
+            rolling_back: "Restoring Previous Release",
             complete: "Update Complete",
             current: "Already Up to Date",
             rolled_back: "Update Rolled Back",
@@ -3168,16 +3380,15 @@ def settings_page():
 
         const updateStateProgress = {{
             idle: 0,
-            checking: 10,
-            available: 10,
-            downloading: 30,
-            installing: 55,
-            validating: 75,
-            restarting: 90,
+            checking: 5,
+            available: 100,
+            downloading: 20,
+            installing: 40,
+            validating: 80,
+            restarting: 95,
+            rolling_back: 95,
             complete: 100,
-            current: 100,
-            rolled_back: 100,
-            failed: 100
+            current: 100
         }};
 
         const activeUpdateStates = new Set([
@@ -3185,15 +3396,68 @@ def settings_page():
             "downloading",
             "installing",
             "validating",
-            "restarting"
+            "restarting",
+            "rolling_back"
         ]);
 
+        let updateStatusTimer = null;
+        let updatePollBusy = false;
+        let updateStarting = false;
+        let updateReconnect = false;
+        let updateLastStatus = null;
+        let updateLastProgress = 0;
+
         function renderUpdateStatus(status) {{
-            const messageElement = document.getElementById(
+            const state = status.state || "idle";
+
+            const active = (
+                activeUpdateStates.has(state)
+                || status.service_active === true
+            );
+
+            const terminal = [
+                "complete",
+                "current",
+                "failed",
+                "rolled_back",
+                "available"
+            ].includes(state);
+
+            const raw = Number(status.progress);
+
+            const progress = Number.isFinite(raw)
+                ? Math.max(
+                    0,
+                    Math.min(100, raw)
+                )
+                : (
+                    updateStateProgress[state]
+                    ?? 0
+                );
+
+            const value = active
+                ? Math.max(
+                    updateLastProgress,
+                    progress
+                )
+                : progress;
+
+            if (active) {{
+                updateLastProgress = value;
+            }} else if (
+                terminal
+                || state === "idle"
+            ) {{
+                updateLastProgress = 0;
+            }}
+
+            updateLastStatus = status;
+
+            const message = document.getElementById(
                 "update_status_message"
             );
 
-            const detailsElement = document.getElementById(
+            const details = document.getElementById(
                 "update_status_details"
             );
 
@@ -3201,78 +3465,135 @@ def settings_page():
                 "update_button"
             );
 
-            const progressContainer = document.getElementById(
+            const container = document.getElementById(
                 "update_progress_container"
             );
 
-            const progressBar = document.getElementById(
+            const bar = document.getElementById(
                 "update_progress_bar"
             );
 
-            if (
-                !messageElement
-                || !detailsElement
-                || !button
-            ) {{
-                return;
-            }}
+            const percent = document.getElementById(
+                "update_progress_percent"
+            );
 
-            const state = status.state || "idle";
+            const step = document.getElementById(
+                "update_progress_step"
+            );
 
-            const label = (
+            const note = document.getElementById(
+                "update_progress_note"
+            );
+
+            const track = document.getElementById(
+                "update_progress_track"
+            );
+
+            message.textContent = (
                 updateStateLabels[state]
                 || "Update Status"
             );
 
-            messageElement.textContent = label;
-
-            detailsElement.textContent = (
+            details.textContent = (
                 status.message
                 || "Update status unavailable."
             );
 
-            const isActive = (
-                activeUpdateStates.has(state)
-                || status.service_active === true
+            button.disabled = (
+                active
+                || updateStarting
             );
 
-            button.disabled = isActive;
-
-            button.textContent = isActive
-                ? "Updating..."
+            button.textContent = active
+                ? "Updating…"
                 : "Check and Install Update";
 
-            const showProgress = (
-                isActive
-                || state === "complete"
-                || state === "failed"
-                || state === "rolled_back"
+            container.style.display = (
+                active
+                || terminal
+            )
+                ? "block"
+                : "none";
+
+            bar.style.width = (
+                value + "%"
             );
 
-            if (progressContainer) {{
-                progressContainer.style.display = (
-                    showProgress
-                    ? "block"
-                    : "none"
+            bar.classList.toggle(
+                "update-progress-failed",
+                (
+                    state === "failed"
+                    || state === "rolled_back"
+                )
+            );
+
+            percent.textContent = (
+                Math.round(value)
+                + "%"
+            );
+
+            step.textContent = (
+                status.step
+                || updateStateLabels[state]
+                || "Update"
+            );
+
+            if (
+                state === "failed"
+                || state === "rolled_back"
+            ) {{
+                note.textContent = (
+                    "The update did not complete. "
+                    + "Review the message above."
+                );
+
+            }} else if (
+                state === "complete"
+                || state === "current"
+            ) {{
+                note.textContent = (
+                    "All update steps completed."
+                );
+
+            }} else if (
+                status.progress_kind
+                === "transfer"
+            ) {{
+                note.textContent = (
+                    "Git transfer progress. "
+                    + "The overall update includes "
+                    + "additional steps."
+                );
+
+            }} else {{
+                note.textContent = (
+                    "Overall progress is based "
+                    + "on completed steps, "
+                    + "not estimated time."
                 );
             }}
 
-            if (progressBar) {{
-                const progress = (
-                    updateStateProgress[state]
-                    ?? 0
-                );
+            track.setAttribute(
+                "aria-valuenow",
+                String(Math.round(value))
+            );
 
-                progressBar.style.width = (
-                    progress + "%"
-                );
-            }}
+            track.setAttribute(
+                "aria-valuetext",
+                note.textContent
+            );
         }}
 
         let updateStatusTimer = null;
         let scoreCastWasRestarting = false;
 
         async function loadUpdateStatus() {{
+            if (updatePollBusy) {{
+                return;
+            }}
+
+            updatePollBusy = true;
+
             try {{
                 const response = await fetch(
                     "/api/update/status",
@@ -3284,59 +3605,70 @@ def settings_page():
 
                 if (!response.ok) {{
                     throw new Error(
-                        "Unable to read update status."
+                        "Status request failed"
                     );
                 }}
 
-                const status = await response.json();
+                const status =
+                    await response.json();
 
                 renderUpdateStatus(status);
 
-                if (
-                    status.state === "restarting"
-                    || status.state === "complete"
-                ) {{
-                    scoreCastWasRestarting = true;
-                }}
-
-                if (
-                    scoreCastWasRestarting
-                    && (
-                        status.state === "complete"
-                        || status.state === "current"
-                        || status.state === "failed"
-                        || status.state === "rolled_back"
-                    )
-                ) {{
-                    scoreCastWasRestarting = false;
-                }}
-
             }} catch (error) {{
-                const messageElement = (
+                const wasActive = (
+                    updateStarting
+                    || updateReconnect
+                    || (
+                        updateLastStatus
+                        && (
+                            activeUpdateStates.has(
+                                updateLastStatus.state
+                            )
+                            || updateLastStatus
+                                .service_active
+                                === true
+                        )
+                    )
+                );
+
+                if (wasActive) {{
+                    updateReconnect = true;
+
                     document.getElementById(
                         "update_status_message"
-                    )
-                );
+                    ).textContent = (
+                        "Reconnecting to ScoreCast…"
+                    );
 
-                const detailsElement = (
                     document.getElementById(
                         "update_status_details"
-                    )
-                );
+                    ).textContent = (
+                        "The dashboard may be "
+                        + "restarting. Your update "
+                        + "progress is preserved."
+                    );
 
-                if (messageElement) {{
-                    messageElement.textContent = (
-                        "ScoreCast is restarting..."
+                    document.getElementById(
+                        "update_button"
+                    ).disabled = true;
+
+                }} else {{
+                    document.getElementById(
+                        "update_status_message"
+                    ).textContent = (
+                        "Unable to reach updater"
+                    );
+
+                    document.getElementById(
+                        "update_status_details"
+                    ).textContent = (
+                        "Check your connection "
+                        + "and try again."
                     );
                 }}
 
-                if (detailsElement) {{
-                    detailsElement.textContent = (
-                        "The dashboard will reconnect automatically."
-                    );
-                }}
-
-                scoreCastWasRestarting = true;
+            }} finally {{
+                updatePollBusy = false;
             }}
         }}
 
@@ -3349,6 +3681,9 @@ def settings_page():
             if (!confirmed) {{
                 return;
             }}
+
+            updateStarting = true;
+            updateLastProgress = 0;
 
             const button = document.getElementById(
                 "update_button"
@@ -3405,9 +3740,14 @@ def settings_page():
                     );
                 }}
 
+                updateStarting = false;
+                updateReconnect = true;
+
                 await loadUpdateStatus();
 
             }} catch (error) {{
+                updateStarting = false;
+
                 if (messageElement) {{
                     messageElement.textContent = (
                         "Unable to Start Update"
