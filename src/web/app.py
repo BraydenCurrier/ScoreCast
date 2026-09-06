@@ -1409,8 +1409,6 @@ def games():
 
         document.addEventListener("DOMContentLoaded", function () {{
             filterGames();
-            loadUpdateStatus();
-            updateStatusTimer = setInterval(loadUpdateStatus, 2000);
         }});
     </script>
 </body>
@@ -3423,7 +3421,12 @@ def settings_page():
                 "available"
             ].includes(state);
 
-            const raw = Number(status.progress);
+            const raw = (
+                status.progress === null
+                || status.progress === undefined
+            )
+                ? NaN
+                : Number(status.progress);
 
             const progress = Number.isFinite(raw)
                 ? Math.max(
@@ -3612,6 +3615,7 @@ def settings_page():
                 const status =
                     await response.json();
 
+                updateReconnect = false;
                 renderUpdateStatus(status);
 
             }} catch (error) {{
@@ -3820,6 +3824,9 @@ def settings_page():
         bindNumberToSlider("brightness_number", "brightness");
         bindNumberToSlider("refresh_interval_number", "refresh_interval");
         bindNumberToSlider("fps_number", "fps");
+
+        loadUpdateStatus();
+        updateStatusTimer = setInterval(loadUpdateStatus, 2000);
     </script>
 </body>
 </html>
