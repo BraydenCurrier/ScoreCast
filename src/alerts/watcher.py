@@ -57,9 +57,19 @@ def possession_watch_loop(stop_event):
         try:
             settings = get_settings()
 
+            # Pause all possession-alert API requests
+            # while the display is software-powered off.
+            if not settings.get("display_enabled", True):
+                stop_event.wait(0.5)
+                continue
+
             games = get_today_games()
 
-            possession_alert_manager.process_games(games=games, settings=settings, now=time.monotonic())
+            possession_alert_manager.process_games(
+                games=games,
+                settings=settings,
+                now=time.monotonic(),
+            )
 
         except Exception as error:
             _log_error_throttled(error)
@@ -70,8 +80,7 @@ def possession_watch_loop(stop_event):
         except Exception:
             poll_interval = DEFAULT_POLL_INTERVAL
 
-        elapsed = (time.monotonic() - loop_started_at)
-
+        elapsed = time.monotonic() - loop_started_at
         sleep_seconds = max(0.1, poll_interval - elapsed)
 
         stop_event.wait(sleep_seconds)

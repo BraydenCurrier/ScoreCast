@@ -529,6 +529,16 @@ settings = get_settings()
 
 last_brightness = None
 
+# Tracks whether the physical LED display is sleeping.
+display_sleeping = False
+
+# Reusable black frame for blanking the matrix.
+black_frame = Image.new(
+    "RGB",
+    (DISPLAY_WIDTH, MATRIX_HEIGHT),
+    (0, 0, 0),
+)
+
 frame_image = Image.new(
     "RGB",
     (DISPLAY_WIDTH, MATRIX_HEIGHT),
@@ -555,6 +565,55 @@ while True:
     scroll_speed = float(settings.get("scroll_speed", 30.0))
     brightness = int(settings.get("brightness", 50))
     refresh_interval = int(settings.get("refresh_interval", 120))
+
+    # --------------------------------------------------
+    # Display software power / low-energy sleep mode
+    # --------------------------------------------------
+
+    display_enabled = bool(
+        settings.get(
+            "display_enabled",
+            True,
+        )
+    )
+
+    if not display_enabled:
+        if not display_sleeping:
+            # Blank the physical LED matrix once.
+            matrix.SetImage(black_frame)
+
+            # Keep brightness within the rgbmatrix
+            # supported range while all pixels are black.
+            matrix.brightness = 1
+
+            display_sleeping = True
+            last_brightness = None
+
+            print("Display sleeping")
+
+        # Do not start API refreshes, render scorecards,
+        # or process display alerts while asleep.
+        time.sleep(0.2)
+        continue
+
+    if display_sleeping:
+        # Restore the configured brightness.
+        matrix.brightness = brightness
+
+        display_sleeping = False
+        last_brightness = brightness
+
+        # Avoid a large scroll-time jump after sleeping.
+        last_frame_time = time.monotonic()
+
+        # Force a fresh sports update after waking.
+        last_refresh = now - refresh_interval
+
+        print("Display awake")
+
+    # --------------------------------------------------
+    # Normal API refreshes — only while display is awake
+    # --------------------------------------------------
 
     if now - last_refresh >= refresh_interval and not _refresh_in_progress:
         _refresh_in_progress = True
