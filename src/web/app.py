@@ -132,6 +132,24 @@ def page_header(active_page="games"):
     settings_active = "active" if active_page == "settings" else ""
     favorites_active = "active" if active_page == "favorites" else ""
 
+    settings = get_settings()
+
+    display_enabled = bool(
+        settings.get("display_enabled", True)
+    )
+
+    power_class = (
+        "display-power-on"
+        if display_enabled
+        else "display-power-off"
+    )
+
+    power_label = (
+        "Turn display off"
+        if display_enabled
+        else "Turn display on"
+    )
+
     return f"""
     <div class="header">
         <div>
@@ -139,7 +157,38 @@ def page_header(active_page="games"):
             <div class="subtitle">Local display controls</div>
         </div>
 
-        <a class="logout" href="/logout">Logout</a>
+        <form
+            class="display-power-form"
+            method="POST"
+            action="/display/power/toggle"
+        >
+            <input
+                type="hidden"
+                name="next"
+                value="{escape(request.path, quote=True)}"
+            >
+
+            <button
+                type="submit"
+                class="display-power-button {power_class}"
+                aria-label="{power_label}"
+                title="{power_label}"
+            >
+                <svg
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                >
+                    <path
+                        d="
+                            M12 2
+                            V12
+                            M7.05 4.93
+                            A9 9 0 1 0 16.95 4.93
+                        "
+                    />
+                </svg>
+            </button>
+        </form>
     </div>
 
     <div class="tabs">
@@ -298,11 +347,65 @@ def page_styles():
             margin-top: 4px;
         }
 
-        .logout {
-            color: #aaa;
-            text-decoration: none;
-            font-size: 14px;
-            padding-top: 8px;
+        .display-power-form {
+            margin: 0;
+            padding: 0;
+        }
+
+        .display-power-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            width: 46px;
+            height: 46px;
+
+            padding: 0;
+
+            border: 1px solid;
+            border-radius: 50%;
+
+            cursor: pointer;
+
+            transition:
+                background 0.15s ease,
+                border-color 0.15s ease,
+                color 0.15s ease,
+                transform 0.1s ease;
+
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .display-power-button svg {
+            width: 25px;
+            height: 25px;
+
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2.4;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .display-power-on {
+            color: #55f18b;
+            background: rgba(85, 241, 139, 0.12);
+            border-color: rgba(85, 241, 139, 0.55);
+        }
+
+        .display-power-off {
+            color: #ff453a;
+            background: rgba(255, 69, 58, 0.12);
+            border-color: rgba(255, 69, 58, 0.55);
+        }
+
+        .display-power-button:active {
+            transform: scale(0.92);
+        }
+
+        .display-power-button:focus-visible {
+            outline: 2px solid white;
+            outline-offset: 3px;
         }
 
         .tabs {
@@ -1104,6 +1207,42 @@ def logout():
     session.clear()
     return redirect("/login")
 
+@app.route(
+    "/display/power/toggle",
+    methods=["POST"],
+)
+@login_required
+def toggle_display_power():
+    settings = get_settings()
+
+    current_state = bool(
+        settings.get(
+            "display_enabled",
+            True,
+        )
+    )
+
+    new_state = not current_state
+
+    update_settings({
+        "display_enabled": new_state,
+    })
+
+    next_path = (
+        request.form.get(
+            "next",
+            "/games",
+        )
+        .strip()
+    )
+
+    if (
+        not next_path.startswith("/")
+        or next_path.startswith("//")
+    ):
+        next_path = "/games"
+
+    return redirect(next_path)
 
 @app.route("/games")
 @login_required
