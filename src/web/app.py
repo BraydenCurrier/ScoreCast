@@ -408,6 +408,32 @@ def page_styles():
             outline-offset: 3px;
         }
 
+        .system-restart-button {
+            padding: 12px 18px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            background: #2b2b2b;
+            color: #ffffff;
+            font: inherit;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .system-restart-button:hover {
+            background: #3a3a3a;
+        }
+
+        .system-restart-button:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        #system-restart-status {
+            margin-top: 10px;
+            font-size: 13px;
+            color: #a0a0a0;
+        }
+
         .tabs {
             position: relative;
             z-index: 10;
@@ -1243,6 +1269,38 @@ def toggle_display_power():
         next_path = "/games"
 
     return redirect(next_path)
+
+@app.route("/system/restart", methods=["POST"])
+@login_required
+def restart_scorecast():
+    import threading
+    import time
+
+    def restart_service():
+        # Give Flask time to return the response before
+        # systemd terminates this process.
+        time.sleep(1.0)
+
+        subprocess.run(
+            [
+                "/usr/bin/systemctl",
+                "restart",
+                "scorecast.service",
+            ],
+            check=False,
+            timeout=30,
+        )
+
+    threading.Thread(
+        target=restart_service,
+        daemon=True,
+        name="scorecast-restart",
+    ).start()
+
+    return jsonify({
+        "ok": True,
+        "message": "ScoreCast is restarting.",
+    })
 
 @app.route("/games")
 @login_required
@@ -3492,6 +3550,35 @@ def settings_page():
                 </button>
             </div>
 
+
+            <div class="card">
+                <div class="card-title">
+                    System
+                </div>
+
+                <div class="hint">
+                    Restart the ScoreCast application without rebooting
+                    the Raspberry Pi. The display and dashboard will
+                    briefly disconnect.
+                </div>
+
+                <div
+                    id="system_restart_status"
+                    class="hint"
+                    style="margin-top: 12px;"
+                ></div>
+
+                <button
+                    type="button"
+                    id="system_restart_button"
+                    class="save-button"
+                    style="margin-top: 14px;"
+                    onclick="restartScoreCast()"
+                >
+                    Restart ScoreCast
+                </button>
+            </div>
+
             <button class="save-button" type="submit">
                 Save Settings
             </button>
@@ -3907,6 +3994,103 @@ def settings_page():
                     button.textContent = (
                         "Check and Install Update"
                     );
+                }}
+            }}
+        }}
+
+
+        async function restartScoreCast() {{
+            const confirmed = window.confirm(
+                "Restart ScoreCast? "
+                + "The display and dashboard will briefly disconnect."
+            );
+
+            if (!confirmed) {{
+                return;
+            }}
+
+            const button = document.getElementById(
+                "system_restart_button"
+            );
+
+            const status = document.getElementById(
+                "system_restart_status"
+            );
+
+            if (button) {{
+                button.disabled = true;
+                button.textContent = "Restarting…";
+            }}
+
+            if (status) {{
+                status.textContent = (
+                    "Restart requested. Waiting for ScoreCast to come back online…"
+                );
+            }}
+
+            try {{
+                const response = await fetch(
+                    "/system/restart",
+                    {{
+                        method: "POST",
+                        cache: "no-store"
+                    }}
+                );
+
+                if (!response.ok) {{
+                    throw new Error(
+                        "Restart request failed"
+                    );
+                }}
+
+                await new Promise(
+                    resolve => setTimeout(resolve, 2500)
+                );
+
+                for (
+                    let attempt = 0;
+                    attempt < 30;
+                    attempt++
+                ) {{
+                    try {{
+                        const health = await fetch(
+                            "/api/update/status",
+                            {{
+                                method: "GET",
+                                cache: "no-store"
+                            }}
+                        );
+
+                        if (health.ok) {{
+                            window.location.reload();
+                            return;
+                        }}
+                    }} catch (error) {{
+                        // ScoreCast is still restarting.
+                    }}
+
+                    await new Promise(
+                        resolve => setTimeout(resolve, 1000)
+                    );
+                }}
+
+                if (status) {{
+                    status.textContent = (
+                        "Restart is taking longer than expected. "
+                        + "Refresh this page in a moment."
+                    );
+                }}
+
+            }} catch (error) {{
+                if (status) {{
+                    status.textContent = (
+                        "Unable to request the restart."
+                    );
+                }}
+
+                if (button) {{
+                    button.disabled = false;
+                    button.textContent = "Restart ScoreCast";
                 }}
             }}
         }}
