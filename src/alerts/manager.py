@@ -1,6 +1,7 @@
 from collections import deque
 from dataclasses import dataclass, field
 from threading import RLock
+import re
 import time
 from typing import Optional
 
@@ -221,9 +222,27 @@ class PossessionAlertManager:
                     headline = "FIELD GOAL"
                     chant = ("FIELD", "GOAL")
 
-                score_detail = (f"{str(game.away).upper()} " f"{away_score}-{home_score} " f"{str(game.home).upper()}")
+                play_detail = self._alert_play_detail(
+                    alert_type=scoring_type,
+                    game=game,
+                    team=scoring_team,
+                )
 
-                alert = self._enqueue_event_alert(game=game, alert_type=scoring_type, team=scoring_team, headline=headline, detail=score_detail, chant=chant, now=now, chant_frame_seconds=(chant_frame_seconds), details_frame_seconds=(details_frame_seconds))
+                alert = self._enqueue_event_alert(
+                    game=game,
+                    alert_type=scoring_type,
+                    team=scoring_team,
+                    headline=headline,
+                    detail=play_detail,
+                    chant=chant,
+                    now=now,
+                    chant_frame_seconds=(
+                        chant_frame_seconds
+                    ),
+                    details_frame_seconds=(
+                        details_frame_seconds
+                    ),
+                )
 
                 if alert is not None:
                     created_alerts.append(alert)
@@ -359,8 +378,10 @@ class PossessionAlertManager:
             headline=(
                 team_definition.possession_label
             ),
-            detail=self._field_position_text(
-                game
+            detail=self._alert_play_detail(
+                alert_type="POSSESSION",
+                game=game,
+                team=current_team,
             ),
             chant=team_definition.chant,
             now=now,
@@ -380,6 +401,300 @@ class PossessionAlertManager:
                 event_type="POSSESSION",
                 team=current_team,
                 now=now,
+            )
+
+        @classmethod
+        def _alert_play_detail(
+            cls,
+            *,
+            alert_type: str,
+            game: FootballGame,
+            team: str,
+        ) -> str:
+            """Build a short explanation for the alert details frame."""
+            alert_type = str(alert_type or "").upper()
+
+            play_text = str(
+                getattr(
+                    game,
+                    "last_play_text",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            if not play_text:
+                if alert_type == "POSSESSION":
+                    return "CHANGE OF POSSESSION"
+
+                return cls._field_position_text(
+                    game
+                )
+
+            compact = re.sub(
+                r"\s+",
+                " ",
+                play_text,
+            ).strip()
+
+            upper = compact.upper()
+
+            # ---------------------------------------------
+            # Change of possession
+            # ---------------------------------------------
+            if alert_type == "POSSESSION":
+
+                # Interception
+                interception = re.search(
+                    r"INTERCEPTED\s+BY\s+([A-Z][A-Z.'’\-]+)",
+                    upper,
+                )
+
+                if interception:
+                    return (
+                        f"INT BY "
+                        f"{interception.group(1)}"
+                    )
+
+                # Fumble recovery
+                recovery = re.search(
+                    r"RECOVERED\s+BY\s+"
+                    r"(?:[A-Z]{2,4}-)?"
+                    r"([A-Z][A-Z.'’\-]+)",
+                    upper,
+                )
+
+                if (
+                    "FUMBL" in upper
+                    and recovery
+                ):
+                    return (
+                        f"FUMBLE REC BY "
+                        f"{recovery.group(1)}"
+                    )
+
+                if "FUMBL" in upper:
+                    return "FUMBLE RECOVERY"
+
+                # Missed field goal
+                missed_fg = re.search(
+                    r"(\d{1,2})\s*"
+                    r"(?:YD|YARD)\s+"
+                    r"FIELD\s+GOAL",
+                    upper,
+                )
+
+                if (
+                    "FIELD GOAL" in upper
+                    and any(
+                        marker in upper
+                        for marker in (
+                            "NO GOOD",
+                            "MISSED",
+                            "MISSES",
+                        )
+                    )
+                ):
+                    if missed_fg:
+                        return (
+                            f"MISSED "
+                            f"{missed_fg.group(1)} "
+                            f"YD FG"
+                        )
+
+                    return "MISSED FIELD GOAL"
+
+                # Punt
+                punt_yards = re.search(
+                    r"PUNTS?\s+"
+                    r"(\d{1,3})\s+"
+                    r"YARDS?",
+                    upper,
+                )
+
+                if punt_yards:
+                    return (
+                        f"PUNT "
+                        f"{punt_yards.group(1)} "
+                        f"YDS"
+                    )
+
+                if "PUNT" in upper:
+                    return "PUNT"
+
+                # Kickoff
+                if (
+                    "KICKOFF" in upper
+                    or "KICKS" in upper
+                ):
+                    return "KICKOFF"
+
+                # Turnover on downs
+                if (
+                    "TURNOVER ON DOWNS" in upper
+                    or "TURNED OVER ON DOWNS"
+                    in upper
+                ):
+                    return "TURNOVER ON DOWNS"
+
+                # If possession definitely changed but it
+                # wasn't identified above, this is the
+                # safest fallback for a normal scrimmage
+                # possession change.
+                return "TURNOVER ON DOWNS"
+
+            # ---------------------------------------------
+            # Field goal
+            # ---------------------------------------------
+            if alert_type == "FIELD_GOAL":
+                distance = re.search(
+                    r"(\d{1,2})\s*"
+                    r"(?:YD|YARD)\s+"
+                    r"FIELD\s+GOAL",
+                    upper,
+                )
+
+                kicker = re.match(
+                    r"(?:\([^)]*\)\s*)?"
+                    r"([A-Z][A-Z.'’\-]+)",
+                    upper,
+                )
+
+                if (
+                    kicker
+                    and distance
+                ):
+                    return (
+                        f"{kicker.group(1)} "
+                        f"{distance.group(1)} "
+                        f"YD FG"
+                    )
+
+                if distance:
+                    return (
+                        f"{distance.group(1)} "
+                        f"YD FIELD GOAL"
+                    )
+
+                return "FIELD GOAL GOOD"
+
+            # ---------------------------------------------
+            # Touchdown
+            # ---------------------------------------------
+            if alert_type == "TOUCHDOWN":
+
+                # Pick six
+                interception = re.search(
+                    r"INTERCEPTED\s+BY\s+"
+                    r"([A-Z][A-Z.'’\-]+)",
+                    upper,
+                )
+
+                return_yards = re.search(
+                    r"FOR\s+"
+                    r"(\d{1,3})\s+"
+                    r"YARDS?",
+                    upper,
+                )
+
+                if interception:
+                    if return_yards:
+                        return (
+                            f"{interception.group(1)} "
+                            f"{return_yards.group(1)} "
+                            f"YD PICK 6"
+                        )
+
+                    return (
+                        f"PICK 6 "
+                        f"{interception.group(1)}"
+                    )
+
+                # Passing touchdown
+                pass_td = re.search(
+                    r"([A-Z][A-Z.'’\-]+)"
+                    r"\s+PASS.*?\s+TO\s+"
+                    r"([A-Z][A-Z.'’\-]+)"
+                    r".*?FOR\s+"
+                    r"(\d{1,3})\s+YARDS?",
+                    upper,
+                )
+
+                if pass_td:
+                    return (
+                        f"{pass_td.group(1)} "
+                        f"TO "
+                        f"{pass_td.group(2)} "
+                        f"{pass_td.group(3)} "
+                        f"YD TD"
+                    )
+
+                # Rushing touchdown
+                rush_td = re.search(
+                    r"([A-Z][A-Z.'’\-]+)"
+                    r".*?FOR\s+"
+                    r"(\d{1,3})\s+YARDS?",
+                    upper,
+                )
+
+                if (
+                    rush_td
+                    and "PASS" not in upper
+                ):
+                    return (
+                        f"{rush_td.group(1)} "
+                        f"{rush_td.group(2)} "
+                        f"YD RUSH TD"
+                    )
+
+                # Unknown TD format:
+                # show a shortened version of ESPN's
+                # actual play instead of inventing info.
+                shortened = re.sub(
+                    r"^\([^)]*\)\s*",
+                    "",
+                    upper,
+                )
+
+                shortened = re.sub(
+                    r"\s+TOUCHDOWN.*$",
+                    " TD",
+                    shortened,
+                )
+
+                return cls._fit_alert_detail(
+                    shortened
+                )
+
+            return cls._fit_alert_detail(
+                upper
+            )
+
+        @staticmethod
+        def _fit_alert_detail(
+            text: str,
+            max_chars: int = 55,
+        ) -> str:
+            """Keep details short enough for the alert frame."""
+
+            text = re.sub(
+                r"\s+",
+                " ",
+                str(text or ""),
+            ).strip().upper()
+
+            if len(text) <= max_chars:
+                return text
+
+            shortened = (
+                text[:max_chars]
+                .rsplit(" ", 1)[0]
+                .rstrip(" ,.-")
+            )
+
+            return (
+                shortened
+                or text[:max_chars]
             )
 
     def _enqueue_event_alert(
@@ -578,7 +893,7 @@ class PossessionAlertManager:
 
         if alert_type == "TOUCHDOWN":
             headline = "TOUCHDOWN"
-            detail = f"{team} 7-0 TEST"
+            detail = "J.ALLEN TO K.COLEMAN 24 YD TD"
             chant = (
                 "TOUCH",
                 "DOWN",
@@ -586,7 +901,7 @@ class PossessionAlertManager:
 
         elif alert_type == "FIELD_GOAL":
             headline = "FIELD GOAL"
-            detail = f"{team} 3-0 TEST"
+            detail = "B.AUBREY 52 YD FG"
             chant = (
                 "FIELD",
                 "GOAL",
@@ -605,7 +920,7 @@ class PossessionAlertManager:
             headline = (
                 team_definition.possession_label
             )
-            detail = f"AT {team} 37"
+            detail = "INT BY D.BLAND"
             chant = team_definition.chant
 
         test_alert = PossessionAlert(
