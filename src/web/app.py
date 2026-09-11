@@ -126,6 +126,7 @@ def login_required(f):
 
 def page_header(active_page="games"):
     games_active = "active" if active_page == "games" else ""
+    focus_active = "active" if active_page == "focus" else ""
     fantasy_active = "active" if active_page == "fantasy" else ""
     alerts_active = "active" if active_page == "alerts" else ""
     logos_active = "active" if active_page == "logos" else ""
@@ -193,6 +194,7 @@ def page_header(active_page="games"):
 
     <div class="tabs">
         <a class="tab {games_active}" href="/games" ontouchend="window.location.assign(this.href); return false;">Games</a>
+        <a class="tab {focus_active}" href="/focus" ontouchend="window.location.assign(this.href); return false;">Focus</a>
         <a class="tab {fantasy_active}" href="/fantasy" ontouchend="window.location.assign(this.href); return false;">Fantasy</a>
         <a class="tab {alerts_active}" href="/alerts" ontouchend="window.location.assign(this.href); return false;">Alerts</a>
         <a class="tab {logos_active}" href="/logos" ontouchend="window.location.assign(this.href); return false;">Logos</a>
@@ -1611,6 +1613,371 @@ def games():
 </body>
 </html>
     """
+
+@app.route("/focus")
+@login_required
+def focus_page():
+    settings = get_settings()
+
+    focus_settings = settings.get(
+        "focus_mode",
+        {},
+    )
+
+    if not isinstance(
+        focus_settings,
+        dict,
+    ):
+        focus_settings = {}
+
+    focus_enabled = bool(
+        focus_settings.get(
+            "enabled",
+            False,
+        )
+    )
+
+    selected_game_ids = set(
+        str(value)
+        for value in focus_settings.get(
+            "nfl_game_ids",
+            [],
+        )
+    )
+
+    try:
+        rotation_seconds = int(
+            focus_settings.get(
+                "rotation_seconds",
+                30,
+            )
+        )
+    except (TypeError, ValueError):
+        rotation_seconds = 30
+
+    rotation_seconds = max(
+        5,
+        min(
+            300,
+            rotation_seconds,
+        ),
+    )
+
+    nfl_rows = ""
+
+    for game in latest_games:
+        league_key, _ = get_game_league(
+            game
+        )
+
+        if league_key != "nfl":
+            continue
+
+        game_identifier = get_game_id(
+            game
+        )
+
+        checked = (
+            "checked"
+            if game_identifier
+            in selected_game_ids
+            else ""
+        )
+
+        safe_id = escape(
+            game_identifier,
+            quote=True,
+        )
+
+        safe_away = escape(
+            str(game.away)
+        )
+
+        safe_home = escape(
+            str(game.home)
+        )
+
+        safe_status = escape(
+            str(
+                get_display_status(
+                    game,
+                    "nfl",
+                )
+            )
+        )
+
+        away_score = escape(
+            str(
+                getattr(
+                    game,
+                    "away_score",
+                    0,
+                )
+            )
+        )
+
+        home_score = escape(
+            str(
+                getattr(
+                    game,
+                    "home_score",
+                    0,
+                )
+            )
+        )
+
+        nfl_rows += f"""
+        <label class="game-row">
+            <input
+                type="checkbox"
+                name="focus_nfl_game"
+                value="{safe_id}"
+                {checked}
+            >
+
+            <div class="game-info">
+                <div class="matchup">
+                    {safe_away} @ {safe_home}
+                </div>
+
+                <div class="details">
+                    {away_score} - {home_score}
+                    · {safe_status}
+                </div>
+            </div>
+
+            <div class="league-badge">
+                NFL
+            </div>
+        </label>
+        """
+
+    if not nfl_rows:
+        nfl_rows = """
+        <div class="empty">
+            No NFL games loaded yet.
+        </div>
+        """
+
+    enabled_checked = (
+        "checked"
+        if focus_enabled
+        else ""
+    )
+
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ScoreCast Focus Mode</title>
+    <meta
+        name="viewport"
+        content="
+            width=device-width,
+            initial-scale=1,
+            viewport-fit=cover
+        "
+    >
+    {page_styles()}
+</head>
+
+<body>
+    <div class="page">
+        {page_header("focus")}
+
+        <form
+            method="POST"
+            action="/save_focus"
+        >
+            <div class="card">
+                <div class="card-title">
+                    NFL Focus Mode
+                </div>
+
+                <div class="hint"
+                     style="margin-bottom: 14px;">
+                    Replace the normal ticker with a
+                    full-screen NFL scoreboard.
+                </div>
+
+                <label class="game-row">
+                    <input
+                        type="checkbox"
+                        name="focus_enabled"
+                        {enabled_checked}
+                    >
+
+                    <div class="game-info">
+                        <div class="matchup">
+                            Enable Focus Mode
+                        </div>
+
+                        <div class="details">
+                            Alerts will still temporarily
+                            override Focus Mode.
+                        </div>
+                    </div>
+                </label>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    Rotation
+                </div>
+
+                <div class="control">
+                    <div class="control-top">
+                        <label
+                            for="focus_rotation_seconds"
+                        >
+                            Switch Games Every
+                        </label>
+
+                        <input
+                            class="number-input"
+                            type="number"
+                            id="focus_rotation_seconds"
+                            name="focus_rotation_seconds"
+                            min="5"
+                            max="300"
+                            step="5"
+                            value="{rotation_seconds}"
+                        >
+                    </div>
+
+                    <input
+                        type="range"
+                        id="focus_rotation_slider"
+                        min="5"
+                        max="300"
+                        step="5"
+                        value="{rotation_seconds}"
+                        oninput="
+                            focus_rotation_seconds.value
+                            = this.value
+                        "
+                    >
+
+                    <div class="hint">
+                        Only used when more than one
+                        NFL game is selected.
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    NFL Games
+                </div>
+
+                <div
+                    class="hint"
+                    style="margin-bottom: 14px;"
+                >
+                    Select one or more games to display
+                    in Focus Mode.
+                </div>
+
+                {nfl_rows}
+            </div>
+
+            <button
+                class="save-button"
+                type="submit"
+            >
+                Save Focus Mode
+            </button>
+        </form>
+    </div>
+
+    <script>
+        const rotationNumber =
+            document.getElementById(
+                "focus_rotation_seconds"
+            );
+
+        const rotationSlider =
+            document.getElementById(
+                "focus_rotation_slider"
+            );
+
+        rotationNumber.addEventListener(
+            "input",
+            function() {{
+                rotationSlider.value =
+                    rotationNumber.value;
+            }}
+        );
+    </script>
+</body>
+</html>
+    """
+
+@app.route(
+    "/save_focus",
+    methods=["POST"],
+)
+@login_required
+def save_focus():
+    selected_game_ids = (
+        request.form.getlist(
+            "focus_nfl_game"
+        )
+    )
+
+    valid_nfl_game_ids = {
+        get_game_id(game)
+        for game in latest_games
+        if get_game_league(game)[0]
+        == "nfl"
+    }
+
+    selected_game_ids = [
+        game_identifier
+        for game_identifier
+        in selected_game_ids
+        if game_identifier
+        in valid_nfl_game_ids
+    ]
+
+    try:
+        rotation_seconds = int(
+            request.form.get(
+                "focus_rotation_seconds",
+                30,
+            )
+        )
+    except (TypeError, ValueError):
+        rotation_seconds = 30
+
+    rotation_seconds = max(
+        5,
+        min(
+            300,
+            rotation_seconds,
+        ),
+    )
+
+    focus_enabled = (
+        request.form.get(
+            "focus_enabled"
+        )
+        == "on"
+    )
+
+    update_settings({
+        "focus_mode": {
+            "enabled": focus_enabled,
+            "nfl_game_ids": (
+                selected_game_ids
+            ),
+            "rotation_seconds": (
+                rotation_seconds
+            ),
+        },
+    })
+
+    return redirect("/focus")
 
 @app.route("/alerts", methods=["GET", "POST"])
 @login_required
