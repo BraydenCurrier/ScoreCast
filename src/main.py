@@ -23,6 +23,7 @@ from mlb.mlb_renderer import render_game_strip_onto as draw_mlb_strip
 
 from nfl.api import get_today_games as get_live_nfl
 from nfl.nfl_renderer import render_game_strip_onto as draw_nfl_strip
+from nfl.focus_renderer import render_nfl_focus
 
 from cfb.api import get_today_games as get_live_cfb
 from cfb.cfb_renderer import render_game_strip_onto as draw_cfb_strip
@@ -283,6 +284,82 @@ def is_favorite_game(
         or home in favorites
     )
 
+def get_focus_settings(settings):
+    focus = settings.get(
+        "focus_mode",
+        {},
+    )
+
+    if not isinstance(
+        focus,
+        dict,
+    ):
+        focus = {}
+
+    return focus
+
+
+def get_focus_nfl_games(
+    all_games,
+    settings,
+):
+    focus = get_focus_settings(
+        settings
+    )
+
+    if not bool(
+        focus.get(
+            "enabled",
+            False,
+        )
+    ):
+        return []
+
+    selected_ids = focus.get(
+        "nfl_game_ids",
+        [],
+    )
+
+    if not isinstance(
+        selected_ids,
+        list,
+    ):
+        return []
+
+    selected_ids = [
+        str(value)
+        for value in selected_ids
+    ]
+
+    selected_set = set(
+        selected_ids
+    )
+
+    matching_games = [
+        game
+        for game in all_games
+        if (
+            is_nfl_game(game)
+            and game_id(game)
+            in selected_set
+        )
+    ]
+
+    order_index = {
+        game_identifier: index
+        for index, game_identifier
+        in enumerate(selected_ids)
+    }
+
+    matching_games.sort(
+        key=lambda game: order_index.get(
+            game_id(game),
+            999,
+        )
+    )
+
+    return matching_games
+
 def get_visible_games(all_games, settings):
     hidden = set(settings.get("hidden_games", []))
     return [game for game in all_games if game_id(game) not in hidden or is_favorite_game(game, settings)]
@@ -520,6 +597,10 @@ set_latest_games(_games)
 current_game = 0
 scroll_x = 0.0
 
+focus_game_index = 0
+focus_last_switch = time.monotonic()
+focus_previous_ids = ()
+
 last_refresh = time.monotonic()
 last_settings_poll = 0.0
 
@@ -659,6 +740,102 @@ while True:
             )
 
         last_frame_time = time.monotonic()
+
+        continue
+
+    with _games_lock:
+        focus_source_games = _games.copy()
+
+    focus_games = get_focus_nfl_games(
+        focus_source_games,
+        settings,
+    )
+
+    if focus_games:
+        focus_settings = get_focus_settings(
+            settings
+        )
+
+        try:
+            focus_rotation_seconds = int(
+                focus_settings.get(
+                    "rotation_seconds",
+                    30,
+                )
+            )
+        except (TypeError, ValueError):
+            focus_rotation_seconds = 30
+
+        focus_rotation_seconds = max(
+            5,
+            min(
+                300,
+                focus_rotation_seconds,
+            ),
+        )
+
+        focus_ids = tuple(
+            game_id(game)
+            for game in focus_games
+        )
+
+        # Selected games changed in the web app.
+        if focus_ids != focus_previous_ids:
+            focus_previous_ids = focus_ids
+            focus_game_index = 0
+            focus_last_switch = now
+
+        if (
+            focus_game_index
+            >= len(focus_games)
+        ):
+            focus_game_index = 0
+
+        # Only rotate if more than one game is selected.
+        if (
+            len(focus_games) > 1
+            and (
+                now - focus_last_switch
+                >= focus_rotation_seconds
+            )
+        ):
+            focus_game_index += 1
+
+            if (
+                focus_game_index
+                >= len(focus_games)
+            ):
+                focus_game_index = 0
+
+            focus_last_switch = now
+
+        focus_game = focus_games[
+            focus_game_index
+        ]
+
+        focus_frame = render_nfl_focus(
+            focus_game,
+            settings,
+        )
+
+        matrix.SetImage(
+            focus_frame
+        )
+
+        frame_elapsed = (
+            time.monotonic()
+            - frame_started_at
+        )
+
+        sleep_time = (
+            frame_delay
+            - frame_elapsed
+        )
+
+        if sleep_time > 0:
+            time.sleep(
+                sleep_time
+            )
 
         continue
 
