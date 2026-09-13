@@ -114,6 +114,8 @@ GFX_5X7 = {
     "-": [0x08, 0x08, 0x08, 0x08, 0x08],
     " ": [0x00, 0x00, 0x00, 0x00, 0x00],
     ".": [0x00, 0x60, 0x60, 0x00, 0x00],
+    ":": [0x00, 0x36, 0x36, 0x00, 0x00],
+    "&": [0x36, 0x49, 0x55, 0x22, 0x50],
 }
 
 def draw_4x5_char(draw, x, y, char, color):
@@ -278,6 +280,32 @@ def print_gfx_5x7(draw, text, x, y, color):
 
 def gfx_5x7_width(text):
     return len(str(text)) * 6 - 1
+
+def print_gfx_5x7_centered(
+    draw,
+    text,
+    center_x,
+    y,
+    color,
+):
+    text = str(text)
+
+    width = gfx_5x7_width(
+        text
+    )
+
+    start_x = (
+        center_x
+        - width // 2
+    )
+
+    print_gfx_5x7(
+        draw,
+        text,
+        start_x,
+        y,
+        color,
+    )
 
 def draw_text_right(draw, text, right_x, y, color):
     text = str(text)

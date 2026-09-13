@@ -7,6 +7,7 @@ from common.fonts import (
     print_clock,
     print_gfx_5x7,
     gfx_5x7_width,
+    print_gfx_5x7_centered,
 )
 
 from nfl.colors import (
@@ -20,7 +21,6 @@ from nfl.colors import (
 from nfl.nfl_renderer import (
     draw_team_logo,
     draw_broadcast_logo,
-    draw_possession_football,
     draw_field_tracker,
     ordinal_down,
 )
@@ -104,6 +104,118 @@ def _safe_int(
 # =========================================================
 # Text / score helpers
 # =========================================================
+
+def draw_focus_possession_football(
+    draw,
+    x,
+    y,
+):
+    # ---------------------------------------------
+    # Football body - 11x7
+    # ---------------------------------------------
+
+    # Pointed top/bottom profile
+    draw.line(
+        [
+            (x + 4, y),
+            (x + 6, y),
+        ],
+        fill=BALL_BROWN,
+    )
+
+    draw.line(
+        [
+            (x + 2, y + 1),
+            (x + 8, y + 1),
+        ],
+        fill=BALL_BROWN,
+    )
+
+    draw.line(
+        [
+            (x + 1, y + 2),
+            (x + 9, y + 2),
+        ],
+        fill=BALL_BROWN,
+    )
+
+    draw.line(
+        [
+            (x, y + 3),
+            (x + 10, y + 3),
+        ],
+        fill=BALL_BROWN,
+    )
+
+    draw.line(
+        [
+            (x + 1, y + 4),
+            (x + 9, y + 4),
+        ],
+        fill=BALL_BROWN,
+    )
+
+    draw.line(
+        [
+            (x + 2, y + 5),
+            (x + 8, y + 5),
+        ],
+        fill=BALL_BROWN,
+    )
+
+    draw.line(
+        [
+            (x + 4, y + 6),
+            (x + 6, y + 6),
+        ],
+        fill=BALL_BROWN,
+    )
+
+    # ---------------------------------------------
+    # Horizontal white seam
+    # ---------------------------------------------
+
+    draw.line(
+        [
+            (x + 3, y + 3),
+            (x + 7, y + 3),
+        ],
+        fill=WHITE,
+    )
+
+    # ---------------------------------------------
+    # Vertical lace marks
+    # ---------------------------------------------
+
+    draw.point(
+        (x + 4, y + 2),
+        fill=WHITE,
+    )
+
+    draw.point(
+        (x + 5, y + 2),
+        fill=WHITE,
+    )
+
+    draw.point(
+        (x + 6, y + 2),
+        fill=WHITE,
+    )
+
+    draw.point(
+        (x + 4, y + 4),
+        fill=WHITE,
+    )
+
+    draw.point(
+        (x + 5, y + 4),
+        fill=WHITE,
+    )
+
+    draw.point(
+        (x + 6, y + 4),
+        fill=WHITE,
+    )
 
 def _draw_scaled_gfx_text(
     image,
@@ -830,7 +942,7 @@ def _draw_scheduled(
     draw_team_logo(
         image,
         away,
-        8,
+        33,
         1,
         settings,
     )
@@ -838,7 +950,7 @@ def _draw_scheduled(
     draw_team_logo(
         image,
         home,
-        346,
+        321,
         1,
         settings,
     )
@@ -850,7 +962,7 @@ def _draw_scheduled(
     _draw_team_name(
         draw,
         team=away,
-        x=45,
+        x=70,
         y=11,
         align="left",
     )
@@ -858,7 +970,7 @@ def _draw_scheduled(
     _draw_team_name(
         draw,
         team=home,
-        x=339,
+        x=314,
         y=11,
         align="right",
     )
@@ -904,18 +1016,6 @@ def _draw_scheduled(
             8,
             WHITE,
         )
-
-    # ---------------------------------------------
-    # Matchup separator
-    # ---------------------------------------------
-
-    print_4x5_centered(
-        draw,
-        "VS",
-        FOCUS_WIDTH // 2,
-        15,
-        GREY,
-    )
 
     # ---------------------------------------------
     # Broadcast logo
@@ -988,7 +1088,7 @@ def _draw_live_team(
         draw_team_logo(
             image,
             team,
-            301,
+            321,
             1,
             settings,
         )
@@ -1000,7 +1100,7 @@ def _draw_live_team(
         _draw_team_name(
             draw,
             team=team,
-            x=294,
+            x=314,
             y=2,
             align="right",
         )
@@ -1010,10 +1110,10 @@ def _draw_live_team(
         # -----------------------------------------
 
         if has_possession:
-            draw_possession_football(
+            draw_focus_possession_football(
                 draw,
-                283,
-                11,
+                278,
+                2,
             )
 
         # -----------------------------------------
@@ -1023,8 +1123,8 @@ def _draw_live_team(
         _draw_scaled_gfx_text(
             image,
             text=score,
-            x=237,
-            y=3,
+            x=296,
+            y=15,
             color=YELLOW,
             scale=2,
             align="right",
@@ -1039,7 +1139,7 @@ def _draw_live_team(
         draw_team_logo(
             image,
             team,
-            53,
+            33,
             1,
             settings,
         )
@@ -1051,7 +1151,7 @@ def _draw_live_team(
         _draw_team_name(
             draw,
             team=team,
-            x=90,
+            x=70,
             y=2,
             align="left",
         )
@@ -1061,10 +1161,10 @@ def _draw_live_team(
         # -----------------------------------------
 
         if has_possession:
-            draw_possession_football(
+            draw_focus_possession_football(
                 draw,
-                101,
-                11,
+                106,
+                2,
             )
 
         # -----------------------------------------
@@ -1074,8 +1174,8 @@ def _draw_live_team(
         _draw_scaled_gfx_text(
             image,
             text=score,
-            x=147,
-            y=3,
+            x=88,
+            y=15,
             color=YELLOW,
             scale=2,
             align="left",
@@ -1103,57 +1203,44 @@ def _draw_live_center(
         or ""
     ).strip()
 
+    is_halftime = _is_halftime(
+        game
+    )
+
     # =====================================================
-    # Quarter / halftime
+    # Top line: quarter + clock
     # =====================================================
 
-    if _is_halftime(
-        game
-    ):
-        print_4x5_centered(
-            draw,
-            "HALF",
-            FOCUS_WIDTH // 2,
-            1,
-            WHITE,
-        )
+    if is_halftime:
+        top_text = "HALF"
 
     elif quarter > 0:
-
         quarter_text = (
             "OT"
             if quarter > 4
             else f"Q{quarter}"
         )
 
-        print_4x5_centered(
-            draw,
-            quarter_text,
-            FOCUS_WIDTH // 2,
-            1,
-            WHITE,
+        top_text = (
+            f"{quarter_text} {clock}"
+            if clock
+            else quarter_text
         )
 
-    # =====================================================
-    # Clock
-    # =====================================================
+    else:
+        top_text = clock
 
-    if (
-        clock
-        and not _is_halftime(
-            game
-        )
-    ):
-        print_clock(
+    if top_text:
+        print_gfx_5x7_centered(
             draw,
-            clock,
+            top_text,
             FOCUS_WIDTH // 2,
-            7,
+            4,
             YELLOW,
         )
 
     # =====================================================
-    # Down + distance
+    # Bottom line: down + distance
     # =====================================================
 
     down = _safe_int(
@@ -1172,14 +1259,16 @@ def _draw_live_center(
         )
     )
 
-    if down > 0:
-
+    if (
+        down > 0
+        and not is_halftime
+    ):
         down_text = (
             f"{ordinal_down(down)}"
             f"&{distance}"
         )
 
-        print_4x5_centered(
+        print_gfx_5x7_centered(
             draw,
             down_text,
             FOCUS_WIDTH // 2,
