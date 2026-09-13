@@ -54,10 +54,26 @@ class PossessionAlertManager:
         touchdown_enabled = bool(alerts_settings.get("touchdown_enabled", True))
         field_goal_enabled = bool(alerts_settings.get("field_goal_enabled", True))
 
-        watched_teams = {
-            str(team).upper()
-            for team in alerts_settings.get("possession_teams", [])
-        }
+        teams_by_league = alerts_settings.get(
+            "teams",
+            {},
+        )
+
+        if not isinstance(
+            teams_by_league,
+            dict,
+        ):
+            teams_by_league = {}
+
+        # Backward compatibility with the old
+        # NFL-only alert configuration.
+        if "nfl" not in teams_by_league:
+            teams_by_league["nfl"] = (
+                alerts_settings.get(
+                    "possession_teams",
+                    [],
+                )
+            )
 
         confirmations_required = self._safe_int(alerts_settings.get("confirmations_required", 2), default=2, minimum=1, maximum=5)
         cooldown_seconds = self._safe_float(alerts_settings.get("cooldown_seconds", 20), default=20.0, minimum=0.0, maximum=300.0)
@@ -71,6 +87,21 @@ class PossessionAlertManager:
 
         with self._lock:
             for game in games:
+                league = self._game_league(
+                    game
+                )
+
+                if not league:
+                    continue
+
+                watched_teams = {
+                    str(team).upper()
+                    for team in teams_by_league.get(
+                        league,
+                        [],
+                    )
+                }
+
                 game_id = self._game_id(game)
 
                 if not game_id:
@@ -365,7 +396,10 @@ class PossessionAlertManager:
             return
 
         team_definition = get_team_alert(
-            current_team
+            current_team,
+            league=self._game_league(
+                game
+            ),
         )
 
         if team_definition is None:
@@ -522,26 +556,45 @@ class PossessionAlertManager:
             if "PUNT" in upper:
                 return "PUNT"
 
-            # Kickoff
-            if (
-                "KICKOFF" in upper
-                or "KICKS" in upper
+           # Kickoff
+            if any(
+                marker in upper
+                for marker in (
+                    "KICKOFF",
+                    "KICKS OFF",
+                    "KICKED OFF",
+                    "ONSIDE KICK",
+                    "TOUCHBACK",
+                )
             ):
                 return "KICKOFF"
 
-            # Turnover on downs
+            # ESPN commonly formats a kickoff like:
+            # "X.X kicks 65 yards from ABC 35..."
+            if (
+                "KICKS" in upper
+                and (
+                    " YARDS FROM " in upper
+                    or " YDS FROM " in upper
+                    or " END ZONE" in upper
+                )
+            ):
+                return "KICKOFF"
+
+            # Turnover on downs should only be shown
+            # when ESPN explicitly tells us that is
+            # what happened.
             if (
                 "TURNOVER ON DOWNS" in upper
-                or "TURNED OVER ON DOWNS"
-                in upper
+                or "TURNED OVER ON DOWNS" in upper
             ):
                 return "TURNOVER ON DOWNS"
 
-            # If possession definitely changed but it
-            # wasn't identified above, this is the
-            # safest fallback for a normal scrimmage
-            # possession change.
-            return "TURNOVER ON DOWNS"
+            # Possession definitely changed, but ESPN's
+            # current last-play text does not tell us
+            # exactly why. Do not guess that it was a
+            # turnover on downs.
+            return "CHANGE OF POSSESSION"
 
         # ---------------------------------------------
         # Field goal
@@ -710,9 +763,19 @@ class PossessionAlertManager:
         chant_frame_seconds: float,
         details_frame_seconds: float,
     ) -> Optional[PossessionAlert]:
-        team = str(team or "").upper()
+        team = str(
+            team
+            or ""
+        ).upper()
 
-        team_definition = get_team_alert(team)
+        league = self._game_league(
+            game
+        )
+
+        team_definition = get_team_alert(
+            team,
+            league=league,
+        )
 
         if team_definition is None:
             return None
@@ -733,6 +796,7 @@ class PossessionAlertManager:
 
         alert = PossessionAlert(
             game_id=self._game_id(game),
+            league=league,
             alert_type=str(
                 alert_type or "POSSESSION"
             ).upper(),
@@ -814,6 +878,7 @@ class PossessionAlertManager:
             # their full animation duration.
             self._active_alert = PossessionAlert(
                 game_id=queued_alert.game_id,
+                league=queued_alert.league,
                 alert_type=queued_alert.alert_type,
                 team=queued_alert.team,
                 opponent=queued_alert.opponent,
@@ -845,116 +910,6 @@ class PossessionAlertManager:
             )
 
             return self._active_alert
-
-    def enqueue_test_alert(
-        self,
-        team: str,
-        settings: dict,
-        now: Optional[float] = None,
-        alert_type: str = "POSSESSION",
-    ) -> bool:
-        if now is None:
-            now = time.monotonic()
-
-        team = str(team).upper()
-        alert_type = str(
-            alert_type or "POSSESSION"
-        ).upper()
-
-        team_definition = get_team_alert(team)
-
-        if team_definition is None:
-            return False
-
-        alerts_settings = settings.get(
-            "alerts",
-            {},
-        )
-
-        chant_frame_seconds = self._safe_float(
-            alerts_settings.get(
-                "chant_frame_seconds",
-                0.65,
-            ),
-            default=0.65,
-            minimum=0.2,
-            maximum=3.0,
-        )
-
-        details_frame_seconds = self._safe_float(
-            alerts_settings.get(
-                "details_frame_seconds",
-                4.0,
-            ),
-            default=4.0,
-            minimum=1.0,
-            maximum=15.0,
-        )
-
-        if alert_type == "TOUCHDOWN":
-            headline = "TOUCHDOWN"
-            detail = "J.ALLEN TO K.COLEMAN 24 YD TD"
-            chant = (
-                "TOUCH",
-                "DOWN",
-            )
-
-        elif alert_type == "FIELD_GOAL":
-            headline = "FIELD GOAL"
-            detail = "B.AUBREY 52 YD FG"
-            chant = (
-                "FIELD",
-                "GOAL",
-            )
-
-        elif alert_type == "REDZONE":
-            headline = "RED ZONE"
-            detail = "AT TEST 15"
-            chant = (
-                "RED",
-                "ZONE",
-            )
-
-        else:
-            alert_type = "POSSESSION"
-            headline = (
-                team_definition.possession_label
-            )
-            detail = "INT BY D.BLAND"
-            chant = team_definition.chant
-
-        test_alert = PossessionAlert(
-            game_id="test",
-            alert_type=alert_type,
-            team=team,
-            opponent="TEST",
-            headline=headline,
-            detail=detail,
-            possession_label=(
-                team_definition.possession_label
-            ),
-            chant=chant,
-            primary=team_definition.primary,
-            accent=team_definition.accent,
-            down=1,
-            distance=10,
-            yardline_side=team,
-            yardline_number=37,
-            quarter=1,
-            clock="12:34",
-            created_at=now,
-            chant_frame_seconds=(
-                chant_frame_seconds
-            ),
-            details_frame_seconds=(
-                details_frame_seconds
-            ),
-        )
-
-        with self._lock:
-            self._queue.append(test_alert)
-
-        return True
 
     def clear(self) -> None:
         with self._lock:
@@ -1168,30 +1123,72 @@ class PossessionAlertManager:
             )
             or ""
         )
-
+    
     @staticmethod
+    def _game_league(game) -> str:
+        class_name = (
+            game.__class__.__name__
+        )
+
+        if class_name == "FootballGame":
+            return "nfl"
+
+        if class_name == "CollegeFootballGame":
+            return "cfb"
+
+        return ""
+
+    @classmethod
     def _game_id(
-        game: FootballGame,
+        cls,
+        game,
     ) -> str:
+        league = cls._game_league(
+            game
+        )
+
+        if not league:
+            return ""
+
         event_id = str(
-            game.event_id or ""
+            getattr(
+                game,
+                "event_id",
+                "",
+            )
+            or ""
         ).strip()
 
         if event_id:
-            return event_id
+            return (
+                f"{league}:{event_id}"
+            )
 
         away = str(
-            game.away or ""
+            getattr(
+                game,
+                "away",
+                "",
+            )
+            or ""
         ).upper()
 
         home = str(
-            game.home or ""
+            getattr(
+                game,
+                "home",
+                "",
+            )
+            or ""
         ).upper()
 
         if not away or not home:
             return ""
 
-        return f"{away}@{home}"
+        return (
+            f"{league}:"
+            f"{away}@{home}"
+        )
 
     @staticmethod
     def _reset_candidate(

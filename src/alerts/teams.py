@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Dict, Tuple
 
+from cfb.colors import WHITE as CFB_WHITE, team_color as cfb_team_color
+
 
 RGBColor = Tuple[int, int, int]
 
@@ -306,5 +308,50 @@ NFL_TEAM_ALERTS: Dict[str, NFLTeamAlert] = {
 }
 
 
-def get_team_alert(abbreviation):
-    return NFL_TEAM_ALERTS.get(str(abbreviation).upper())
+def get_team_alert(
+    abbreviation,
+    league="nfl",
+):
+    abbreviation = str(
+        abbreviation
+        or ""
+    ).strip().upper()
+
+    league = str(
+        league
+        or "nfl"
+    ).strip().lower()
+
+    if not abbreviation:
+        return None
+
+    if league == "nfl":
+        return NFL_TEAM_ALERTS.get(
+            abbreviation
+        )
+
+    if league == "cfb":
+        primary = cfb_team_color(
+            abbreviation
+        )
+
+        if primary == CFB_WHITE:
+            accent = (0, 0, 0)
+        else:
+            accent = (255, 255, 255)
+
+        return NFLTeamAlert(
+            abbreviation=abbreviation,
+            name=abbreviation,
+            possession_label=(
+                f"{abbreviation} BALL"
+            ),
+            chant=(
+                abbreviation,
+                "BALL",
+            ),
+            primary=primary,
+            accent=accent,
+        )
+
+    return None

@@ -534,8 +534,26 @@ def _get_broadcast(event, competition):
     return ", ".join(broadcast_names)
 
 
-def get_today_games():
-    selected_groups = get_selected_conference_groups()
+def get_today_games(conference_groups=None):
+    if conference_groups is None:
+        selected_groups = (
+            get_selected_conference_groups()
+        )
+    else:
+        selected_groups = [
+            str(group_id)
+            for group_id in conference_groups
+            if str(group_id) in CFB_CONFERENCES
+        ]
+
+        if not selected_groups:
+            selected_groups = (
+                DEFAULT_CONFERENCE_GROUPS.copy()
+            )
+
+        if "80" in selected_groups:
+            selected_groups = ["80"]
+
     rankings = fetch_rankings()
 
     events_by_id = {}
@@ -582,6 +600,17 @@ def get_today_games():
         status_info = event.get("status") or {}
         status_type = status_info.get("type") or {}
         situation = competition.get("situation") or {}
+
+        last_play = (
+            situation.get("lastPlay")
+            or {}
+        )
+
+        if not isinstance(
+            last_play,
+            dict,
+        ):
+            last_play = {}
 
         home_data, away_data = _get_home_away_competitors(
             competition
@@ -701,6 +730,21 @@ def get_today_games():
 
                 date=formatted_date,
                 week=week_number,
+
+                event_id=str(
+                    event.get("id", "")
+                    or ""
+                ).strip(),
+
+                last_play_id=str(
+                    last_play.get("id", "")
+                    or ""
+                ).strip(),
+
+                last_play_text=str(
+                    last_play.get("text", "")
+                    or ""
+                ).strip(),
             )
         )
 

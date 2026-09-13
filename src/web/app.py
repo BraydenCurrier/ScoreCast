@@ -12,7 +12,10 @@ from common.logo_store import get_logo_variant_path, get_selected_logo_variant, 
 from fantasy.api import connect_sleeper_user, get_user_leagues
 
 from alerts.manager import possession_alert_manager
-from alerts.teams import NFL_TEAM_ALERTS
+from alerts.teams import (
+    NFL_TEAM_ALERTS,
+    get_team_alert,
+)
 
 from updater.status import read_status
 
@@ -1985,12 +1988,45 @@ def alerts_page():
     settings = get_settings()
     alerts = settings.get("alerts", {})
 
+    requested_league = (
+        request.values.get(
+            "league",
+            "nfl",
+        )
+        .strip()
+        .lower()
+    )
+
+    if requested_league not in {
+        "nfl",
+        "cfb",
+    }:
+        requested_league = "nfl"
+
+    league_label = (
+        "NFL"
+        if requested_league == "nfl"
+        else "CFB"
+    )
+
+    if requested_league == "nfl":
+        available_teams = sorted(
+            NFL_TEAM_ALERTS.keys()
+        )
+    else:
+        available_teams = (
+            get_teams_with_logos(
+                "cfb"
+            )
+        )
+
     if request.method == "POST":
         selected_teams = [
             abbreviation
-            for abbreviation in NFL_TEAM_ALERTS
+            for abbreviation
+            in available_teams
             if request.form.get(
-                f"possession_team:{abbreviation}"
+                f"alert_team:{abbreviation}"
             ) == "on"
         ]
 
@@ -2024,6 +2060,34 @@ def alerts_page():
 
             return max(minimum, min(maximum, value))
 
+        teams_by_league = alerts.get(
+            "teams",
+            {},
+        )
+
+        if not isinstance(
+            teams_by_league,
+            dict,
+        ):
+            teams_by_league = {}
+
+        # Import existing NFL selections from the
+        # old NFL-only settings format.
+        if "nfl" not in teams_by_league:
+            teams_by_league["nfl"] = [
+                str(team).upper()
+                for team in alerts.get(
+                    "possession_teams",
+                    [],
+                )
+            ]
+
+        teams_by_league[
+            requested_league
+        ] = sorted(
+            selected_teams
+        )
+
         updated_alerts = {
             "enabled": (
                 request.form.get("enabled") == "on"
@@ -2048,9 +2112,7 @@ def alerts_page():
                     "field_goal_enabled"
                 ) == "on"
             ),
-            "possession_teams": sorted(
-                selected_teams
-            ),
+            "teams": teams_by_league,
             "poll_interval_seconds": form_float(
                 "poll_interval_seconds",
                 3.0,
@@ -2087,7 +2149,13 @@ def alerts_page():
             "alerts": updated_alerts,
         })
 
-        return redirect("/alerts?saved=1")
+        return redirect(
+            url_for(
+                "alerts_page",
+                league=requested_league,
+                saved="1",
+            )
+        )
 
     def checked(name: str, default: bool) -> str:
         return (
@@ -2096,20 +2164,49 @@ def alerts_page():
             else ""
         )
 
+    teams_by_league = alerts.get(
+        "teams",
+        {},
+    )
+
+    if not isinstance(
+        teams_by_league,
+        dict,
+    ):
+        teams_by_league = {}
+
+    if "nfl" not in teams_by_league:
+        teams_by_league["nfl"] = [
+            str(team).upper()
+            for team in alerts.get(
+                "possession_teams",
+                [],
+            )
+        ]
+
     selected_teams = {
         str(team).upper()
-        for team in alerts.get(
-            "possession_teams",
+        for team in teams_by_league.get(
+            requested_league,
             [],
         )
     }
 
     team_rows = ""
 
-    for abbreviation, definition in sorted(
-        NFL_TEAM_ALERTS.items(),
-        key=lambda item: item[1].name,
-    ):
+    for abbreviation in available_teams:
+        abbreviation = str(
+            abbreviation
+        ).upper()
+
+        definition = get_team_alert(
+            abbreviation,
+            league=requested_league,
+        )
+
+        if definition is None:
+            continue
+
         team_checked = (
             "checked"
             if abbreviation in selected_teams
@@ -2120,9 +2217,15 @@ def alerts_page():
             abbreviation,
             quote=True,
         )
-        safe_name = escape(definition.name)
+
+        safe_name = escape(
+            definition.name
+        )
+
         safe_chant = escape(
-            " → ".join(definition.chant)
+            " → ".join(
+                definition.chant
+            )
         )
 
         team_rows += f"""
@@ -2133,10 +2236,15 @@ def alerts_page():
                 {safe_abbreviation.lower()}
             "
         >
-            <label class="game-row alert-team-label">
+            <label
+                class="
+                    game-row
+                    alert-team-label
+                "
+            >
                 <input
                     type="checkbox"
-                    name="possession_team:{safe_abbreviation}"
+                    name="alert_team:{safe_abbreviation}"
                     {team_checked}
                 >
 
@@ -2162,62 +2270,6 @@ def alerts_page():
                     </div>
                 </div>
             </label>
-
-            <div class="team-test-row">
-                <button
-                    class="secondary-button alert-test-button"
-                    type="submit"
-                    formaction="{url_for(
-                        'test_possession_alert',
-                        team=abbreviation,
-                        alert_type='POSSESSION',
-                    )}"
-                    formmethod="POST"
-                >
-                    Possession
-                </button>
-
-                <button
-                    class="secondary-button alert-test-button"
-                    type="submit"
-                    formaction="{url_for(
-                        'test_possession_alert',
-                        team=abbreviation,
-                        alert_type='REDZONE',
-                    )}"
-                    formmethod="POST"
-                >
-                    Red Zone
-                </button>
-
-                <button
-                    class="secondary-button alert-test-button"
-                    type="submit"
-                    formaction="{url_for(
-                        'test_possession_alert',
-                        team=abbreviation,
-                        alert_type='TOUCHDOWN',
-                    )}"
-                    formmethod="POST"
-                >
-                    TD
-                </button>
-
-                <button
-                    class="secondary-button alert-test-button"
-                    type="submit"
-                    formaction="{url_for(
-                        'test_possession_alert',
-                        team=abbreviation,
-                        alert_type='FIELD_GOAL',
-                    )}"
-                    formmethod="POST"
-                >
-                    FG
-                </button>
-            </div>
-
-
         </div>
         """
 
@@ -2399,22 +2451,6 @@ def alerts_page():
                 border-radius: 12px;
             }}
 
-            .team-test-row {{
-                display: grid;
-                grid-template-columns:
-                    repeat(4, 1fr);
-                gap: 7px;
-                padding-left: 36px;
-            }}
-
-            .alert-test-button {{
-                min-width: 0;
-                width: 100%;
-                padding: 10px 4px;
-                font-size: 12px;
-                line-height: 1.1;
-            }}
-
             .alert-control {{
                 margin-bottom: 22px;
             }}
@@ -2468,17 +2504,6 @@ def alerts_page():
                     );
             }}
 
-            @media (max-width: 390px) {{
-                .team-test-row {{
-                    grid-template-columns:
-                        1fr 1fr;
-                }}
-
-                .alert-test-button {{
-                    font-size: 13px;
-                    padding: 11px 6px;
-                }}
-            }}
         </style>
     </head>
 
@@ -2490,8 +2515,65 @@ def alerts_page():
             <form method="POST">
                 <div class="card">
                     <div class="card-title">
-                        NFL Alerts
+                        Alerts
                     </div>
+
+                    <div
+                        style="
+                            margin-bottom: 16px;
+                        "
+                    >
+                        <label
+                            for="alert_league"
+                            style="
+                                display: block;
+                                margin-bottom: 7px;
+                                font-weight: 700;
+                            "
+                        >
+                            League
+                        </label>
+
+                        <select
+                            class="select-input"
+                            id="alert_league"
+                            onchange="
+                                window.location.href =
+                                    '/alerts?league='
+                                    + encodeURIComponent(
+                                        this.value
+                                    )
+                            "
+                        >
+                            <option
+                                value="nfl"
+                                {
+                                    "selected"
+                                    if requested_league == "nfl"
+                                    else ""
+                                }
+                            >
+                                NFL
+                            </option>
+
+                            <option
+                                value="cfb"
+                                {
+                                    "selected"
+                                    if requested_league == "cfb"
+                                    else ""
+                                }
+                            >
+                                CFB
+                            </option>
+                        </select>
+                    </div>
+
+                    <input
+                        type="hidden"
+                        name="league"
+                        value="{requested_league}"
+                    >
 
                     <label class="alert-master-row">
                         <input
@@ -2514,7 +2596,7 @@ def alerts_page():
                                     alert-row-description
                                 "
                             >
-                                Allow NFL events to
+                                Allow {league_label} events to
                                 temporarily take over
                                 the scoreboard.
                             </div>
@@ -2664,7 +2746,7 @@ def alerts_page():
                         "
                         id="alert_team_search"
                         type="search"
-                        placeholder="Search NFL teams..."
+                        placeholder="Search {league_label} teams..."
                         oninput="filterAlertTeams()"
                     >
 
@@ -2935,7 +3017,7 @@ def alerts_page():
                     "
                     type="submit"
                 >
-                    Save NFL Alerts
+                    Save {league_label} Alerts
                 </button>
             </form>
         </div>
@@ -2943,7 +3025,7 @@ def alerts_page():
         <script>
             function setAllAlertTeams(checked) {{
                 document.querySelectorAll(
-                    'input[name^="possession_team:"]'
+                    'input[name^="alert_team:"]'
                 ).forEach(function (input) {{
                     input.checked = checked;
                 }});
@@ -3190,47 +3272,6 @@ def fantasy_page():
 </body>
 </html>
 """
-
-@app.route(
-    "/alerts/test/<team>/<alert_type>",
-    methods=["POST"],
-)
-@login_required
-def test_possession_alert(
-    team: str,
-    alert_type: str,
-):
-    team = str(team).upper()
-    alert_type = str(alert_type).upper()
-
-    valid_alert_types = {
-        "POSSESSION",
-        "REDZONE",
-        "TOUCHDOWN",
-        "FIELD_GOAL",
-    }
-
-    if team not in NFL_TEAM_ALERTS:
-        return "Unknown NFL team.", 404
-
-    if alert_type not in valid_alert_types:
-        return "Unknown alert type.", 404
-
-    settings = get_settings()
-
-    queued = (
-        possession_alert_manager
-        .enqueue_test_alert(
-            team=team,
-            settings=settings,
-            alert_type=alert_type,
-        )
-    )
-
-    if not queued:
-        return "Could not queue alert.", 400
-
-    return redirect("/alerts")
 
 @app.route(
     "/logo-preview/<league>/<team>/<variant>"

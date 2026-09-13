@@ -4,6 +4,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class PossessionAlert:
     game_id: str
+    league: str
     alert_type: str
     team: str
     opponent: str
