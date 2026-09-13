@@ -11,13 +11,14 @@ DISPLAY_HEIGHT = PANEL_HEIGHT
 
 def draw_team_logo(
     image,
+    league,
     team_abbreviation,
     x_start,
     y_start,
 ):
     return draw_logo(
         destination=image,
-        league="nfl",
+        league=league,
         identifier=team_abbreviation,
         x=x_start,
         y=y_start,
@@ -63,8 +64,8 @@ def _create_team_frame(alert):
     left_logo_x = 1
     right_logo_x = (DISPLAY_WIDTH - logo_size - 1)
 
-    draw_team_logo(image, alert.team, left_logo_x, logo_y)
-    draw_team_logo(image, alert.team, right_logo_x, logo_y)
+    draw_team_logo(image, alert.league, alert.team, left_logo_x, logo_y)
+    draw_team_logo(image, alert.league, alert.team, right_logo_x, logo_y)
 
     return image, draw
 

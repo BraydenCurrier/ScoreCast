@@ -34,7 +34,17 @@ DEFAULT_SETTINGS = {
 
     "alerts": {
         "enabled": False,
-        "possession_teams": [],
+
+        "possession_enabled": True,
+        "redzone_enabled": True,
+        "touchdown_enabled": True,
+        "field_goal_enabled": True,
+
+        "teams": {
+            "nfl": [],
+            "cfb": [],
+        },
+
         "cooldown_seconds": 20,
         "poll_interval_seconds": 3.0,
         "confirmations_required": 2,

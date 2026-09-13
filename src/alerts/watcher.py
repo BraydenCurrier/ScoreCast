@@ -3,7 +3,12 @@ import time
 
 from alerts.manager import possession_alert_manager
 from common.settings import get_settings
-from nfl.api import get_today_games
+from nfl.api import (
+    get_today_games as get_nfl_games,
+)
+from cfb.api import (
+    get_today_games as get_cfb_games,
+)
 
 
 DEFAULT_POLL_INTERVAL = 3.0
@@ -63,7 +68,43 @@ def possession_watch_loop(stop_event):
                 stop_event.wait(0.5)
                 continue
 
-            games = get_today_games()
+            games = []
+
+            try:
+                nfl_games = (
+                    get_nfl_games()
+                    or []
+                )
+
+                games.extend(
+                    nfl_games
+                )
+
+            except Exception as error:
+                _log_error_throttled(
+                    RuntimeError(
+                        f"NFL alerts: {error}"
+                    )
+                )
+
+            try:
+                cfb_games = (
+                    get_cfb_games(
+                        conference_groups=["80"],
+                    )
+                    or []
+                )
+
+                games.extend(
+                    cfb_games
+                )
+
+            except Exception as error:
+                _log_error_throttled(
+                    RuntimeError(
+                        f"CFB alerts: {error}"
+                    )
+                )
 
             possession_alert_manager.process_games(
                 games=games,
