@@ -71,6 +71,8 @@ MATRIX_HEIGHT = 32
 CARD_SPACING = 15
 DEFAULT_CARD_WIDTH = 129
 CFB_CARD_WIDTH = 162
+NFL_CARD_WIDTH = 130
+FANTASY_CARD_WIDTH = 143
 
 SETTINGS_POLL_INTERVAL = 0.5
 
@@ -178,6 +180,10 @@ def get_sport(game):
 def get_game_width(game):
     if is_cfb_game(game):
         return CFB_CARD_WIDTH
+    if is_nfl_game(game):
+        return NFL_CARD_WIDTH
+    if is_fantasy_game(game):
+        return FANTASY_CARD_WIDTH
 
     return DEFAULT_CARD_WIDTH
 

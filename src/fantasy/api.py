@@ -641,7 +641,6 @@ def refresh_fantasy_avatars_on_startup():
             league_id
         )
 
-
 def projected_team_points(
     team,
     projections,
@@ -649,6 +648,43 @@ def projected_team_points(
 ):
     total = 0.0
     found = False
+
+    scoring_settings = (
+        scoring_settings
+        or {}
+    )
+
+    try:
+        reception_points = float(
+            scoring_settings.get(
+                "rec",
+                0
+            )
+            or 0
+        )
+
+    except (
+        TypeError,
+        ValueError
+    ):
+        reception_points = 0.0
+
+    # Sleeper provides three ready-made
+    # fantasy point projections.
+    #
+    # Choose the one that most closely
+    # matches the league's reception
+    # scoring.
+    if reception_points >= 0.75:
+        projection_field = "pts_ppr"
+
+    elif reception_points >= 0.25:
+        projection_field = (
+            "pts_half_ppr"
+        )
+
+    else:
+        projection_field = "pts_std"
 
     for player_id in (
         team.get("starters")
@@ -658,57 +694,45 @@ def projected_team_points(
             str(player_id)
         ) or {}
 
+        # Depending on the Sleeper
+        # projection response format,
+        # fantasy-point fields may be
+        # directly on the record or
+        # inside its stats dictionary.
         stats = (
             record.get("stats")
             or {}
         )
 
-        if not stats:
-            continue
+        projected_points = (
+            record.get(
+                projection_field
+            )
+        )
 
-        player_total = 0.0
-        player_found = False
-
-        for (
-            stat_name,
-            multiplier
-        ) in (
-            scoring_settings
-            or {}
-        ).items():
-
-            try:
-                stat_value = float(
-                    stats.get(
-                        stat_name,
-                        0
-                    )
-                    or 0
+        if projected_points is None:
+            projected_points = (
+                stats.get(
+                    projection_field
                 )
-
-                multiplier_value = float(
-                    multiplier
-                    or 0
-                )
-
-            except (
-                TypeError,
-                ValueError
-            ):
-                continue
-
-            if stat_value:
-                player_found = True
-
-            player_total += (
-                stat_value
-                * multiplier_value
             )
 
-        if player_found:
-            found = True
+        if projected_points is None:
+            continue
 
-        total += player_total
+        try:
+            projected_points = float(
+                projected_points
+            )
+
+        except (
+            TypeError,
+            ValueError
+        ):
+            continue
+
+        total += projected_points
+        found = True
 
     if not found:
         return 0.0
@@ -717,7 +741,6 @@ def projected_team_points(
         total,
         2
     )
-
 
 def get_team_info(
     roster_id,

@@ -19,9 +19,9 @@ BADGE_BG = (28, 31, 38)
 BADGE_EDGE = (72, 76, 86)
 
 # Match the physical structure used by NBA/NHL/MLB:
-# 30px away logo + 69px score panel + 30px home logo = 129px.
+# 30px away logo + 79px score panel + 30px home logo = 139px.
 LOGO_SIZE = 30
-SCORE_WIDTH = 69
+SCORE_WIDTH = 83
 CARD_WIDTH = LOGO_SIZE + SCORE_WIDTH + LOGO_SIZE
 
 
