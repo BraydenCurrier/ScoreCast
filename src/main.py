@@ -1,6 +1,7 @@
 import threading
 import time
-from wsgiref.simple_server import make_server
+from socketserver import ThreadingMixIn
+from wsgiref.simple_server import WSGIServer, make_server
 
 import traceback
 
@@ -10,6 +11,8 @@ from PIL import Image, ImageDraw
 
 from common.matrix import create_matrix
 from common.settings import get_settings
+from common.splash import render_idle_splash
+from updater.status import is_update_in_progress
 
 from fantasy.api import get_today_games as get_live_fantasy, refresh_fantasy_avatars_on_startup
 from fantasy.renderer import render_game_strip_onto as draw_fantasy_strip
@@ -75,6 +78,7 @@ NFL_CARD_WIDTH = 130
 FANTASY_CARD_WIDTH = 143
 
 SETTINGS_POLL_INTERVAL = 0.5
+UPDATE_POLL_INTERVAL = 0.25
 
 _games = []
 _games_lock = threading.Lock()
@@ -563,8 +567,18 @@ def refresh_games_background():
         _refresh_in_progress = False
 
 
+class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
+    daemon_threads = True
+    block_on_close = False
+
+
 def run_web_server():
-    server = make_server("0.0.0.0", 8080, app)
+    server = make_server(
+        "0.0.0.0",
+        8080,
+        app,
+        server_class=ThreadingWSGIServer,
+    )
     print("Web app running on port 8080")
     server.serve_forever()
 
@@ -580,6 +594,15 @@ def load_initial_games():
     )
 
 matrix = create_matrix()
+
+if is_update_in_progress():
+    matrix.SetImage(
+        render_idle_splash(
+            DISPLAY_WIDTH,
+            MATRIX_HEIGHT,
+            "UPDATING",
+        )
+    )
 
 threading.Thread(
     target=run_web_server,
@@ -609,6 +632,8 @@ focus_previous_ids = ()
 
 last_refresh = time.monotonic()
 last_settings_poll = 0.0
+last_update_poll = 0.0
+update_in_progress = False
 
 last_frame_time = time.monotonic()
 
@@ -645,6 +670,10 @@ while True:
     if now - last_settings_poll >= SETTINGS_POLL_INTERVAL:
         settings = get_settings()
         last_settings_poll = now
+
+    if now - last_update_poll >= UPDATE_POLL_INTERVAL:
+        update_in_progress = is_update_in_progress()
+        last_update_poll = now
 
     target_fps = get_target_fps(settings)
     frame_delay = 1.0 / target_fps
@@ -697,6 +726,27 @@ while True:
         last_refresh = now - refresh_interval
 
         print("Display awake")
+
+    if update_in_progress:
+        if brightness != last_brightness:
+            matrix.brightness = brightness
+            last_brightness = brightness
+
+        matrix.SetImage(
+            render_idle_splash(
+                DISPLAY_WIDTH,
+                MATRIX_HEIGHT,
+                "UPDATING",
+            )
+        )
+
+        frame_elapsed = time.monotonic() - frame_started_at
+        sleep_time = frame_delay - frame_elapsed
+
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+
+        continue
 
     # --------------------------------------------------
     # Normal API refreshes — only while display is awake
@@ -850,6 +900,13 @@ while True:
     )
 
     if not visible_games:
+        matrix.SetImage(
+            render_idle_splash(
+                DISPLAY_WIDTH,
+                MATRIX_HEIGHT,
+            )
+        )
+
         frame_elapsed = time.monotonic() - frame_started_at
         sleep_time = frame_delay - frame_elapsed
 

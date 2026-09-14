@@ -1,4 +1,5 @@
 import subprocess
+from datetime import timedelta
 from pathlib import Path
 
 from functools import wraps
@@ -7,6 +8,18 @@ from html import escape
 from flask import Flask, abort, request, redirect, send_file, session, jsonify, url_for
 
 from common.settings import get_settings, update_settings
+from common.users import (
+    BOOTSTRAP_PASSWORD,
+    UserError,
+    UserStoreError,
+    authenticate,
+    create_user,
+    delete_user,
+    get_or_create_web_secret,
+    get_user_by_id,
+    has_users,
+    list_users,
+)
 from common.logo_store import get_logo_variant_path, get_selected_logo_variant, get_teams_with_logo_variants, get_teams_with_logos
 
 from fantasy.api import connect_sleeper_user, get_user_leagues
@@ -20,9 +33,11 @@ from alerts.teams import (
 from updater.status import read_status
 
 app = Flask(__name__)
-app.secret_key = "change-this-later"
-
-WEB_PASSWORD = "ticker123"
+app.secret_key = get_or_create_web_secret()
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 86400
 
 latest_games = []
 
@@ -117,11 +132,77 @@ def set_latest_games(games):
     global latest_games
     latest_games = games
 
+def establish_session(user):
+    session.clear()
+    session.permanent = True
+    session["logged_in"] = True
+    session["user_id"] = user["id"]
+    session["username"] = user["username"]
+    session["is_root"] = user["role"] == "root"
+
+
+@app.after_request
+def set_response_cache_headers(response):
+    content_type = response.headers.get("Content-Type", "")
+
+    if "text/html" in content_type:
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+
+    return response
+
+
+def current_user():
+    if not session.get("logged_in"):
+        return None
+
+    return get_user_by_id(session.get("user_id"))
+
+
 def login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
-        if not session.get("logged_in"):
+        try:
+            profiles_exist = has_users()
+        except UserStoreError:
+            session.clear()
             return redirect("/login")
+
+        if not profiles_exist:
+            if session.get("setup_pending"):
+                return redirect("/setup")
+            return redirect("/login")
+
+        user = current_user()
+        if user is None:
+            session.clear()
+            return redirect("/login")
+
+        return f(*args, **kwargs)
+
+    return wrapper
+
+
+def root_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        try:
+            profiles_exist = has_users()
+        except UserStoreError:
+            session.clear()
+            return redirect("/login")
+
+        if not profiles_exist:
+            return redirect("/login")
+
+        user = current_user()
+        if user is None:
+            session.clear()
+            return redirect("/login")
+
+        if user["role"] != "root":
+            return redirect("/games")
+
         return f(*args, **kwargs)
 
     return wrapper
@@ -135,6 +216,17 @@ def page_header(active_page="games"):
     logos_active = "active" if active_page == "logos" else ""
     settings_active = "active" if active_page == "settings" else ""
     favorites_active = "active" if active_page == "favorites" else ""
+    profiles_active = "active" if active_page == "profiles" else ""
+
+    user = current_user()
+    username = escape(user["username"]) if user else "Guest"
+    is_root = bool(user and user["role"] == "root")
+    root_badge = '<span class="account-role">Root</span>' if is_root else ""
+    profiles_tab = (
+        f'<a class="tab {profiles_active}" href="/profiles">Profiles</a>'
+        if is_root
+        else ""
+    )
 
     settings = get_settings()
 
@@ -155,55 +247,66 @@ def page_header(active_page="games"):
     )
 
     return f"""
-    <div class="header">
-        <div>
-            <h1 class="title">Scoreboard</h1>
-            <div class="subtitle">Local display controls</div>
+    <header class="topbar">
+        <div class="topbar-main">
+            <div class="brand-lockup brand-lockup-compact">
+                <div class="brand-mark" aria-hidden="true">SC</div>
+                <h1 class="title">ScoreCast</h1>
+            </div>
+
+            <form
+                class="display-power-form"
+                method="POST"
+                action="/display/power/toggle"
+            >
+                <input
+                    type="hidden"
+                    name="next"
+                    value="{escape(request.path, quote=True)}"
+                >
+
+                <button
+                    type="submit"
+                    class="display-power-button {power_class}"
+                    aria-label="{power_label}"
+                    title="{power_label}"
+                >
+                    <svg
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                    >
+                        <path
+                            d="
+                                M12 2
+                                V12
+                                M7.05 4.93
+                                A9 9 0 1 0 16.95 4.93
+                            "
+                        />
+                    </svg>
+                </button>
+            </form>
         </div>
 
-        <form
-            class="display-power-form"
-            method="POST"
-            action="/display/power/toggle"
-        >
-            <input
-                type="hidden"
-                name="next"
-                value="{escape(request.path, quote=True)}"
-            >
+        <div class="topbar-account">
+            <div class="account-chip">
+                <span class="account-name">{username}</span>
+                {root_badge}
+            </div>
+            <a class="logout-link" href="/logout">Sign out</a>
+        </div>
+    </header>
 
-            <button
-                type="submit"
-                class="display-power-button {power_class}"
-                aria-label="{power_label}"
-                title="{power_label}"
-            >
-                <svg
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                >
-                    <path
-                        d="
-                            M12 2
-                            V12
-                            M7.05 4.93
-                            A9 9 0 1 0 16.95 4.93
-                        "
-                    />
-                </svg>
-            </button>
-        </form>
-    </div>
-
-    <div class="tabs">
-        <a class="tab {games_active}" href="/games" ontouchend="window.location.assign(this.href); return false;">Games</a>
-        <a class="tab {focus_active}" href="/focus" ontouchend="window.location.assign(this.href); return false;">Focus</a>
-        <a class="tab {fantasy_active}" href="/fantasy" ontouchend="window.location.assign(this.href); return false;">Fantasy</a>
-        <a class="tab {alerts_active}" href="/alerts" ontouchend="window.location.assign(this.href); return false;">Alerts</a>
-        <a class="tab {logos_active}" href="/logos" ontouchend="window.location.assign(this.href); return false;">Logos</a>
-        <a class="tab {settings_active}" href="/settings" ontouchend="window.location.assign(this.href); return false;">Settings</a>
-        <a class="tab {favorites_active}" href="/favorites" ontouchend="window.location.assign(this.href); return false;">Favorites</a>
-    </div>
+    <nav class="tabs" aria-label="ScoreCast">
+        <a class="tab {games_active}" href="/games">Games</a>
+        <a class="tab {focus_active}" href="/focus">Focus</a>
+        <a class="tab {fantasy_active}" href="/fantasy">Fantasy</a>
+        <a class="tab {alerts_active}" href="/alerts">Alerts</a>
+        <a class="tab {logos_active}" href="/logos">Logos</a>
+        <a class="tab {settings_active}" href="/settings">Settings</a>
+        <a class="tab {favorites_active}" href="/favorites">Favorites</a>
+        {profiles_tab}
+    </nav>
     """
 
 def page_head(title: str) -> str:
@@ -218,7 +321,7 @@ def page_head(title: str) -> str:
 
         <title>{escape(title)}</title>
 
-        <meta name="theme-color" content="#0e1110">
+        <meta name="theme-color" content="#0b0c10">
 
         <meta
             name="apple-mobile-web-app-capable"
@@ -302,749 +405,27 @@ def page_head(title: str) -> str:
 
 def page_styles():
     return """
-    <style>
-        * {
-            box-sizing: border-box;
-        }
-
-        html {
-            min-height: 100%;
-            background: #0b0b0f;
-            -webkit-text-size-adjust: 100%;
-        }
-
-        body {
-            min-height: 100%;
-            margin: 0;
-            padding-top: env(safe-area-inset-top);
-            padding-right: env(safe-area-inset-right);
-            padding-bottom: env(safe-area-inset-bottom);
-            padding-left: env(safe-area-inset-left);
-            font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif;
-            background: #0b0b0f;
-            color: white;
-            overscroll-behavior-y: none;
-            -webkit-tap-highlight-color: transparent;
-        }
-
-        .page {
-            max-width: 520px;
-            margin: 0 auto;
-            padding: 18px;
-        }
-
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 18px;
-        }
-
-        .title {
-            font-size: 28px;
-            font-weight: 800;
-            margin: 0;
-        }
-
-        .subtitle {
-            color: #aaa;
-            font-size: 14px;
-            margin-top: 4px;
-        }
-
-        .display-power-form {
-            margin: 0;
-            padding: 0;
-        }
-
-        .display-power-button {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-
-            width: 46px;
-            height: 46px;
-
-            padding: 0;
-
-            border: 1px solid;
-            border-radius: 50%;
-
-            cursor: pointer;
-
-            transition:
-                background 0.15s ease,
-                border-color 0.15s ease,
-                color 0.15s ease,
-                transform 0.1s ease;
-
-            -webkit-tap-highlight-color: transparent;
-        }
-
-        .display-power-button svg {
-            width: 25px;
-            height: 25px;
-
-            fill: none;
-            stroke: currentColor;
-            stroke-width: 2.4;
-            stroke-linecap: round;
-            stroke-linejoin: round;
-        }
-
-        .display-power-on {
-            color: #55f18b;
-            background: rgba(85, 241, 139, 0.12);
-            border-color: rgba(85, 241, 139, 0.55);
-        }
-
-        .display-power-off {
-            color: #ff453a;
-            background: rgba(255, 69, 58, 0.12);
-            border-color: rgba(255, 69, 58, 0.55);
-        }
-
-        .display-power-button:active {
-            transform: scale(0.92);
-        }
-
-        .display-power-button:focus-visible {
-            outline: 2px solid white;
-            outline-offset: 3px;
-        }
-
-        .system-restart-button {
-            padding: 12px 18px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 10px;
-            background: #2b2b2b;
-            color: #ffffff;
-            font: inherit;
-            font-weight: 600;
-            cursor: pointer;
-        }
-
-        .system-restart-button:hover {
-            background: #3a3a3a;
-        }
-
-        .system-restart-button:disabled {
-            opacity: 0.55;
-            cursor: not-allowed;
-        }
-
-        #system-restart-status {
-            margin-top: 10px;
-            font-size: 13px;
-            color: #a0a0a0;
-        }
-
-        .tabs {
-            position: relative;
-            z-index: 10;
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-            margin-bottom: 16px;
-        }
-
-        .tab {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 48px;
-            flex: 1;
-            text-align: center;
-            text-decoration: none;
-            color: white;
-            background: #17171d;
-            border: 1px solid #2a2a33;
-            padding: 12px;
-            border-radius: 14px;
-            font-size: 15px;
-            font-weight: 700;
-            cursor: pointer;
-            touch-action: manipulation;
-            -webkit-user-select: none;
-            user-select: none;
-            -webkit-tap-highlight-color: transparent;
-            -webkit-touch-callout: none;
-        }
-
-        .tab.active {
-            background: #0a84ff;
-            border-color: #0a84ff;
-        }
-
-        a,
-        button,
-        input,
-        select,
-        textarea {
-            touch-action: manipulation;
-        }
-
-        .card {
-            background: #17171d;
-            border: 1px solid #2a2a33;
-            border-radius: 18px;
-            padding: 16px;
-            margin-bottom: 16px;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.25);
-        }
-
-        .card-title {
-            font-size: 18px;
-            font-weight: 700;
-            margin-bottom: 14px;
-        }
-
-        .search-input {
-            width: 100%;
-            padding: 13px;
-            border-radius: 12px;
-            border: 1px solid #444;
-            background: #0f0f14;
-            color: white;
-            font-size: 16px;
-            margin-bottom: 12px;
-        }
-
-        .search-input::placeholder {
-            color: #777;
-        }
-
-        .filter-row {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 14px;
-            align-items: center;
-        }
-
-        .game-filter-controls {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            flex: 1 1 100%;
-            min-width: 0;
-        }
-
-        .league-filter-select {
-            width: 190px;
-            flex: 0 0 190px;
-        }
-
-        .live-filter {
-            display: flex;
-            align-items: center;
-            gap: 7px;
-            min-height: 44px;
-            color: white;
-            font-size: 15px;
-            font-weight: 600;
-            white-space: nowrap;
-            cursor: pointer;
-        }
-
-        .live-filter input {
-            width: 20px;
-            height: 20px;
-            margin: 0;
-            cursor: pointer;
-            accent-color: #0a84ff;
-        }
-
-        .select-input {
-            flex: 1;
-            padding: 12px;
-            border-radius: 12px;
-            border: 1px solid #444;
-            background: #0f0f14;
-            color: white;
-            font-size: 15px;
-        }
-
-        .favorite-grid {
-            display: grid;
-            grid-template-columns:
-                repeat(
-                    3,
-                    minmax(0, 1fr)
-                );
-            gap: 8px;
-        }
-
-        .favorite-option {
-            position: relative;
-            display: block;
-        }
-
-        .favorite-option input {
-            position: absolute;
-            opacity: 0;
-            pointer-events: none;
-        }
-
-        .favorite-option span {
-            display: flex;
-            min-height: 42px;
-            align-items: center;
-            justify-content: center;
-
-            border: 1px solid #3a3a45;
-            border-radius: 12px;
-
-            background: #0f0f14;
-            color: #ddd;
-
-            font-size: 14px;
-            font-weight: 700;
-
-            text-align: center;
-
-            padding: 9px 6px;
-
-            cursor: pointer;
-            user-select: none;
-        }
-
-        .favorite-option
-        input:checked + span {
-            background: #0a84ff;
-            border-color: #0a84ff;
-            color: white;
-        }
-
-        .favorite-option
-        input:focus-visible + span {
-            outline: 2px solid white;
-            outline-offset: 2px;
-        }
-
-        .favorite-actions {
-            display: flex;
-            gap: 8px;
-            margin-top: 10px;
-        }
-
-        @media (max-width: 380px) {
-            .favorite-grid {
-                grid-template-columns:
-                    repeat(
-                        2,
-                        minmax(0, 1fr)
-                    );
-            }
-        }
-
-        .control {
-            margin-bottom: 20px;
-        }
-
-        .control:last-child {
-            margin-bottom: 0;
-        }
-
-        .control-top {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 8px;
-        }
-
-        .number-input {
-            width: 88px;
-            padding: 8px;
-            border-radius: 10px;
-            border: 1px solid #444;
-            background: #0f0f14;
-            color: white;
-            font-size: 16px;
-            text-align: center;
-        }
-
-        input[type=range] {
-            width: 100%;
-            accent-color: #0a84ff;
-        }
-
-        .secondary-button {
-            flex: 1;
-            border: 1px solid #3a3a45;
-            background: #24242c;
-            color: white;
-            padding: 12px;
-            border-radius: 12px;
-            font-size: 15px;
-            font-weight: 600;
-        }
-
-        .game-row-container {
-            cursor: grab;
-            transition: transform 0.1s ease;
-            -webkit-user-select: none;
-            -ms-user-select: none;
-            user-select: none;
-        }
-
-        .test-alert-button {
-            flex: 0 0 auto;
-            width: auto;
-            padding: 8px 12px;
-        }
-
-        .game-row-container:active {
-            cursor: grabbing;
-        }
-
-        .game-row-container.dragging {
-            opacity: 0.4;
-            background: #24242c;
-            border-radius: 8px;
-        }
-
-        .game-row {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px 0;
-            border-bottom: 1px solid #2c2c35;
-        }
-
-        .game-row:last-child {
-            border-bottom: 0;
-        }
-
-        .game-row input {
-            width: 22px;
-            height: 22px;
-            accent-color: #0a84ff;
-        }
-
-        .game-info {
-            flex: 1;
-        }
-
-        .matchup {
-            font-size: 17px;
-            font-weight: 700;
-        }
-
-        .details {
-            color: #aaa;
-            font-size: 13px;
-            margin-top: 2px;
-        }
-
-        .empty {
-            color: #aaa;
-            padding: 10px 0;
-        }
-
-        .save-button {
-            width: 100%;
-            border: 0;
-            border-radius: 16px;
-            background: #0a84ff;
-            color: white;
-            padding: 16px;
-            font-size: 18px;
-            font-weight: 800;
-            margin-top: 4px;
-        }
-
-        button:active {
-            transform: scale(0.98);
-        }
-
-        .hint {
-            color: #888;
-            font-size: 12px;
-            margin-top: 8px;
-            line-height: 1.4;
-        }
-
-        input[type=password] {
-            width: 100%;
-            padding: 14px;
-            border-radius: 12px;
-            border: 1px solid #444;
-            background: #0f0f14;
-            color: white;
-            font-size: 18px;
-        }
-
-        .login-card {
-            margin-top: 40px;
-        }
-
-        .league-badge {
-            margin-left: auto;
-            min-width: 56px;
-            text-align: center;
-            padding: 6px 10px;
-            border-radius: 999px;
-            background: #2a2a33;
-            color: #bcbcbc;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: .5px;
-            text-transform: uppercase;
-        }
-
-        .error {
-            color: #ff453a;
-            margin-bottom: 12px;
-            font-size: 14px;
-        }
-
-        .team-alert-row {
-            padding: 14px 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-        }
-
-        .team-alert-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-
-        .alert-options {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-        }
-
-        .alert-option {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 14px;
-            padding: 8px;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.06);
-        }
-
-        .alert-option input {
-            transform: scale(1.1);
-        }
-
-                .logo-team-row {
-            display: grid;
-            grid-template-columns: 78px minmax(0, 1fr);
-            gap: 14px;
-            align-items: center;
-            padding: 14px 0;
-            border-bottom: 1px solid #2c2c35;
-        }
-
-        .logo-team-row:last-child {
-            border-bottom: 0;
-        }
-
-        .logo-preview-box {
-            width: 72px;
-            height: 72px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border: 1px solid #3a3a45;
-            border-radius: 14px;
-            background-color: #0f0f14;
-            background-image:
-                linear-gradient(
-                    45deg,
-                    #24242c 25%,
-                    transparent 25%
-                ),
-                linear-gradient(
-                    -45deg,
-                    #24242c 25%,
-                    transparent 25%
-                ),
-                linear-gradient(
-                    45deg,
-                    transparent 75%,
-                    #24242c 75%
-                ),
-                linear-gradient(
-                    -45deg,
-                    transparent 75%,
-                    #24242c 75%
-                );
-            background-size: 16px 16px;
-            background-position:
-                0 0,
-                0 8px,
-                8px -8px,
-                -8px 0;
-        }
-
-        .logo-preview {
-            display: block;
-            width: 60px;
-            height: 60px;
-            object-fit: contain;
-            image-rendering: pixelated;
-        }
-
-        .logo-team-controls {
-            min-width: 0;
-        }
-
-        .logo-team-name {
-            font-size: 17px;
-            font-weight: 700;
-            margin-bottom: 8px;
-        }
-
-        .logo-variant-select {
-            width: 100%;
-            padding: 12px;
-            border-radius: 12px;
-            border: 1px solid #444;
-            background: #0f0f14;
-            color: white;
-            font-size: 15px;
-        }
-
-        .logo-success {
-            background: rgba(48, 209, 88, 0.14);
-            border: 1px solid rgba(48, 209, 88, 0.45);
-            color: #7ee893;
-            border-radius: 14px;
-            padding: 14px 16px;
-            margin-bottom: 16px;
-            font-size: 15px;
-            font-weight: 700;
-        }
-
-        @media (max-width: 390px) {
-            .logo-team-row {
-                grid-template-columns: 64px minmax(0, 1fr);
-                gap: 10px;
-            }
-
-            .logo-preview-box {
-                width: 60px;
-                height: 60px;
-            }
-
-            .logo-preview {
-                width: 52px;
-                height: 52px;
-            }
-        }
-
-        @media (max-width: 600px) {
-            .filter-row {
-                flex-direction: column;
-                align-items: stretch;
-            }
-
-            .game-filter-controls {
-                width: 100%;
-                flex-direction: row;
-                align-items: center;
-            }
-
-            .league-filter-select {
-                width: 165px;
-                flex: 0 0 165px;
-            }
-
-            .live-filter {
-                flex: 0 0 auto;
-            }
-
-            .alert-options {
-                grid-template-columns: 1fr;
-            }
-        }
-        .update-progress {
-            margin-top: 18px;
-            padding: 16px;
-            border: 1px solid #34343e;
-            border-radius: 14px;
-            background: #101015;
-        }
-
-        .update-progress-heading {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 12px;
-            font-size: 14px;
-            font-weight: 600;
-        }
-
-        .update-progress-heading strong {
-            font-size: 18px;
-            font-variant-numeric: tabular-nums;
-        }
-
-        .update-progress-track {
-            height: 14px;
-            border-radius: 999px;
-            overflow: hidden;
-            background: #34343e;
-        }
-
-        .update-progress-fill {
-            height: 100%;
-            width: 0;
-            border-radius: 999px;
-            background: #55f18b;
-            transition: width 0.3s ease;
-        }
-
-        .update-progress-failed {
-            background: #ff9f0a;
-        }
-
-        .update-progress-note {
-            margin-top: 10px;
-            color: #a5a5b0;
-            font-size: 12px;
-            line-height: 1.5;
-        }
-
-        @media (
-            prefers-reduced-motion: reduce
-        ) {
-            .update-progress-fill {
-                transition: none;
-            }
-        }
-
-        .settings-version {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-            padding: 14px 0;
-            margin-bottom: 16px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .settings-version-label {
-            color: #a5a5b0;
-            font-size: 14px;
-            font-weight: 500;
-        }
-
-        .settings-version-value {
-            color: #f5f5f7;
-            font-size: 14px;
-            font-weight: 600;
-            font-variant-numeric: tabular-nums;
-            white-space: nowrap;
-        }
-    </style>
+    <link rel="stylesheet" href="/static/app.css?v=6">
+    <script>
+    (function () {
+      if (navigator.serviceWorker) {
+        navigator.serviceWorker.getRegistrations().then(function (registrations) {
+          registrations.forEach(function (registration) {
+            registration.unregister();
+          });
+        });
+      }
+      if (window.caches) {
+        caches.keys().then(function (keys) {
+          keys.forEach(function (key) {
+            caches.delete(key);
+          });
+        });
+      }
+    })();
+    </script>
     """
+
 
 
 def get_game_league(game):
@@ -1182,6 +563,20 @@ def get_display_status(game, league_key):
     return status
 
 
+def render_auth_page(title, body):
+    return f"""
+<!DOCTYPE html>
+<html>
+{page_head(title)}
+<body class="auth-body">
+    <div class="page">
+        {body}
+    </div>
+</body>
+</html>
+    """
+
+
 @app.route("/")
 @login_required
 def home():
@@ -1190,53 +585,357 @@ def home():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    try:
+        profiles_exist = has_users()
+    except UserStoreError as exc:
+        body = f"""
+            <div class="auth-intro">
+                <div class="brand-lockup">
+                    <div class="brand-mark" aria-hidden="true">SC</div>
+                    <div>
+                        <div class="brand-name">ScoreCast</div>
+                        <div class="brand-tag">Unable to load profiles</div>
+                    </div>
+                </div>
+            </div>
+            <div class="card login-card">
+                <div class="error">{escape(str(exc))}</div>
+            </div>
+        """
+        return render_auth_page("ScoreCast Login", body), 500
+
+    if profiles_exist:
+        user = current_user()
+        if user is not None:
+            return redirect("/games")
+    elif session.get("setup_pending"):
+        return redirect("/setup")
+
     error = ""
+    needs_setup = not profiles_exist
 
     if request.method == "POST":
-        if request.form.get("password") == WEB_PASSWORD:
-            session["logged_in"] = True
-            return redirect("/games")
+        if needs_setup:
+            if request.form.get("password") == BOOTSTRAP_PASSWORD:
+                session.clear()
+                session.permanent = True
+                session["setup_pending"] = True
+                return redirect("/setup")
 
-        error = "Invalid password"
+            error = "Invalid password"
+        else:
+            user = authenticate(
+                request.form.get("username", ""),
+                request.form.get("password", ""),
+            )
 
-    return f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Scoreboard Login</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    {page_styles()}
-</head>
-<body>
-    <div class="page">
+            if user is not None:
+                establish_session(user)
+                return redirect("/games")
+
+            error = "Invalid username or password"
+
+    error_html = f"<div class='error'>{escape(error)}</div>" if error else ""
+
+    if needs_setup:
+        form_fields = """
+            <p class="auth-hint">
+                This display has no profiles yet. Enter the setup password
+                <strong>ticker123</strong> to create the root account.
+            </p>
+            <label class="field-label" for="setup_password">Setup password</label>
+            <input
+                class="auth-input"
+                id="setup_password"
+                type="password"
+                name="password"
+                placeholder="••••••••"
+                autofocus
+            >
+        """
+        button_label = "Continue"
+        subtitle = "Create the first profile"
+    else:
+        form_fields = """
+            <label class="field-label" for="login_username">Username</label>
+            <input
+                class="auth-input"
+                id="login_username"
+                type="text"
+                name="username"
+                placeholder="Username"
+                autocomplete="username"
+                autofocus
+            >
+            <label class="field-label" for="login_password">Password</label>
+            <input
+                class="auth-input"
+                id="login_password"
+                type="password"
+                name="password"
+                placeholder="••••••••"
+                autocomplete="current-password"
+            >
+        """
+        button_label = "Sign in"
+        subtitle = "Sign in to this display"
+
+    body = f"""
+        <div class="auth-intro">
+            <div class="brand-lockup">
+                <div class="brand-mark" aria-hidden="true">SC</div>
+                <div>
+                    <div class="brand-name">ScoreCast</div>
+                    <div class="brand-tag">{subtitle}</div>
+                </div>
+            </div>
+        </div>
         <div class="card login-card">
-            <h1 class="title">Scoreboard Login</h1>
-
-            {"<div class='error'>" + error + "</div>" if error else ""}
-
+            {error_html}
             <form method="POST">
-                <input
-                    type="password"
-                    name="password"
-                    placeholder="Password"
-                    autofocus
-                >
-
+                {form_fields}
                 <button class="save-button" type="submit">
-                    Login
+                    {button_label}
                 </button>
             </form>
         </div>
-    </div>
-</body>
-</html>
     """
+
+    return render_auth_page("ScoreCast Login", body)
+
+
+@app.route("/setup", methods=["GET", "POST"])
+def setup_root_profile():
+    if has_users():
+        return redirect("/login")
+
+    if not session.get("setup_pending"):
+        return redirect("/login")
+
+    error = ""
+
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        confirm_password = request.form.get("confirm_password", "")
+
+        if password != confirm_password:
+            error = "Passwords do not match."
+        else:
+            try:
+                user = create_user(username, password, role="root")
+            except UserError as exc:
+                error = str(exc)
+            else:
+                establish_session(user)
+                return redirect("/games")
+
+    error_html = f"<div class='error'>{escape(error)}</div>" if error else ""
+
+    body = f"""
+        <div class="auth-intro">
+            <div class="brand-lockup">
+                <div class="brand-mark" aria-hidden="true">SC</div>
+                <div>
+                    <div class="brand-name">ScoreCast</div>
+                    <div class="brand-tag">Create the root profile</div>
+                </div>
+            </div>
+        </div>
+        <div class="card login-card">
+            <p class="auth-hint">
+                This first account can add other people later.
+                The setup password will no longer work after this.
+            </p>
+            {error_html}
+            <form method="POST">
+                <label class="field-label" for="root_username">Username</label>
+                <input
+                    class="auth-input"
+                    id="root_username"
+                    type="text"
+                    name="username"
+                    placeholder="Username"
+                    autocomplete="username"
+                    autofocus
+                    value="{escape(request.form.get('username', ''), quote=True)}"
+                >
+                <label class="field-label" for="root_password">Password</label>
+                <input
+                    class="auth-input"
+                    id="root_password"
+                    type="password"
+                    name="password"
+                    placeholder="At least 8 characters"
+                    autocomplete="new-password"
+                >
+                <label class="field-label" for="root_password_confirm">Confirm password</label>
+                <input
+                    class="auth-input"
+                    id="root_password_confirm"
+                    type="password"
+                    name="confirm_password"
+                    placeholder="Re-enter password"
+                    autocomplete="new-password"
+                >
+                <button class="save-button" type="submit">
+                    Create profile
+                </button>
+            </form>
+        </div>
+    """
+
+    return render_auth_page("Create root profile", body)
 
 
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect("/login")
+
+
+@app.route("/profiles", methods=["GET", "POST"])
+@root_required
+def profiles_page():
+    error = ""
+    saved_message = ""
+
+    if request.args.get("saved") == "1":
+        saved_message = '<div class="hint" style="margin-bottom:12px;">Profile created.</div>'
+    elif request.args.get("deleted") == "1":
+        saved_message = '<div class="hint" style="margin-bottom:12px;">Profile deleted.</div>'
+    if request.args.get("error"):
+        error = request.args.get("error", "")
+
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        confirm_password = request.form.get("confirm_password", "")
+
+        if password != confirm_password:
+            error = "Passwords do not match."
+        else:
+            try:
+                create_user(username, password, role="user")
+            except UserError as exc:
+                error = str(exc)
+            else:
+                return redirect("/profiles?saved=1")
+
+    error_html = f"<div class='error'>{escape(error)}</div>" if error else ""
+    actor = current_user()
+    actor_id = actor["id"] if actor else ""
+
+    profile_rows = ""
+    for user in list_users():
+        is_root = user["role"] == "root"
+        role_label = "Root" if is_root else "Profile"
+        can_delete = user["id"] != actor_id and not is_root
+
+        delete_control = ""
+        if can_delete:
+            delete_control = f"""
+                <form method="POST" action="/profiles/delete">
+                    <input type="hidden" name="user_id" value="{escape(user['id'], quote=True)}">
+                    <button
+                        class="delete-profile-button"
+                        type="submit"
+                        onclick="return confirm('Delete this profile?');"
+                    >
+                        Delete
+                    </button>
+                </form>
+            """
+        else:
+            delete_control = """
+                <button class="delete-profile-button" type="button" disabled>
+                    Root
+                </button>
+            """
+
+        profile_rows += f"""
+            <div class="profile-row">
+                <div class="profile-meta">
+                    <div class="profile-name">{escape(user['username'])}</div>
+                    <div class="profile-details">{role_label}</div>
+                </div>
+                {delete_control}
+            </div>
+        """
+
+    return f"""
+<!DOCTYPE html>
+<html>
+{page_head("ScoreCast Profiles")}
+<body>
+    <div class="page">
+        {page_header("profiles")}
+
+        <div class="card">
+            <div class="card-title">Profiles</div>
+            {saved_message}
+            {profile_rows}
+        </div>
+
+        <form method="POST">
+            <div class="card">
+                <div class="card-title">Add profile</div>
+                <div class="hint" style="margin-bottom:12px;">
+                    New profiles can use the dashboard. Only the root user
+                    can create or delete them.
+                </div>
+                {error_html}
+                <input
+                    class="auth-input"
+                    type="text"
+                    name="username"
+                    placeholder="Username"
+                    autocomplete="off"
+                    value="{escape(request.form.get('username', ''), quote=True)}"
+                >
+                <input
+                    class="auth-input"
+                    type="password"
+                    name="password"
+                    placeholder="Password"
+                    autocomplete="new-password"
+                >
+                <input
+                    class="auth-input"
+                    type="password"
+                    name="confirm_password"
+                    placeholder="Confirm password"
+                    autocomplete="new-password"
+                >
+                <button class="save-button" type="submit">
+                    Create profile
+                </button>
+            </div>
+        </form>
+    </div>
+</body>
+</html>
+    """
+
+
+@app.route("/profiles/delete", methods=["POST"])
+@root_required
+def delete_profile():
+    actor = current_user()
+    if actor is None:
+        return redirect("/login")
+
+    try:
+        delete_user(
+            request.form.get("user_id", ""),
+            actor_id=actor["id"],
+        )
+    except UserError as exc:
+        return redirect(
+            url_for("profiles_page", error=str(exc))
+        )
+
+    return redirect("/profiles?deleted=1")
 
 @app.route(
     "/display/power/toggle",
@@ -1383,7 +1082,7 @@ def games():
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Scoreboard Games</title>
+    <title>ScoreCast Games</title>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     {page_styles()}
 </head>
@@ -3199,7 +2898,7 @@ def fantasy_page():
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Scoreboard Fantasy</title>
+    <title>ScoreCast Fantasy</title>
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1, viewport-fit=cover"
@@ -3482,7 +3181,7 @@ def logos_page():
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Scoreboard Logos</title>
+    <title>ScoreCast Logos</title>
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1, viewport-fit=cover"
@@ -3756,7 +3455,7 @@ def settings_page():
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Scoreboard Settings</title>
+    <title>ScoreCast Settings</title>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     {page_styles()}
 </head>
@@ -4717,7 +4416,7 @@ def favorites_page():
 <head>
 
     <title>
-        Scoreboard Favorites
+        ScoreCast Favorites
     </title>
 
     <meta
