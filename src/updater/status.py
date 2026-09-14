@@ -111,6 +111,14 @@ def write_status(
             pass
 
 
+def is_update_in_progress() -> bool:
+    state = str(
+        read_status().get("state", "")
+    ).strip().lower()
+
+    return state in ACTIVE_STATES
+
+
 def read_status() -> dict[str, Any]:
     """Read the current update state."""
     default = {
