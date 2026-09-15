@@ -917,3 +917,79 @@ input[type=password],
 .setting-group {
     margin-top: 18px;
 }
+
+.stock-search {
+    position: relative;
+    margin-bottom: 12px;
+}
+
+.stock-search .search-input {
+    margin-bottom: 0;
+}
+
+.stock-search-results {
+    position: absolute;
+    z-index: 20;
+    left: 0;
+    right: 0;
+    top: calc(100% + 6px);
+    max-height: 260px;
+    overflow-y: auto;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: #16181f;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.stock-search-result {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 12px 14px;
+    border: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: transparent;
+    color: inherit;
+}
+
+.stock-search-result:last-child {
+    border-bottom: 0;
+}
+
+.stock-search-result:active {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.stock-search-empty {
+    padding: 14px;
+    color: #8b909b;
+    font-size: 13px;
+}
+
+.stock-watch-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.stock-watch-row:last-child {
+    border-bottom: 0;
+}
+
+.stock-watch-row .game-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.stock-remove-button {
+    flex: 0 0 auto;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: #cfd3dc;
+    font-size: 13px;
+    font-weight: 600;
+}

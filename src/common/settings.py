@@ -86,6 +86,23 @@ DEFAULT_SETTINGS = {
         ],
     },
 
+    "stocks": {
+        "symbols": [
+            "SPY",
+            "QQQ",
+            "AAPL",
+            "NVDA",
+            "MSFT",
+        ],
+        "names": {
+            "SPY": "S&P 500",
+            "QQQ": "Nasdaq 100",
+            "AAPL": "Apple",
+            "NVDA": "Nvidia",
+            "MSFT": "Microsoft",
+        },
+    },
+
     "fantasy": {
         "enabled": False,
         "provider": "sleeper",
