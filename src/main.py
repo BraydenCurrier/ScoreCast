@@ -40,12 +40,16 @@ from nhl.nhl_renderer import render_game_strip_onto as draw_nhl_strip
 from soccer.api import get_today_games as get_live_soccer
 from soccer.soccer_renderer import render_game_strip_onto as draw_soccer_strip
 
+from stocks.api import get_today_games as get_live_stocks
+from stocks.renderer import render_game_strip_onto as draw_stocks_strip
+
 from mlb.test_data import TEST_GAMES_MLB
 from nfl.test_data import TEST_GAMES_NFL
 from cfb.test_data import TEST_GAMES_CFB
 from nba.test_data import TEST_GAMES_NBA
 from nhl.test_data import TEST_GAMES_NHL
 from soccer.test_data import TEST_GAMES_SOCCER
+from stocks.test_data import TEST_GAMES_STOCKS
 from fantasy.test_data import TEST_GAMES_FANTASY
 
 TEST_GAMES_BY_SPORT = {
@@ -55,6 +59,7 @@ TEST_GAMES_BY_SPORT = {
     "nba": TEST_GAMES_NBA,
     "nhl": TEST_GAMES_NHL,
     "soccer": TEST_GAMES_SOCCER,
+    "stocks": TEST_GAMES_STOCKS,
     "fantasy": TEST_GAMES_FANTASY,
 }
 
@@ -65,6 +70,7 @@ SPORT_DISPLAY_ORDER = (
     "nba",
     "nhl",
     "soccer",
+    "stocks",
     "fantasy",
 )
 
@@ -82,6 +88,7 @@ DEFAULT_CARD_WIDTH = 129
 CFB_CARD_WIDTH = 162
 NFL_CARD_WIDTH = 130
 FANTASY_CARD_WIDTH = 143
+STOCK_CARD_WIDTH = 120
 
 SETTINGS_POLL_INTERVAL = 0.5
 UPDATE_POLL_INTERVAL = 0.25
@@ -101,6 +108,7 @@ SPORT_FETCHERS = {
     "nba": get_live_nba,
     "nhl": get_live_nhl,
     "soccer": get_live_soccer,
+    "stocks": get_live_stocks,
     "fantasy": get_live_fantasy,
 }
 
@@ -167,12 +175,18 @@ def is_nhl_game(game):
 def is_soccer_game(game):
     return game.__class__.__name__ == "SoccerGame"
 
+def is_stock_quote(game):
+    return game.__class__.__name__ == "StockQuote"
+
 def is_fantasy_game(game):
     return game.__class__.__name__ == "FantasyMatchup"
 
 def game_id(game):
     if is_soccer_game(game) and getattr(game, "event_id", ""):
         return f"soccer:{game.event_id}"
+
+    if is_stock_quote(game):
+        return f"stocks:{game.symbol}"
 
     return f"{get_sport(game)}:{game.away}@{game.home}"
 
@@ -192,6 +206,9 @@ def get_sport(game):
     if is_soccer_game(game):
         return "soccer"
 
+    if is_stock_quote(game):
+        return "stocks"
+
     if is_fantasy_game(game):
         return "fantasy"
     
@@ -204,6 +221,8 @@ def get_game_width(game):
         return NFL_CARD_WIDTH
     if is_fantasy_game(game):
         return FANTASY_CARD_WIDTH
+    if is_stock_quote(game):
+        return STOCK_CARD_WIDTH
 
     return DEFAULT_CARD_WIDTH
 
@@ -223,6 +242,8 @@ def draw_game(image, draw, game, x, settings):
         draw_nhl_strip(image, draw, game, x, settings)
     elif is_soccer_game(game):
         draw_soccer_strip(image, draw, game, x, settings)
+    elif is_stock_quote(game):
+        draw_stocks_strip(image, draw, game, x, settings)
     elif is_fantasy_game(game):
         draw_fantasy_strip(image, draw, game, x, settings)
     else:

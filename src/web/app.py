@@ -26,6 +26,13 @@ from soccer.api import (
     DEFAULT_SOCCER_LEAGUES,
     SOCCER_LEAGUES,
 )
+from stocks.api import (
+    DEFAULT_STOCK_SYMBOLS,
+    MAX_SYMBOLS,
+    POPULAR_SYMBOLS,
+    parse_symbol_list,
+    search_symbols,
+)
 
 from alerts.manager import possession_alert_manager
 from alerts.teams import (
@@ -417,7 +424,7 @@ def page_head(title: str) -> str:
 
 def page_styles():
     return """
-    <link rel="stylesheet" href="/static/app.css?v=6">
+    <link rel="stylesheet" href="/static/app.css?v=7">
     <script>
     (function () {
       if (navigator.serviceWorker) {
@@ -451,6 +458,9 @@ def get_game_league(game):
 
     if class_name == "SoccerGame":
         return "soccer", "Soccer"
+
+    if class_name == "StockQuote":
+        return "stocks", "Stocks"
     
     if class_name == "BasketballGame":
         return "nba", "NBA"
@@ -473,6 +483,15 @@ def get_game_id(game):
 
         if event_id:
             return f"{league_key}:{event_id}"
+
+    if league_key == "stocks":
+        symbol = str(
+            getattr(game, "symbol", "")
+            or getattr(game, "away", "")
+        ).strip().upper()
+
+        if symbol:
+            return f"{league_key}:{symbol}"
 
     return f"{league_key}:{game.away}@{game.home}"
 
@@ -565,6 +584,8 @@ def is_game_live(game):
         "FINAL",
         "STATUS_PREVIEW",
         "PREVIEW",
+        "QUOTE",
+        "CLOSED",
     }
 
     return status not in not_live_statuses
@@ -586,6 +607,16 @@ def get_display_status(game, league_key):
             return f"{status} · {league_name}"
 
         return league_name
+
+    if league_key == "stocks":
+        change = float(getattr(game, "change", 0) or 0)
+        percent = float(
+            getattr(game, "change_percent", 0) or 0
+        )
+        sign = "+" if change > 0 else ""
+        return (
+            f"{sign}{change:.2f} ({sign}{percent:.1f}%)"
+        )
 
     if status == "STATUS_SCHEDULED":
         if league_key in ("nfl", "cfb"):
@@ -1079,11 +1110,43 @@ def games():
         )
 
         safe_game_id = escape(game_id, quote=True)
-        safe_away = escape(str(game.away))
-        safe_home = escape(str(game.home))
         safe_status = escape(str(display_status))
-        away_score = escape(str(getattr(game, "away_score", 0)))
-        home_score = escape(str(getattr(game, "home_score", 0)))
+        favorite_suffix = (
+            " · Favorite" if favorite_game else ""
+        )
+
+        if league_key == "stocks":
+            symbol = escape(
+                str(getattr(game, "symbol", game.away))
+            )
+            name = str(getattr(game, "name", "") or "")
+            price = float(getattr(game, "price", 0) or 0)
+            matchup = symbol
+
+            if name and name.upper() != symbol.upper():
+                matchup = (
+                    f"{symbol} · {escape(name)}"
+                )
+
+            details = (
+                f"{price:.2f} · {safe_status}"
+                f"{favorite_suffix}"
+            )
+        else:
+            matchup = (
+                f"{escape(str(game.away))} @ "
+                f"{escape(str(game.home))}"
+            )
+            away_score = escape(
+                str(getattr(game, "away_score", 0))
+            )
+            home_score = escape(
+                str(getattr(game, "home_score", 0))
+            )
+            details = (
+                f"{away_score} - {home_score} · "
+                f"{safe_status}{favorite_suffix}"
+            )
 
         game_rows += f"""
         <div class="game-row-container" draggable="true" data-id="{safe_game_id}" data-league="{league_key}" data-top25="{"true" if is_top_25 else "false"}" data-live="{"true" if is_live else "false"}">
@@ -1091,9 +1154,9 @@ def games():
                 <input type="checkbox" name="game" value="{safe_game_id}" {checked} {"disabled" if favorite_game else ""}> 
                 {f'<input type="hidden" name="game" value="{safe_game_id}">' if favorite_game else ''}
                 <div class="game-info">
-                    <div class="matchup">{safe_away} @ {safe_home}</div>
+                    <div class="matchup">{matchup}</div>
                     <div class="details">
-                        {away_score} - {home_score} · {safe_status}{" · Favorite" if favorite_game else ""}
+                        {details}
                     </div>
                 </div>
 
@@ -1145,6 +1208,7 @@ def games():
                         <option value="cfb">CFB</option>
                         <option value="top25">Top 25 CFB</option>
                         <option value="soccer">Soccer</option>
+                        <option value="stocks">Stocks</option>
                         <option value="nba">NBA</option>
                         <option value="nhl">NHL</option>
                         <option value="fantasy">Fantasy</option>
@@ -3459,6 +3523,51 @@ def settings_page():
         )
     }
 
+    stocks_settings = settings.get("stocks", {})
+    selected_stock_symbols = parse_symbol_list(
+        stocks_settings.get(
+            "symbols",
+            DEFAULT_STOCK_SYMBOLS,
+        )
+    )
+    stock_names = stocks_settings.get("names", {})
+
+    if not isinstance(stock_names, dict):
+        stock_names = {}
+
+    popular_names = dict(POPULAR_SYMBOLS)
+    stock_watchlist_rows = ""
+
+    for symbol in selected_stock_symbols:
+        name = str(
+            stock_names.get(symbol)
+            or popular_names.get(symbol)
+            or ""
+        ).strip()
+        safe_symbol = escape(symbol, quote=True)
+        safe_name = escape(name, quote=True)
+        safe_name_label = escape(name) if name else "Tracked quote"
+
+        stock_watchlist_rows += f"""
+        <div class="stock-watch-row">
+            <input type="hidden" name="stock_symbols" value="{safe_symbol}">
+            <input type="hidden" name="stock_names" value="{safe_name}">
+            <div class="game-info">
+                <div class="matchup">{escape(symbol)}</div>
+                <div class="details">{safe_name_label}</div>
+            </div>
+            <button
+                type="button"
+                class="stock-remove-button"
+                aria-label="Remove {safe_symbol}"
+            >Remove</button>
+        </div>
+        """
+
+    stock_empty_display = (
+        "none" if selected_stock_symbols else "block"
+    )
+
     soccer_league_rows = ""
 
     for league_id, league_name in SOCCER_LEAGUE_OPTIONS:
@@ -3643,6 +3752,44 @@ def settings_page():
                 </div>
 
                 {soccer_league_rows}
+            </div>
+
+            <div class="card">
+                <div class="card-title">Stock Ticker</div>
+
+                <div class="hint" style="margin-bottom: 12px;">
+                    Search for a company or ticker, then tap
+                    it to add it to the board. You can track
+                    up to {MAX_SYMBOLS}.
+                </div>
+
+                <div class="stock-search">
+                    <input
+                        class="search-input"
+                        type="search"
+                        id="stock_search"
+                        placeholder="Search Apple, NVDA, Bitcoin…"
+                        autocomplete="off"
+                        enterkeyhint="search"
+                    >
+                    <div
+                        id="stock_search_results"
+                        class="stock-search-results"
+                        hidden
+                    ></div>
+                </div>
+
+                <div
+                    id="stock_watchlist_empty"
+                    class="empty"
+                    style="display:{stock_empty_display};"
+                >
+                    No stocks yet. Search to add one.
+                </div>
+
+                <div id="stock_watchlist">
+                    {stock_watchlist_rows}
+                </div>
             </div>
 
             <div class="card">
@@ -4292,6 +4439,243 @@ def settings_page():
             }});
         }}
 
+        function setupStockSearch() {{
+            const search = document.getElementById("stock_search");
+            const results = document.getElementById("stock_search_results");
+            const list = document.getElementById("stock_watchlist");
+            const empty = document.getElementById("stock_watchlist_empty");
+            const maxSymbols = {MAX_SYMBOLS};
+
+            if (!search || !results || !list) {{
+                return;
+            }}
+
+            let timer = null;
+            let requestId = 0;
+
+            function selectedSymbols() {{
+                return Array.from(
+                    list.querySelectorAll('input[name="stock_symbols"]')
+                ).map(function(input) {{
+                    return input.value;
+                }});
+            }}
+
+            function refreshEmpty() {{
+                if (!empty) {{
+                    return;
+                }}
+
+                empty.style.display = selectedSymbols().length
+                    ? "none"
+                    : "block";
+            }}
+
+            function hideResults() {{
+                results.hidden = true;
+                results.innerHTML = "";
+            }}
+
+            function addStock(symbol, name) {{
+                symbol = String(symbol || "").toUpperCase();
+                name = String(name || "").trim();
+
+                if (!symbol) {{
+                    return;
+                }}
+
+                if (selectedSymbols().indexOf(symbol) !== -1) {{
+                    search.value = "";
+                    hideResults();
+                    return;
+                }}
+
+                if (selectedSymbols().length >= maxSymbols) {{
+                    results.innerHTML = (
+                        '<div class="stock-search-empty">'
+                        + "You can track "
+                        + maxSymbols
+                        + " stocks.</div>"
+                    );
+                    results.hidden = false;
+                    return;
+                }}
+
+                const row = document.createElement("div");
+                row.className = "stock-watch-row";
+
+                const symbolInput = document.createElement("input");
+                symbolInput.type = "hidden";
+                symbolInput.name = "stock_symbols";
+                symbolInput.value = symbol;
+
+                const nameInput = document.createElement("input");
+                nameInput.type = "hidden";
+                nameInput.name = "stock_names";
+                nameInput.value = name;
+
+                const info = document.createElement("div");
+                info.className = "game-info";
+
+                const matchup = document.createElement("div");
+                matchup.className = "matchup";
+                matchup.textContent = symbol;
+
+                const details = document.createElement("div");
+                details.className = "details";
+                details.textContent = name || "Tracked quote";
+
+                info.appendChild(matchup);
+                info.appendChild(details);
+
+                const remove = document.createElement("button");
+                remove.type = "button";
+                remove.className = "stock-remove-button";
+                remove.textContent = "Remove";
+                remove.setAttribute(
+                    "aria-label",
+                    "Remove " + symbol
+                );
+
+                row.appendChild(symbolInput);
+                row.appendChild(nameInput);
+                row.appendChild(info);
+                row.appendChild(remove);
+                list.appendChild(row);
+
+                search.value = "";
+                hideResults();
+                refreshEmpty();
+            }}
+
+            function renderResults(items) {{
+                results.innerHTML = "";
+
+                if (!items.length) {{
+                    results.innerHTML = (
+                        '<div class="stock-search-empty">'
+                        + "No matching stocks.</div>"
+                    );
+                    results.hidden = false;
+                    return;
+                }}
+
+                items.forEach(function(item) {{
+                    const button = document.createElement("button");
+                    button.type = "button";
+                    button.className = "stock-search-result";
+
+                    const symbol = document.createElement("div");
+                    symbol.className = "matchup";
+                    symbol.textContent = item.symbol;
+
+                    const meta = document.createElement("div");
+                    meta.className = "details";
+                    meta.textContent = [
+                        item.name,
+                        item.exchange
+                    ].filter(Boolean).join(" · ");
+
+                    button.appendChild(symbol);
+                    button.appendChild(meta);
+                    button.addEventListener("click", function() {{
+                        addStock(item.symbol, item.name);
+                    }});
+                    results.appendChild(button);
+                }});
+
+                results.hidden = false;
+            }}
+
+            async function lookup(query) {{
+                const currentId = ++requestId;
+
+                try {{
+                    const response = await fetch(
+                        "/api/stocks/search?q="
+                        + encodeURIComponent(query),
+                        {{
+                            method: "GET",
+                            cache: "no-store"
+                        }}
+                    );
+
+                    if (!response.ok) {{
+                        throw new Error("search failed");
+                    }}
+
+                    const payload = await response.json();
+
+                    if (currentId !== requestId) {{
+                        return;
+                    }}
+
+                    renderResults(payload.results || []);
+                }} catch (error) {{
+                    if (currentId !== requestId) {{
+                        return;
+                    }}
+
+                    results.innerHTML = (
+                        '<div class="stock-search-empty">'
+                        + "Unable to search right now.</div>"
+                    );
+                    results.hidden = false;
+                }}
+            }}
+
+            search.addEventListener("input", function() {{
+                const query = search.value.trim();
+                window.clearTimeout(timer);
+
+                if (query.length < 1) {{
+                    hideResults();
+                    return;
+                }}
+
+                timer = window.setTimeout(function() {{
+                    lookup(query);
+                }}, 250);
+            }});
+
+            search.addEventListener("keydown", function(event) {{
+                if (event.key === "Enter") {{
+                    event.preventDefault();
+                    const first = results.querySelector(
+                        ".stock-search-result"
+                    );
+                    if (first) {{
+                        first.click();
+                    }}
+                }}
+            }});
+
+            list.addEventListener("click", function(event) {{
+                const button = event.target.closest(
+                    ".stock-remove-button"
+                );
+
+                if (!button) {{
+                    return;
+                }}
+
+                const row = button.closest(".stock-watch-row");
+
+                if (row) {{
+                    row.remove();
+                    refreshEmpty();
+                }}
+            }});
+
+            document.addEventListener("click", function(event) {{
+                if (!event.target.closest(".stock-search")) {{
+                    hideResults();
+                }}
+            }});
+        }}
+
+        setupStockSearch();
+
         function handleCfbConferenceChange(changedCheckbox) {{
             const allFbs = document.querySelector(
                 'input[name="cfb_conferences"][value="80"]'
@@ -4742,6 +5126,21 @@ def save_settings():
             DEFAULT_SOCCER_LEAGUES
         )
 
+    selected_stock_symbols = parse_symbol_list(
+        request.form.getlist("stock_symbols")
+    )
+    stock_name_values = request.form.getlist("stock_names")
+    stock_names = {}
+
+    for index, symbol in enumerate(selected_stock_symbols):
+        if index >= len(stock_name_values):
+            break
+
+        name = str(stock_name_values[index] or "").strip()
+
+        if name:
+            stock_names[symbol] = name[:80]
+
     update_settings({
         "scroll_speed": float(
             request.form["scroll_speed"]
@@ -4765,9 +5164,31 @@ def save_settings():
                 selected_soccer_leagues
             ),
         },
+        "stocks": {
+            "symbols": selected_stock_symbols,
+            "names": stock_names,
+        },
     })
 
     return redirect("/settings")
+
+
+@app.route("/api/stocks/search")
+@login_required
+def api_stocks_search():
+    query = request.args.get("q", "")
+
+    try:
+        results = search_symbols(query)
+    except Exception:
+        return jsonify({
+            "results": [],
+            "error": "search_failed",
+        }), 502
+
+    return jsonify({
+        "results": results,
+    })
 
 
 @app.route(
