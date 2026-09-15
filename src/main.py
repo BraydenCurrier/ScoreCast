@@ -37,11 +37,15 @@ from nba.nba_renderer import render_game_strip_onto as draw_nba_strip
 from nhl.api import get_today_games as get_live_nhl
 from nhl.nhl_renderer import render_game_strip_onto as draw_nhl_strip
 
+from soccer.api import get_today_games as get_live_soccer
+from soccer.soccer_renderer import render_game_strip_onto as draw_soccer_strip
+
 from mlb.test_data import TEST_GAMES_MLB
 from nfl.test_data import TEST_GAMES_NFL
 from cfb.test_data import TEST_GAMES_CFB
 from nba.test_data import TEST_GAMES_NBA
 from nhl.test_data import TEST_GAMES_NHL
+from soccer.test_data import TEST_GAMES_SOCCER
 from fantasy.test_data import TEST_GAMES_FANTASY
 
 TEST_GAMES_BY_SPORT = {
@@ -50,6 +54,7 @@ TEST_GAMES_BY_SPORT = {
     "cfb": TEST_GAMES_CFB,
     "nba": TEST_GAMES_NBA,
     "nhl": TEST_GAMES_NHL,
+    "soccer": TEST_GAMES_SOCCER,
     "fantasy": TEST_GAMES_FANTASY,
 }
 
@@ -59,6 +64,7 @@ SPORT_DISPLAY_ORDER = (
     "cfb",
     "nba",
     "nhl",
+    "soccer",
     "fantasy",
 )
 
@@ -94,6 +100,7 @@ SPORT_FETCHERS = {
     "cfb": get_live_cfb,
     "nba": get_live_nba,
     "nhl": get_live_nhl,
+    "soccer": get_live_soccer,
     "fantasy": get_live_fantasy,
 }
 
@@ -157,10 +164,16 @@ def is_nba_game(game):
 def is_nhl_game(game):
     return game.__class__.__name__ == "HockeyGame"
 
+def is_soccer_game(game):
+    return game.__class__.__name__ == "SoccerGame"
+
 def is_fantasy_game(game):
     return game.__class__.__name__ == "FantasyMatchup"
 
 def game_id(game):
+    if is_soccer_game(game) and getattr(game, "event_id", ""):
+        return f"soccer:{game.event_id}"
+
     return f"{get_sport(game)}:{game.away}@{game.home}"
 
 def get_sport(game):
@@ -175,6 +188,9 @@ def get_sport(game):
 
     if is_nhl_game(game):
         return "nhl"
+
+    if is_soccer_game(game):
+        return "soccer"
 
     if is_fantasy_game(game):
         return "fantasy"
@@ -205,6 +221,8 @@ def draw_game(image, draw, game, x, settings):
         draw_nfl_strip(image, draw, game, x, settings)
     elif is_nhl_game(game):
         draw_nhl_strip(image, draw, game, x, settings)
+    elif is_soccer_game(game):
+        draw_soccer_strip(image, draw, game, x, settings)
     elif is_fantasy_game(game):
         draw_fantasy_strip(image, draw, game, x, settings)
     else:

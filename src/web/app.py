@@ -22,7 +22,10 @@ from common.users import (
 )
 from common.logo_store import get_logo_variant_path, get_selected_logo_variant, get_teams_with_logo_variants, get_teams_with_logos
 
-from fantasy.api import connect_sleeper_user, get_user_leagues
+from soccer.api import (
+    DEFAULT_SOCCER_LEAGUES,
+    SOCCER_LEAGUES,
+)
 
 from alerts.manager import possession_alert_manager
 from alerts.teams import (
@@ -50,6 +53,11 @@ CFB_CONFERENCE_OPTIONS = [
     ("17", "Mountain West"),
 ]
 
+SOCCER_LEAGUE_OPTIONS = [
+    (league_id, league_name)
+    for league_id, league_name in SOCCER_LEAGUES.items()
+]
+
 FAVORITE_LEAGUES = [
     (
         "mlb",
@@ -70,6 +78,10 @@ FAVORITE_LEAGUES = [
     (
         "nhl",
         "NHL"
+    ),
+    (
+        "soccer",
+        "Soccer"
     ),
 ]
 
@@ -453,6 +465,15 @@ def get_game_league(game):
 
 def get_game_id(game):
     league_key, _ = get_game_league(game)
+
+    if league_key == "soccer":
+        event_id = str(
+            getattr(game, "event_id", "") or ""
+        ).strip()
+
+        if event_id:
+            return f"{league_key}:{event_id}"
+
     return f"{league_key}:{game.away}@{game.home}"
 
 def get_favorite_teams(
@@ -551,12 +572,24 @@ def is_game_live(game):
 def get_display_status(game, league_key):
     status = getattr(game, "status", "")
 
+    if league_key == "soccer":
+        league_name = str(
+            getattr(game, "league_short", "")
+            or getattr(game, "league_name", "")
+            or "Soccer"
+        )
+
+        if status in ("Scheduled", "STATUS_SCHEDULED"):
+            return league_name
+
+        if status:
+            return f"{status} · {league_name}"
+
+        return league_name
+
     if status == "STATUS_SCHEDULED":
         if league_key in ("nfl", "cfb"):
             return f"Week {getattr(game, 'week', 1)}"
-
-        if league_key == "soccer":
-            return getattr(game, "stage", "Scheduled")
 
         return "Scheduled"
 
@@ -3408,6 +3441,7 @@ def settings_page():
     settings = get_settings()
 
     cfb_settings = settings.get("cfb", {})
+    soccer_settings = settings.get("soccer", {})
 
     selected_cfb_conferences = {
         str(group_id)
@@ -3416,6 +3450,41 @@ def settings_page():
             ["80"],
         )
     }
+
+    selected_soccer_leagues = {
+        str(league_id)
+        for league_id in soccer_settings.get(
+            "selected_leagues",
+            DEFAULT_SOCCER_LEAGUES,
+        )
+    }
+
+    soccer_league_rows = ""
+
+    for league_id, league_name in SOCCER_LEAGUE_OPTIONS:
+        checked = (
+            "checked"
+            if league_id in selected_soccer_leagues
+            else ""
+        )
+
+        soccer_league_rows += f"""
+        <label class="game-row">
+            <input
+                type="checkbox"
+                name="soccer_leagues"
+                value="{escape(league_id, quote=True)}"
+                {checked}
+            >
+
+            <div class="game-info">
+                <div class="matchup">{escape(league_name)}</div>
+                <div class="details">
+                    Show today's games from this league
+                </div>
+            </div>
+        </label>
+        """
 
     cfb_conference_rows = ""
 
@@ -3562,6 +3631,18 @@ def settings_page():
                 </div>
 
                 {cfb_conference_rows}
+            </div>
+
+            <div class="card">
+                <div class="card-title">Soccer Leagues</div>
+
+                <div class="hint" style="margin-bottom: 12px;">
+                    Choose the soccer competitions to load.
+                    Premier League, Champions League, and MLS
+                    are on by default.
+                </div>
+
+                {soccer_league_rows}
             </div>
 
             <div class="card">
@@ -4644,6 +4725,23 @@ def save_settings():
     if "80" in selected_cfb_conferences:
         selected_cfb_conferences = ["80"]
 
+    selected_soccer_leagues = request.form.getlist(
+        "soccer_leagues"
+    )
+
+    valid_soccer_ids = set(SOCCER_LEAGUES)
+
+    selected_soccer_leagues = [
+        league_id
+        for league_id in selected_soccer_leagues
+        if league_id in valid_soccer_ids
+    ]
+
+    if not selected_soccer_leagues:
+        selected_soccer_leagues = list(
+            DEFAULT_SOCCER_LEAGUES
+        )
+
     update_settings({
         "scroll_speed": float(
             request.form["scroll_speed"]
@@ -4660,6 +4758,11 @@ def save_settings():
         "cfb": {
             "selected_conferences": (
                 selected_cfb_conferences
+            ),
+        },
+        "soccer": {
+            "selected_leagues": (
+                selected_soccer_leagues
             ),
         },
     })
