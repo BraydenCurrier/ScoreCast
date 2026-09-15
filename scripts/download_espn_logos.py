@@ -17,6 +17,9 @@ OUTPUT_ROOT = PROJECT_ROOT / "assets" / "logos"
 ESPN_BASE_URL = (
     "https://site.api.espn.com/apis/site/v2/sports"
 )
+ESPN_WEB_BASE_URL = (
+    "https://site.web.api.espn.com/apis/site/v2/sports"
+)
 
 LEAGUES: dict[str, tuple[str, str]] = {
     "nfl": ("football", "nfl"),
@@ -26,13 +29,27 @@ LEAGUES: dict[str, tuple[str, str]] = {
     "cfb": ("football", "college-football"),
 }
 
+SOCCER_LEAGUES: dict[str, str] = {
+    "eng.1": "Premier League",
+    "uefa.champions": "Champions League",
+    "usa.1": "MLS",
+    "esp.1": "La Liga",
+    "ger.1": "Bundesliga",
+    "ita.1": "Serie A",
+    "mex.1": "Liga MX",
+}
+
 REQUEST_TIMEOUT = (3.05, 15)
 LOGO_SIZE = (30, 30)
 
 session = requests.Session()
 session.headers.update(
     {
-        "User-Agent": "ScoreCast/1.0",
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux aarch64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
         "Accept": "application/json,image/png,image/*",
     }
 )
@@ -208,9 +225,10 @@ def download_league(
     local_league: str,
     sport: str,
     espn_league: str,
+    base_url: str = ESPN_BASE_URL,
 ) -> None:
     url = (
-        f"{ESPN_BASE_URL}/{sport}/"
+        f"{base_url}/{sport}/"
         f"{espn_league}/teams"
         "?limit=1000"
     )
@@ -255,6 +273,10 @@ def download_league(
             output_directory
             / f"{abbreviation}.png"
         )
+
+        if output_path.is_file():
+            skipped += 1
+            continue
 
         try:
             source_image = download_image(
@@ -305,7 +327,7 @@ def main() -> None:
     parser.add_argument(
         "leagues",
         nargs="*",
-        choices=sorted(LEAGUES),
+        choices=sorted(list(LEAGUES) + ["soccer"]),
         help=(
             "Leagues to download. "
             "Defaults to all supported leagues."
@@ -317,10 +339,20 @@ def main() -> None:
     selected_leagues = (
         arguments.leagues
         if arguments.leagues
-        else list(LEAGUES)
+        else list(LEAGUES) + ["soccer"]
     )
 
     for local_league in selected_leagues:
+        if local_league == "soccer":
+            for espn_league in SOCCER_LEAGUES:
+                download_league(
+                    "soccer",
+                    "soccer",
+                    espn_league,
+                    base_url=ESPN_WEB_BASE_URL,
+                )
+            continue
+
         sport, espn_league = LEAGUES[
             local_league
         ]

@@ -30,6 +30,7 @@ DEFAULT_SETTINGS = {
         "cfb": [],
         "nba": [],
         "nhl": [],
+        "soccer": [],
     },
 
     "alerts": {
@@ -75,6 +76,14 @@ DEFAULT_SETTINGS = {
 
     "cfb": {
         "selected_conferences": ["80"],
+    },
+
+    "soccer": {
+        "selected_leagues": [
+            "eng.1",
+            "uefa.champions",
+            "usa.1",
+        ],
     },
 
     "fantasy": {
