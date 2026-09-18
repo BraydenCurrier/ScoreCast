@@ -32,6 +32,12 @@ class GamePossessionState:
 
     last_seen_at: float = 0.0
 
+    mlb_initialized: bool = False
+    saw_live: bool = False
+    win_alerted: bool = False
+    close_game_alerted: bool = False
+    seen_play_ids: set = field(default_factory=set)
+
 
 class PossessionAlertManager:
     def __init__(self):
@@ -53,6 +59,9 @@ class PossessionAlertManager:
         redzone_enabled = bool(alerts_settings.get("redzone_enabled", True))
         touchdown_enabled = bool(alerts_settings.get("touchdown_enabled", True))
         field_goal_enabled = bool(alerts_settings.get("field_goal_enabled", True))
+        homerun_enabled = bool(alerts_settings.get("homerun_enabled", True))
+        mlb_win_enabled = bool(alerts_settings.get("mlb_win_enabled", True))
+        close_game_enabled = bool(alerts_settings.get("close_game_enabled", True))
 
         teams_by_league = alerts_settings.get(
             "teams",
@@ -112,6 +121,23 @@ class PossessionAlertManager:
                 state = self._game_states.setdefault(game_id, GamePossessionState())
 
                 state.last_seen_at = now
+
+                if league == "mlb":
+                    self._process_mlb_alerts(
+                        game=game,
+                        state=state,
+                        watched_teams=watched_teams,
+                        enabled=enabled,
+                        homerun_enabled=homerun_enabled,
+                        mlb_win_enabled=mlb_win_enabled,
+                        close_game_enabled=close_game_enabled,
+                        cooldown_seconds=cooldown_seconds,
+                        chant_frame_seconds=chant_frame_seconds,
+                        details_frame_seconds=details_frame_seconds,
+                        now=now,
+                        created_alerts=created_alerts,
+                    )
+                    continue
 
                 status = str(game.status or "").upper()
 
@@ -205,6 +231,340 @@ class PossessionAlertManager:
             self._remove_stale_states(seen_game_ids, now)
 
         return created_alerts
+
+    def _process_mlb_alerts(
+        self,
+        *,
+        game,
+        state,
+        watched_teams,
+        enabled,
+        homerun_enabled,
+        mlb_win_enabled,
+        close_game_enabled,
+        cooldown_seconds,
+        chant_frame_seconds,
+        details_frame_seconds,
+        now,
+        created_alerts,
+    ):
+        status = str(game.status or "").upper()
+        away = str(game.away or "").upper()
+        home = str(game.home or "").upper()
+        involved = {away, home}
+        involved.discard("")
+        watching_game = bool(involved & watched_teams)
+
+        if not state.mlb_initialized:
+            state.seen_play_ids = {
+                play.play_id
+                for play in getattr(game, "scoring_plays", ())
+                if getattr(play, "play_id", "")
+            }
+            state.away_score = self._nonnegative_int(game.away_score)
+            state.home_score = self._nonnegative_int(game.home_score)
+            state.mlb_initialized = True
+            state.saw_live = status in LIVE_STATUSES
+            state.win_alerted = status in {"FINAL", "GAME OVER"}
+
+            if status in LIVE_STATUSES:
+                self._process_mlb_close_game(
+                    game=game,
+                    state=state,
+                    watched_teams=watched_teams,
+                    watching_game=watching_game,
+                    enabled=enabled,
+                    close_game_enabled=close_game_enabled,
+                    cooldown_seconds=cooldown_seconds,
+                    chant_frame_seconds=chant_frame_seconds,
+                    details_frame_seconds=details_frame_seconds,
+                    now=now,
+                    created_alerts=created_alerts,
+                )
+
+            return
+
+        if status in LIVE_STATUSES:
+            state.saw_live = True
+            state.win_alerted = False
+
+            self._process_mlb_home_runs(
+                game=game,
+                state=state,
+                watched_teams=watched_teams,
+                enabled=enabled,
+                homerun_enabled=homerun_enabled,
+                cooldown_seconds=cooldown_seconds,
+                chant_frame_seconds=chant_frame_seconds,
+                details_frame_seconds=details_frame_seconds,
+                now=now,
+                created_alerts=created_alerts,
+            )
+
+            self._process_mlb_close_game(
+                game=game,
+                state=state,
+                watched_teams=watched_teams,
+                watching_game=watching_game,
+                enabled=enabled,
+                close_game_enabled=close_game_enabled,
+                cooldown_seconds=cooldown_seconds,
+                chant_frame_seconds=chant_frame_seconds,
+                details_frame_seconds=details_frame_seconds,
+                now=now,
+                created_alerts=created_alerts,
+            )
+            return
+
+        state.close_game_alerted = False
+
+        if status in {"FINAL", "GAME OVER"}:
+            self._process_mlb_win(
+                game=game,
+                state=state,
+                watched_teams=watched_teams,
+                watching_game=watching_game,
+                enabled=enabled,
+                mlb_win_enabled=mlb_win_enabled,
+                cooldown_seconds=cooldown_seconds,
+                chant_frame_seconds=chant_frame_seconds,
+                details_frame_seconds=details_frame_seconds,
+                now=now,
+                created_alerts=created_alerts,
+            )
+
+    def _process_mlb_home_runs(
+        self,
+        *,
+        game,
+        state,
+        watched_teams,
+        enabled,
+        homerun_enabled,
+        cooldown_seconds,
+        chant_frame_seconds,
+        details_frame_seconds,
+        now,
+        created_alerts,
+    ):
+        for play in getattr(game, "scoring_plays", ()):
+            play_id = str(getattr(play, "play_id", "") or "")
+
+            if not play_id or play_id in state.seen_play_ids:
+                continue
+
+            state.seen_play_ids.add(play_id)
+
+            if not getattr(play, "is_home_run", False):
+                continue
+
+            team = str(play.batting_team or "").upper()
+
+            if (
+                not enabled
+                or not homerun_enabled
+                or team not in watched_teams
+            ):
+                continue
+
+            if self._is_on_cooldown(
+                state=state,
+                event_type="HOME_RUN",
+                team=team,
+                now=now,
+                cooldown_seconds=cooldown_seconds,
+            ):
+                continue
+
+            rbi = self._nonnegative_int(play.rbi)
+            batter = str(play.batter or team).upper()
+            away_score = self._nonnegative_int(game.away_score)
+            home_score = self._nonnegative_int(game.home_score)
+
+            if rbi >= 4:
+                headline = "GRAND SLAM"
+                chant = ("GRAND", "SLAM")
+                kind = "GRAND SLAM"
+            elif rbi == 1:
+                headline = "HOME RUN"
+                chant = ("GONE",)
+                kind = "SOLO HR"
+            else:
+                headline = "HOME RUN"
+                chant = ("GONE",)
+                kind = f"{rbi} RUN HR"
+
+            detail = self._fit_alert_detail(
+                f"{batter} {kind} {away_score}-{home_score}"
+            )
+
+            alert = self._enqueue_event_alert(
+                game=game,
+                alert_type="HOME_RUN",
+                team=team,
+                headline=headline,
+                detail=detail,
+                chant=chant,
+                now=now,
+                chant_frame_seconds=chant_frame_seconds,
+                details_frame_seconds=details_frame_seconds,
+            )
+
+            if alert is not None:
+                created_alerts.append(alert)
+                self._mark_alert(
+                    state=state,
+                    event_type="HOME_RUN",
+                    team=team,
+                    now=now,
+                )
+
+    def _process_mlb_close_game(
+        self,
+        *,
+        game,
+        state,
+        watched_teams,
+        watching_game,
+        enabled,
+        close_game_enabled,
+        cooldown_seconds,
+        chant_frame_seconds,
+        details_frame_seconds,
+        now,
+        created_alerts,
+    ):
+        inning = self._nonnegative_int(game.inning)
+        away_score = self._nonnegative_int(game.away_score)
+        home_score = self._nonnegative_int(game.home_score)
+        margin = abs(home_score - away_score)
+        is_close = inning >= 7 and margin <= 1
+
+        if not is_close:
+            state.close_game_alerted = False
+            return
+
+        if state.close_game_alerted:
+            return
+
+        if (
+            not enabled
+            or not close_game_enabled
+            or not watching_game
+        ):
+            return
+
+        away = str(game.away or "").upper()
+        home = str(game.home or "").upper()
+        team = home if home in watched_teams else away
+
+        if self._is_on_cooldown(
+            state=state,
+            event_type="CLOSE_GAME",
+            team=team,
+            now=now,
+            cooldown_seconds=cooldown_seconds,
+        ):
+            return
+
+        half = "TOP" if game.top_inning else "BOT"
+        headline = "CLOSE GAME"
+        chant = ("CLOSE", "GAME")
+        detail = self._fit_alert_detail(
+            f"{away} {away_score}-{home_score} {home} {half} {inning}"
+        )
+
+        alert = self._enqueue_event_alert(
+            game=game,
+            alert_type="CLOSE_GAME",
+            team=team,
+            headline=headline,
+            detail=detail,
+            chant=chant,
+            now=now,
+            chant_frame_seconds=chant_frame_seconds,
+            details_frame_seconds=details_frame_seconds,
+        )
+
+        state.close_game_alerted = True
+
+        if alert is not None:
+            created_alerts.append(alert)
+            self._mark_alert(
+                state=state,
+                event_type="CLOSE_GAME",
+                team=team,
+                now=now,
+            )
+
+    def _process_mlb_win(
+        self,
+        *,
+        game,
+        state,
+        watched_teams,
+        watching_game,
+        enabled,
+        mlb_win_enabled,
+        cooldown_seconds,
+        chant_frame_seconds,
+        details_frame_seconds,
+        now,
+        created_alerts,
+    ):
+        if state.win_alerted or not state.saw_live:
+            state.win_alerted = True
+            return
+
+        state.win_alerted = True
+
+        if not enabled or not mlb_win_enabled or not watching_game:
+            return
+
+        away_score = self._nonnegative_int(game.away_score)
+        home_score = self._nonnegative_int(game.home_score)
+
+        if away_score == home_score:
+            return
+
+        away = str(game.away or "").upper()
+        home = str(game.home or "").upper()
+        winner = home if home_score > away_score else away
+
+        if winner not in watched_teams:
+            return
+
+        if self._is_on_cooldown(
+            state=state,
+            event_type="WIN",
+            team=winner,
+            now=now,
+            cooldown_seconds=cooldown_seconds,
+        ):
+            return
+
+        alert = self._enqueue_event_alert(
+            game=game,
+            alert_type="WIN",
+            team=winner,
+            headline="WIN",
+            detail=self._fit_alert_detail(
+                f"{away} {away_score}-{home_score} {home}"
+            ),
+            chant=(winner, "WIN"),
+            now=now,
+            chant_frame_seconds=chant_frame_seconds,
+            details_frame_seconds=details_frame_seconds,
+        )
+
+        if alert is not None:
+            created_alerts.append(alert)
+            self._mark_alert(
+                state=state,
+                event_type="WIN",
+                team=winner,
+                now=now,
+            )
 
     def _process_scoring_alert(self, *, game, state, watched_teams, enabled, touchdown_enabled, field_goal_enabled, cooldown_seconds, chant_frame_seconds, details_frame_seconds, now, created_alerts):
         away_score = self._nonnegative_int(game.away_score)
@@ -753,7 +1113,7 @@ class PossessionAlertManager:
     def _enqueue_event_alert(
         self,
         *,
-        game: FootballGame,
+        game,
         alert_type: str,
         team: str,
         headline: str,
@@ -815,24 +1175,26 @@ class PossessionAlertManager:
             primary=team_definition.primary,
             accent=team_definition.accent,
             down=self._nonnegative_int(
-                game.down
+                getattr(game, "down", 0)
             ),
             distance=self._nonnegative_int(
-                game.distance
+                getattr(game, "distance", 0)
             ),
             yardline_side=str(
-                game.yardline_side or ""
+                getattr(game, "yardline_side", "") or ""
             ).upper(),
             yardline_number=(
                 self._nonnegative_int(
-                    game.yardline_number
+                    getattr(game, "yardline_number", 0)
                 )
             ),
             quarter=self._nonnegative_int(
-                game.quarter
+                getattr(game, "quarter", None)
+                if getattr(game, "quarter", None) is not None
+                else getattr(game, "inning", 0)
             ),
             clock=str(
-                game.clock or ""
+                getattr(game, "clock", "") or ""
             ),
             created_at=now,
             chant_frame_seconds=(
@@ -1136,6 +1498,9 @@ class PossessionAlertManager:
         if class_name == "CollegeFootballGame":
             return "cfb"
 
+        if class_name == "BaseballGame":
+            return "mlb"
+
         return ""
 
     @classmethod
@@ -1151,11 +1516,8 @@ class PossessionAlertManager:
             return ""
 
         event_id = str(
-            getattr(
-                game,
-                "event_id",
-                "",
-            )
+            getattr(game, "event_id", "")
+            or getattr(game, "game_pk", "")
             or ""
         ).strip()
 

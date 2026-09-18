@@ -40,10 +40,14 @@ DEFAULT_SETTINGS = {
         "redzone_enabled": True,
         "touchdown_enabled": True,
         "field_goal_enabled": True,
+        "homerun_enabled": True,
+        "mlb_win_enabled": True,
+        "close_game_enabled": True,
 
         "teams": {
             "nfl": [],
             "cfb": [],
+            "mlb": [],
         },
 
         "cooldown_seconds": 20,

@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import Dict, Tuple
 
 from cfb.colors import WHITE as CFB_WHITE, team_color as cfb_team_color
+from mlb.api import TEAM_ABBR
+from mlb.colors import team_color as mlb_team_color
 
 
 RGBColor = Tuple[int, int, int]
@@ -307,6 +309,39 @@ NFL_TEAM_ALERTS: Dict[str, NFLTeamAlert] = {
     ),
 }
 
+MLB_TEAM_NAMES = {
+    "ARI": "Arizona Diamondbacks",
+    "ATL": "Atlanta Braves",
+    "ATH": "Athletics",
+    "BAL": "Baltimore Orioles",
+    "BOS": "Boston Red Sox",
+    "CHC": "Chicago Cubs",
+    "CWS": "Chicago White Sox",
+    "CIN": "Cincinnati Reds",
+    "CLE": "Cleveland Guardians",
+    "COL": "Colorado Rockies",
+    "DET": "Detroit Tigers",
+    "HOU": "Houston Astros",
+    "KC": "Kansas City Royals",
+    "LAA": "Los Angeles Angels",
+    "LAD": "Los Angeles Dodgers",
+    "MIA": "Miami Marlins",
+    "MIL": "Milwaukee Brewers",
+    "MIN": "Minnesota Twins",
+    "NYM": "New York Mets",
+    "NYY": "New York Yankees",
+    "PHI": "Philadelphia Phillies",
+    "PIT": "Pittsburgh Pirates",
+    "SD": "San Diego Padres",
+    "SF": "San Francisco Giants",
+    "SEA": "Seattle Mariners",
+    "STL": "St. Louis Cardinals",
+    "TB": "Tampa Bay Rays",
+    "TEX": "Texas Rangers",
+    "TOR": "Toronto Blue Jays",
+    "WSH": "Washington Nationals",
+}
+
 
 def get_team_alert(
     abbreviation,
@@ -350,6 +385,28 @@ def get_team_alert(
                 abbreviation,
                 "BALL",
             ),
+            primary=primary,
+            accent=accent,
+        )
+
+    if league == "mlb":
+        primary = mlb_team_color(abbreviation)
+        red, green, blue = primary
+        luminance = (0.3 * red) + (0.59 * green) + (0.11 * blue)
+        accent = (
+            (20, 20, 20)
+            if luminance > 180
+            else (255, 255, 255)
+        )
+
+        return NFLTeamAlert(
+            abbreviation=abbreviation,
+            name=MLB_TEAM_NAMES.get(
+                abbreviation,
+                abbreviation,
+            ),
+            possession_label=f"{abbreviation} WIN",
+            chant=(abbreviation, "WIN"),
             primary=primary,
             accent=accent,
         )

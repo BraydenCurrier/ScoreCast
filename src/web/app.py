@@ -36,6 +36,7 @@ from stocks.api import (
 
 from alerts.manager import possession_alert_manager
 from alerts.teams import (
+    MLB_TEAM_NAMES,
     NFL_TEAM_ALERTS,
     get_team_alert,
 )
@@ -1796,18 +1797,23 @@ def alerts_page():
     if requested_league not in {
         "nfl",
         "cfb",
+        "mlb",
     }:
         requested_league = "nfl"
 
-    league_label = (
-        "NFL"
-        if requested_league == "nfl"
-        else "CFB"
-    )
+    league_label = {
+        "nfl": "NFL",
+        "cfb": "CFB",
+        "mlb": "MLB",
+    }[requested_league]
 
     if requested_league == "nfl":
         available_teams = sorted(
             NFL_TEAM_ALERTS.keys()
+        )
+    elif requested_league == "mlb":
+        available_teams = sorted(
+            MLB_TEAM_NAMES.keys()
         )
     else:
         available_teams = (
@@ -1884,29 +1890,10 @@ def alerts_page():
             selected_teams
         )
 
-        updated_alerts = {
+        updated_alerts = dict(alerts)
+        updated_alerts.update({
             "enabled": (
                 request.form.get("enabled") == "on"
-            ),
-            "possession_enabled": (
-                request.form.get(
-                    "possession_enabled"
-                ) == "on"
-            ),
-            "redzone_enabled": (
-                request.form.get(
-                    "redzone_enabled"
-                ) == "on"
-            ),
-            "touchdown_enabled": (
-                request.form.get(
-                    "touchdown_enabled"
-                ) == "on"
-            ),
-            "field_goal_enabled": (
-                request.form.get(
-                    "field_goal_enabled"
-                ) == "on"
             ),
             "teams": teams_by_league,
             "poll_interval_seconds": form_float(
@@ -1939,7 +1926,31 @@ def alerts_page():
                 1.0,
                 15.0,
             ),
-        }
+        })
+
+        if requested_league == "mlb":
+            updated_alerts["homerun_enabled"] = (
+                request.form.get("homerun_enabled") == "on"
+            )
+            updated_alerts["mlb_win_enabled"] = (
+                request.form.get("mlb_win_enabled") == "on"
+            )
+            updated_alerts["close_game_enabled"] = (
+                request.form.get("close_game_enabled") == "on"
+            )
+        else:
+            updated_alerts["possession_enabled"] = (
+                request.form.get("possession_enabled") == "on"
+            )
+            updated_alerts["redzone_enabled"] = (
+                request.form.get("redzone_enabled") == "on"
+            )
+            updated_alerts["touchdown_enabled"] = (
+                request.form.get("touchdown_enabled") == "on"
+            )
+            updated_alerts["field_goal_enabled"] = (
+                request.form.get("field_goal_enabled") == "on"
+            )
 
         update_settings({
             "alerts": updated_alerts,
@@ -2067,6 +2078,119 @@ def alerts_page():
                 </div>
             </label>
         </div>
+        """
+
+    if requested_league == "mlb":
+        alert_type_rows = f"""
+                    <label class="alert-type-row">
+                        <input
+                            type="checkbox"
+                            name="homerun_enabled"
+                            {checked("homerun_enabled", True)}
+                        >
+                        <div class="alert-icon">💣</div>
+                        <div class="alert-row-text">
+                            <div class="alert-row-title">Home Run</div>
+                            <div class="alert-row-description">
+                                Take over the board when a
+                                selected team hits a home run.
+                            </div>
+                        </div>
+                    </label>
+                    <label class="alert-type-row">
+                        <input
+                            type="checkbox"
+                            name="mlb_win_enabled"
+                            {checked("mlb_win_enabled", True)}
+                        >
+                        <div class="alert-icon">🏆</div>
+                        <div class="alert-row-text">
+                            <div class="alert-row-title">Win</div>
+                            <div class="alert-row-description">
+                                Take over the board when a
+                                selected team wins.
+                            </div>
+                        </div>
+                    </label>
+                    <label class="alert-type-row">
+                        <input
+                            type="checkbox"
+                            name="close_game_enabled"
+                            {checked("close_game_enabled", True)}
+                        >
+                        <div class="alert-icon">🔥</div>
+                        <div class="alert-row-text">
+                            <div class="alert-row-title">Close Game</div>
+                            <div class="alert-row-description">
+                                Alert once when a selected team's
+                                game is tied or within one run
+                                from the 7th inning on.
+                            </div>
+                        </div>
+                    </label>
+        """
+    else:
+        alert_type_rows = f"""
+                    <label class="alert-type-row">
+                        <input
+                            type="checkbox"
+                            name="possession_enabled"
+                            {checked("possession_enabled", True)}
+                        >
+                        <div class="alert-icon">🏈</div>
+                        <div class="alert-row-text">
+                            <div class="alert-row-title">Possession</div>
+                            <div class="alert-row-description">
+                                Show an alert when a selected
+                                team gains possession.
+                            </div>
+                        </div>
+                    </label>
+                    <label class="alert-type-row">
+                        <input
+                            type="checkbox"
+                            name="redzone_enabled"
+                            {checked("redzone_enabled", True)}
+                        >
+                        <div class="alert-icon">🔴</div>
+                        <div class="alert-row-text">
+                            <div class="alert-row-title">Red Zone</div>
+                            <div class="alert-row-description">
+                                Show an alert when a selected
+                                team reaches the opponent's 20.
+                            </div>
+                        </div>
+                    </label>
+                    <label class="alert-type-row">
+                        <input
+                            type="checkbox"
+                            name="touchdown_enabled"
+                            {checked("touchdown_enabled", True)}
+                        >
+                        <div class="alert-icon">🙌</div>
+                        <div class="alert-row-text">
+                            <div class="alert-row-title">Touchdown</div>
+                            <div class="alert-row-description">
+                                Show an alert when a selected
+                                team scores a touchdown.
+                            </div>
+                        </div>
+                    </label>
+                    <label class="alert-type-row">
+                        <input
+                            type="checkbox"
+                            name="field_goal_enabled"
+                            {checked("field_goal_enabled", True)}
+                        >
+                        <div class="alert-icon">🥅</div>
+                        <div class="alert-row-text">
+                            <div class="alert-row-title">Field Goal</div>
+                            <div class="alert-row-description">
+                                Show an alert when a selected
+                                team makes a field goal.
+                            </div>
+                        </div>
+                    </label>
         """
 
     saved_message = ""
@@ -2362,6 +2486,17 @@ def alerts_page():
                             >
                                 CFB
                             </option>
+
+                            <option
+                                value="mlb"
+                                {
+                                    "selected"
+                                    if requested_league == "mlb"
+                                    else ""
+                                }
+                            >
+                                MLB
+                            </option>
                         </select>
                     </div>
 
@@ -2405,129 +2540,7 @@ def alerts_page():
                         Alert Types
                     </div>
 
-                    <label class="alert-type-row">
-                        <input
-                            type="checkbox"
-                            name="possession_enabled"
-                            {checked(
-                                "possession_enabled",
-                                True,
-                            )}
-                        >
-
-                        <div class="alert-icon">
-                            🏈
-                        </div>
-
-                        <div class="alert-row-text">
-                            <div class="alert-row-title">
-                                Possession
-                            </div>
-
-                            <div
-                                class="
-                                    alert-row-description
-                                "
-                            >
-                                Show an alert when a
-                                selected team gains
-                                possession.
-                            </div>
-                        </div>
-                    </label>
-
-                    <label class="alert-type-row">
-                        <input
-                            type="checkbox"
-                            name="redzone_enabled"
-                            {checked(
-                                "redzone_enabled",
-                                True,
-                            )}
-                        >
-
-                        <div class="alert-icon">
-                            🔴
-                        </div>
-
-                        <div class="alert-row-text">
-                            <div class="alert-row-title">
-                                Red Zone
-                            </div>
-
-                            <div
-                                class="
-                                    alert-row-description
-                                "
-                            >
-                                Show an alert when a
-                                selected team reaches
-                                the opponent's 20.
-                            </div>
-                        </div>
-                    </label>
-
-                    <label class="alert-type-row">
-                        <input
-                            type="checkbox"
-                            name="touchdown_enabled"
-                            {checked(
-                                "touchdown_enabled",
-                                True,
-                            )}
-                        >
-
-                        <div class="alert-icon">
-                            🙌
-                        </div>
-
-                        <div class="alert-row-text">
-                            <div class="alert-row-title">
-                                Touchdown
-                            </div>
-
-                            <div
-                                class="
-                                    alert-row-description
-                                "
-                            >
-                                Show an alert when a
-                                selected team scores
-                                a touchdown.
-                            </div>
-                        </div>
-                    </label>
-
-                    <label class="alert-type-row">
-                        <input
-                            type="checkbox"
-                            name="field_goal_enabled"
-                            {checked(
-                                "field_goal_enabled",
-                                True,
-                            )}
-                        >
-
-                        <div class="alert-icon">
-                            🥅
-                        </div>
-
-                        <div class="alert-row-text">
-                            <div class="alert-row-title">
-                                Field Goal
-                            </div>
-
-                            <div
-                                class="
-                                    alert-row-description
-                                "
-                            >
-                                Show an alert when a
-                                selected team makes
-                                a field goal.
-                            </div>
-                        </div>
-                    </label>
+                    {alert_type_rows}
                 </div>
 
                 <div class="card">
