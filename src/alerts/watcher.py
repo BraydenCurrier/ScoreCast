@@ -6,8 +6,8 @@ from common.settings import get_settings
 from nfl.api import (
     get_today_games as get_nfl_games,
 )
-from cfb.api import (
-    get_today_games as get_cfb_games,
+from mlb.api import (
+    get_alert_games as get_mlb_alert_games,
 )
 
 
@@ -103,6 +103,23 @@ def possession_watch_loop(stop_event):
                 _log_error_throttled(
                     RuntimeError(
                         f"CFB alerts: {error}"
+                    )
+                )
+
+            try:
+                mlb_games = (
+                    get_mlb_alert_games()
+                    or []
+                )
+
+                games.extend(
+                    mlb_games
+                )
+
+            except Exception as error:
+                _log_error_throttled(
+                    RuntimeError(
+                        f"MLB alerts: {error}"
                     )
                 )
 

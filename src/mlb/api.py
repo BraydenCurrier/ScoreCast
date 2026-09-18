@@ -4,7 +4,7 @@ from common.timezone import get_local_timezone
 
 import requests
 
-from mlb.models import BaseballGame
+from mlb.models import BaseballGame, MlbScoringPlay
 
 MLB_SCHEDULE_URL = "https://statsapi.mlb.com/api/v1/schedule"
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
@@ -53,7 +53,102 @@ def get_record(team_data):
     }
 
 
-def get_today_games():
+def _batter_last_name(play):
+    matchup = play.get("matchup") or {}
+    batter = matchup.get("batter") or {}
+    full_name = str(batter.get("fullName") or "").strip()
+
+    if not full_name:
+        return ""
+
+    return full_name.split()[-1]
+
+
+def _parse_scoring_plays(game, away, home):
+    plays = []
+
+    for index, play in enumerate(game.get("scoringPlays") or []):
+        if not isinstance(play, dict):
+            continue
+
+        result = play.get("result") or {}
+        about = play.get("about") or {}
+        event = str(result.get("event") or "").strip()
+        event_type = str(result.get("eventType") or "").strip()
+        description = str(result.get("description") or "").strip()
+        half = str(about.get("halfInning") or "").strip().lower()
+        inning = int(about.get("inning") or 0)
+        rbi = int(result.get("rbi") or 0)
+        batting_team = away if half == "top" else home
+        play_id = (
+            f"{inning}:{half}:{event}:{rbi}:"
+            f"{result.get('awayScore')}:"
+            f"{result.get('homeScore')}:"
+            f"{description}"
+        )
+
+        plays.append(
+            MlbScoringPlay(
+                play_id=play_id or f"play-{index}",
+                event=event,
+                event_type=event_type,
+                description=description,
+                rbi=rbi,
+                inning=inning,
+                half=half,
+                batter=_batter_last_name(play),
+                batting_team=str(batting_team or "").upper(),
+            )
+        )
+
+    return tuple(plays)
+
+
+def _parse_game(game, include_scoring_plays=False):
+    linescore = game.get("linescore", {})
+
+    away_data = game["teams"]["away"]
+    home_data = game["teams"]["home"]
+
+    away_team = away_data["team"]
+    home_team = home_data["team"]
+
+    away_record = get_record(away_data)
+    home_record = get_record(home_data)
+    away = get_team_abbr(away_team)
+    home = get_team_abbr(home_team)
+    scoring_plays = ()
+
+    if include_scoring_plays:
+        scoring_plays = _parse_scoring_plays(
+            game,
+            away,
+            home,
+        )
+
+    return BaseballGame(
+        away=away,
+        home=home,
+        status=game["status"]["abstractGameState"],
+        start_time=format_local_time(game["gameDate"]),
+        away_score=away_data.get("score", 0) or 0,
+        home_score=home_data.get("score", 0) or 0,
+        away_wins=away_record["wins"],
+        away_losses=away_record["losses"],
+        home_wins=home_record["wins"],
+        home_losses=home_record["losses"],
+        inning=linescore.get("currentInning", 0) or 0,
+        top_inning=linescore.get("inningHalf") == "Top",
+        first=bool(linescore.get("offense", {}).get("first")),
+        second=bool(linescore.get("offense", {}).get("second")),
+        third=bool(linescore.get("offense", {}).get("third")),
+        outs=linescore.get("outs", 0) or 0,
+        game_pk=str(game.get("gamePk") or ""),
+        scoring_plays=scoring_plays,
+    )
+
+
+def _fetch_schedule(hydrate):
     today = datetime.now(
         get_local_timezone()
     ).strftime("%Y-%m-%d")
@@ -61,7 +156,7 @@ def get_today_games():
     params = {
         "sportId": 1,
         "date": today,
-        "hydrate": "probablePitcher,linescore,team",
+        "hydrate": hydrate,
     }
 
     response = _session.get(
@@ -73,47 +168,43 @@ def get_today_games():
 
     response.raise_for_status()
 
-    data = response.json()
+    return response.json()
+
+
+def _parse_schedule(data, include_scoring_plays=False):
     games = []
 
     for date_block in data.get("dates", []):
         for game in date_block.get("games", []):
-            linescore = game.get("linescore", {})
-
-            away_data = game["teams"]["away"]
-            home_data = game["teams"]["home"]
-
-            away_team = away_data["team"]
-            home_team = home_data["team"]
-
-            away_record = get_record(away_data)
-            home_record = get_record(home_data)
-
-            games.append(
-                BaseballGame(
-                    away=get_team_abbr(away_team),
-                    home=get_team_abbr(home_team),
-
-                    status=game["status"]["abstractGameState"],
-                    start_time=format_local_time(game["gameDate"]),
-
-                    away_score=away_data.get("score", 0),
-                    home_score=home_data.get("score", 0),
-
-                    away_wins=away_record["wins"],
-                    away_losses=away_record["losses"],
-                    home_wins=home_record["wins"],
-                    home_losses=home_record["losses"],
-
-                    inning=linescore.get("currentInning", 0),
-                    top_inning=linescore.get("inningHalf") == "Top",
-
-                    first=bool(linescore.get("offense", {}).get("first")),
-                    second=bool(linescore.get("offense", {}).get("second")),
-                    third=bool(linescore.get("offense", {}).get("third")),
-
-                    outs=linescore.get("outs", 0),
+            try:
+                games.append(
+                    _parse_game(
+                        game,
+                        include_scoring_plays=(
+                            include_scoring_plays
+                        ),
+                    )
                 )
-            )
+            except (KeyError, TypeError, ValueError):
+                continue
 
     return games
+
+
+def get_today_games():
+    data = _fetch_schedule(
+        "probablePitcher,linescore,team"
+    )
+
+    return _parse_schedule(data)
+
+
+def get_alert_games():
+    data = _fetch_schedule(
+        "linescore,team,scoringplays"
+    )
+
+    return _parse_schedule(
+        data,
+        include_scoring_plays=True,
+    )
