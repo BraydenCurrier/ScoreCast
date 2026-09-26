@@ -1,5 +1,6 @@
 from common.fonts import print_3x5, get_3x5_width, print_3x5_right, print_4x5_centered, print_gfx_5x7, draw_text_right, print_clock
 from common.logo_store import draw_logo, get_selected_logo_variant
+from common.broadcast import draw_broadcast_logo
 
 WHITE = (255, 255, 255)
 YELLOW = (255, 235, 0)
@@ -45,55 +46,6 @@ def draw_team_logo(
         variant=variant,
     )
 
-def draw_broadcast_logo(
-    image,
-    team_abbreviation,
-    x,
-    y,
-    settings,
-):
-    if not team_abbreviation:
-        return False
-
-    broadcast = team_abbreviation.strip()
-    logo_identifier = BROADCAST_IDS.get(
-        team_abbreviation,
-        team_abbreviation.replace("+", "_PLUS")
-    )
-
-    try:
-        variant = get_selected_logo_variant(
-            settings,
-            "broadcast",
-            logo_identifier,
-        )
-
-        logo = load_logo(
-            league="broadcast",
-            identifier=logo_identifier,
-            variant=variant,
-        )
-
-        return draw_logo(
-            destination=image,
-            league="broadcast",
-            identifier=logo_identifier,
-            x=x - logo.width // 2,
-            y=y - logo.height // 2,
-            variant=variant,
-        )
-
-    except (FileNotFoundError, ValueError, OSError, KeyError) as exc:
-        # Optional text fallback.
-        draw = ImageDraw.Draw(image)
-        draw.text(
-            (x, y),
-            broadcast,
-            fill="white",
-            anchor="mm",
-        )
-
-        return False
 
 def render_basketball_game_onto(image, draw, game, offset_x, settings):
     # team Away

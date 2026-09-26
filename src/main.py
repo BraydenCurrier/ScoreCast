@@ -27,6 +27,7 @@ from mlb.mlb_renderer import render_game_strip_onto as draw_mlb_strip
 from nfl.api import get_today_games as get_live_nfl
 from nfl.nfl_renderer import render_game_strip_onto as draw_nfl_strip
 from nfl.focus_renderer import render_nfl_focus
+from cfb.focus_renderer import render_cfb_focus
 
 from cfb.api import get_today_games as get_live_cfb
 from cfb.cfb_renderer import render_game_strip_onto as draw_cfb_strip
@@ -348,7 +349,7 @@ def get_focus_settings(settings):
     return focus
 
 
-def get_focus_nfl_games(
+def get_focus_games(
     all_games,
     settings,
 ):
@@ -364,31 +365,29 @@ def get_focus_nfl_games(
     ):
         return []
 
-    selected_ids = focus.get(
-        "nfl_game_ids",
-        [],
+    def _id_list(key):
+        values = focus.get(key, [])
+        if not isinstance(values, list):
+            return []
+        return [str(value) for value in values]
+
+    selected_ids = _id_list("nfl_game_ids") + _id_list(
+        "cfb_game_ids"
     )
 
-    if not isinstance(
-        selected_ids,
-        list,
-    ):
+    if not selected_ids:
         return []
 
-    selected_ids = [
-        str(value)
-        for value in selected_ids
-    ]
-
-    selected_set = set(
-        selected_ids
-    )
+    selected_set = set(selected_ids)
 
     matching_games = [
         game
         for game in all_games
         if (
-            is_nfl_game(game)
+            (
+                is_nfl_game(game)
+                or is_cfb_game(game)
+            )
             and game_id(game)
             in selected_set
         )
@@ -841,7 +840,7 @@ while True:
     with _games_lock:
         focus_source_games = _games.copy()
 
-    focus_games = get_focus_nfl_games(
+    focus_games = get_focus_games(
         focus_source_games,
         settings,
     )
@@ -908,10 +907,16 @@ while True:
             focus_game_index
         ]
 
-        focus_frame = render_nfl_focus(
-            focus_game,
-            settings,
-        )
+        if is_cfb_game(focus_game):
+            focus_frame = render_cfb_focus(
+                focus_game,
+                settings,
+            )
+        else:
+            focus_frame = render_nfl_focus(
+                focus_game,
+                settings,
+            )
 
         matrix.SetImage(
             focus_frame

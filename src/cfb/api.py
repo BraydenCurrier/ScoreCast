@@ -488,50 +488,7 @@ def _get_possession_abbr(
     return ""
 
 
-def _get_broadcast(event, competition):
-    """
-    Return a readable broadcast string such as:
-    "ESPN", "CBS", or "ESPN, ABC".
-    """
-    broadcast_names = []
-    seen_names = set()
-
-    broadcast_sources = [
-        competition.get("broadcasts", []),
-        event.get("broadcasts", []),
-    ]
-
-    for broadcasts in broadcast_sources:
-        if not isinstance(broadcasts, list):
-            continue
-
-        for broadcast in broadcasts:
-            if not isinstance(broadcast, dict):
-                continue
-
-            names = broadcast.get("names", [])
-
-            if isinstance(names, str):
-                names = [names]
-
-            if not isinstance(names, list):
-                continue
-
-            for name in names:
-                cleaned_name = str(name or "").strip()
-
-                if not cleaned_name:
-                    continue
-
-                normalized_name = cleaned_name.upper()
-
-                if normalized_name in seen_names:
-                    continue
-
-                seen_names.add(normalized_name)
-                broadcast_names.append(cleaned_name)
-
-    return ", ".join(broadcast_names)
+from common.broadcast import format_broadcast as _get_broadcast
 
 
 def get_today_games(conference_groups=None):
