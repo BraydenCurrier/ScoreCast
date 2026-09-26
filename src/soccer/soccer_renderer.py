@@ -1,6 +1,7 @@
 from common.fonts import (
     get_3x5_width,
     get_4x5_width,
+    gfx_5x7_width,
     print_3x5,
     print_3x5_right,
     print_4x5,
@@ -11,7 +12,6 @@ from common.fonts import (
 from common.logo_store import (
     draw_logo,
     get_selected_logo_variant,
-    load_logo,
 )
 
 WHITE = (255, 255, 255)
@@ -22,6 +22,18 @@ LOGO_SIZE = 30
 CARD_WIDTH = 64
 GAME_GAP = 5
 GAME_WIDTH = LOGO_SIZE + CARD_WIDTH + LOGO_SIZE
+
+NAME_LEFT_X = 2
+NAME_RIGHT_X = 62
+PAD_CENTER_X = 32
+RECORD_Y = 26
+LEAGUE_Y = 17
+DATE_Y = 9
+TIME_Y = 2
+NAME_Y = 2
+SCORE_Y = 13
+STATUS_Y = 2
+CLOCK_Y = 22
 
 
 def is_live(game):
@@ -62,6 +74,15 @@ def period_label(game):
     return ""
 
 
+def _team_name_width(text):
+    text = str(text or "").upper()
+
+    if len(text) <= 3:
+        return gfx_5x7_width(text)
+
+    return get_4x5_width(text)
+
+
 def draw_team_name(draw, text, x, y, color, right=False):
     text = str(text or "").upper()
 
@@ -97,43 +118,71 @@ def draw_team_logo(image, team_abbreviation, x_start, y_start, settings):
     )
 
 
-def draw_broadcast_logo(image, broadcast, x, y, settings):
-    if not broadcast:
+def _record_text(wins, draws, losses):
+    return f"{int(wins or 0)}-{int(draws or 0)}-{int(losses or 0)}"
+
+
+def _draw_centered_if_fits(
+    draw,
+    text,
+    center_x,
+    y,
+    color,
+    width_fn,
+    left_limit,
+    right_limit,
+):
+    text = str(text or "").strip()
+    if not text:
         return False
 
-    identifier = str(broadcast).split(",")[0].strip()
-    identifier = identifier.replace("+", "_PLUS")
-    identifier = identifier.replace(" ", "_")
+    width = width_fn(text)
+    start_x = center_x - width // 2
+    end_x = start_x + width - 1
 
-    if not identifier:
+    if start_x < left_limit or end_x > right_limit:
         return False
 
-    variant = get_selected_logo_variant(
-        settings,
-        "broadcast",
-        identifier,
-    )
+    if width_fn is get_3x5_width:
+        print_3x5(draw, text, start_x, y, color)
+    else:
+        print_4x5(draw, text, start_x, y, color)
 
-    try:
-        logo = load_logo(
-            league="broadcast",
-            identifier=identifier,
-            variant=variant,
+    return True
+
+
+def _draw_pregame_center_badge(image, draw, game, offset_x, settings):
+    # Soccer W-D-L records are too wide to share a row with
+    # league text or a broadcast logo. Keep this middle band
+    # for the league only so nothing collides with the records.
+    if game.league_short:
+        print_4x5_centered(
+            draw,
+            game.league_short,
+            PAD_CENTER_X + offset_x,
+            LEAGUE_Y,
+            GREY,
         )
-    except (
-        FileNotFoundError,
-        ValueError,
-        OSError,
-    ):
-        return False
 
-    return draw_logo(
-        destination=image,
-        league="broadcast",
-        identifier=identifier,
-        x=x - logo.width // 2,
-        y=y - logo.height // 2,
-        variant=variant,
+
+def _draw_scores(draw, game, offset_x):
+    away = str(game.away_score)
+    home = str(game.home_score)
+
+    print_gfx_5x7(
+        draw,
+        away,
+        NAME_LEFT_X + 2 + offset_x,
+        SCORE_Y,
+        YELLOW,
+    )
+    home_width = gfx_5x7_width(home)
+    print_gfx_5x7(
+        draw,
+        home,
+        NAME_RIGHT_X - 2 - home_width + offset_x,
+        SCORE_Y,
+        YELLOW,
     )
 
 
@@ -141,119 +190,89 @@ def render_soccer_game_onto(image, draw, game, offset_x, settings):
     draw_team_name(
         draw,
         game.away,
-        3 + offset_x,
-        2,
+        NAME_LEFT_X + offset_x,
+        NAME_Y,
         WHITE,
     )
     draw_team_name(
         draw,
         game.home,
-        61 + offset_x,
-        2,
+        NAME_RIGHT_X + offset_x,
+        NAME_Y,
         WHITE,
         right=True,
     )
 
+    away_name_end = NAME_LEFT_X + _team_name_width(game.away)
+    home_name_start = NAME_RIGHT_X - _team_name_width(game.home)
+
     if is_scheduled(game):
-        width = get_3x5_width(game.start_time)
-        centered_x = (64 - width) // 2
-        print_3x5(
+        _draw_centered_if_fits(
             draw,
             game.start_time,
-            centered_x + offset_x,
-            2,
+            PAD_CENTER_X + offset_x,
+            TIME_Y,
             YELLOW,
+            get_3x5_width,
+            away_name_end + 2 + offset_x,
+            home_name_start - 2 + offset_x,
         )
-        print_4x5_centered(
+
+        if game.date:
+            print_4x5_centered(
+                draw,
+                game.date,
+                PAD_CENTER_X + offset_x,
+                DATE_Y,
+                WHITE,
+            )
+
+        _draw_pregame_center_badge(
+            image,
             draw,
-            game.date,
-            32 + offset_x,
-            11,
-            WHITE,
+            game,
+            offset_x,
+            settings,
         )
 
         print_3x5(
             draw,
-            f"{game.away_wins}-{game.away_draws}-{game.away_losses}",
-            2 + offset_x,
-            22,
+            _record_text(
+                game.away_wins,
+                game.away_draws,
+                game.away_losses,
+            ),
+            NAME_LEFT_X + offset_x,
+            RECORD_Y,
             GREY,
         )
         print_3x5_right(
             draw,
-            f"{game.home_wins}-{game.home_draws}-{game.home_losses}",
-            60 + offset_x,
-            22,
+            _record_text(
+                game.home_wins,
+                game.home_draws,
+                game.home_losses,
+            ),
+            NAME_RIGHT_X + offset_x,
+            RECORD_Y,
             GREY,
         )
-
-        if game.broadcast:
-            drew_logo = draw_broadcast_logo(
-                image,
-                game.broadcast,
-                31 + offset_x,
-                24,
-                settings,
-            )
-            if not drew_logo and game.league_short:
-                print_4x5_centered(
-                    draw,
-                    game.league_short,
-                    32 + offset_x,
-                    22,
-                    GREY,
-                )
-        elif game.league_short:
-            print_4x5_centered(
-                draw,
-                game.league_short,
-                32 + offset_x,
-                22,
-                GREY,
-            )
         return
 
-    print_4x5_centered(
-        draw,
-        period_label(game),
-        32 + offset_x,
-        2,
-        YELLOW,
-    )
-
-    if game.away_score < 10:
-        print_gfx_5x7(
+    label = period_label(game)
+    if label and game.status.upper() != "HALFTIME":
+        _draw_centered_if_fits(
             draw,
-            str(game.away_score),
-            9 + offset_x,
-            13,
+            label,
+            PAD_CENTER_X + offset_x,
+            STATUS_Y,
             YELLOW,
-        )
-    else:
-        print_gfx_5x7(
-            draw,
-            str(game.away_score),
-            5 + offset_x,
-            13,
-            YELLOW,
+            get_4x5_width,
+            away_name_end + 2 + offset_x,
+            home_name_start - 2 + offset_x,
         )
 
-    if game.home_score < 10:
-        draw_text_right(
-            draw,
-            game.home_score,
-            55 + offset_x,
-            13,
-            YELLOW,
-        )
-    else:
-        draw_text_right(
-            draw,
-            game.home_score,
-            60 + offset_x,
-            13,
-            YELLOW,
-        )
+    _draw_scores(draw, game, offset_x)
 
     if is_final(game):
         return
@@ -262,8 +281,8 @@ def render_soccer_game_onto(image, draw, game, offset_x, settings):
         print_4x5_centered(
             draw,
             "HT",
-            32 + offset_x,
-            22,
+            PAD_CENTER_X + offset_x,
+            CLOCK_Y,
             YELLOW,
         )
         return
@@ -272,8 +291,8 @@ def render_soccer_game_onto(image, draw, game, offset_x, settings):
         print_4x5_centered(
             draw,
             game.clock,
-            32 + offset_x,
-            22,
+            PAD_CENTER_X + offset_x,
+            CLOCK_Y,
             YELLOW,
         )
 

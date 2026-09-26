@@ -1,5 +1,6 @@
 from common.fonts import print_3x5, get_3x5_width, print_3x5_right, print_4x5_centered, print_gfx_5x7, draw_text_right, print_clock
-from common.logo_store import draw_logo, get_selected_logo_variant, load_logo
+from common.logo_store import draw_logo, get_selected_logo_variant
+from common.broadcast import draw_broadcast_logo
 
 WHITE = (255, 255, 255)
 YELLOW = (255, 235, 0)
@@ -45,40 +46,6 @@ def draw_team_logo(
         variant=variant,
     )
 
-def draw_broadcast_logo(
-    image,
-    team_abbreviation,
-    x,
-    y,
-    settings,
-):
-    variant = get_selected_logo_variant(
-        settings,
-        "broadcast",
-        team_abbreviation,
-    )
-
-    try:
-        logo = load_logo(
-            league="broadcast",
-            identifier=team_abbreviation,
-            variant=variant,
-        )
-    except (
-        FileNotFoundError,
-        ValueError,
-        OSError,
-    ):
-        return False
-
-    return draw_logo(
-        destination=image,
-        league="broadcast",
-        identifier=team_abbreviation,
-        x=x - logo.width // 2,
-        y=y - logo.height // 2,
-        variant=variant,
-    )
 
 def render_hockey_game_onto(image, draw, game, offset_x, settings):
     # away team

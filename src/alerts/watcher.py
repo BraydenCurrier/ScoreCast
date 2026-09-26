@@ -6,6 +6,9 @@ from common.settings import get_settings
 from nfl.api import (
     get_today_games as get_nfl_games,
 )
+from cfb.api import (
+    get_today_games as get_cfb_games,
+)
 from mlb.api import (
     get_alert_games as get_mlb_alert_games,
 )

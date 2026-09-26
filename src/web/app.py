@@ -1414,6 +1414,119 @@ def games():
 </html>
     """
 
+def _focus_search_blob(game, league_key):
+    parts = [
+        league_key,
+        str(getattr(game, "away", "")),
+        str(getattr(game, "home", "")),
+        str(get_display_status(game, league_key)),
+        str(getattr(game, "broadcast", "") or ""),
+        str(getattr(game, "start_time", "") or ""),
+    ]
+
+    for team in (
+        getattr(game, "away", ""),
+        getattr(game, "home", ""),
+    ):
+        definition = get_team_alert(
+            team,
+            league=league_key,
+        )
+
+        if definition is not None:
+            parts.append(definition.name)
+            parts.append(definition.abbreviation)
+
+        if league_key == "cfb":
+            parts.append(str(team).replace(" ", ""))
+
+    if league_key == "cfb":
+        for rank in (
+            getattr(game, "away_rank", None),
+            getattr(game, "home_rank", None),
+        ):
+            if rank:
+                parts.append(str(rank))
+                parts.append(f"#{rank}")
+
+    return " ".join(
+        str(part).strip()
+        for part in parts
+        if str(part).strip()
+    ).lower()
+
+
+def _focus_game_rows(
+    games,
+    league_key,
+    selected_ids,
+    input_name,
+    badge,
+):
+    rows = ""
+
+    for game in games:
+        key, _ = get_game_league(game)
+
+        if key != league_key:
+            continue
+
+        game_identifier = get_game_id(game)
+        checked = (
+            "checked"
+            if game_identifier in selected_ids
+            else ""
+        )
+        safe_id = escape(game_identifier, quote=True)
+        safe_away = escape(str(game.away))
+        safe_home = escape(str(game.home))
+        safe_status = escape(
+            str(get_display_status(game, league_key))
+        )
+        away_score = escape(
+            str(getattr(game, "away_score", 0))
+        )
+        home_score = escape(
+            str(getattr(game, "home_score", 0))
+        )
+        safe_search = escape(
+            _focus_search_blob(game, league_key),
+            quote=True,
+        )
+
+        rows += f"""
+        <label
+            class="game-row focus-game-row"
+            data-league="{league_key}"
+            data-search="{safe_search}"
+        >
+            <input
+                type="checkbox"
+                name="{input_name}"
+                value="{safe_id}"
+                {checked}
+            >
+
+            <div class="game-info">
+                <div class="matchup">
+                    {safe_away} @ {safe_home}
+                </div>
+
+                <div class="details">
+                    {away_score} - {home_score}
+                    · {safe_status}
+                </div>
+            </div>
+
+            <div class="league-badge">
+                {badge}
+            </div>
+        </label>
+        """
+
+    return rows
+
+
 @app.route("/focus")
 @login_required
 def focus_page():
@@ -1437,10 +1550,18 @@ def focus_page():
         )
     )
 
-    selected_game_ids = set(
+    selected_nfl_ids = set(
         str(value)
         for value in focus_settings.get(
             "nfl_game_ids",
+            [],
+        )
+    )
+
+    selected_cfb_ids = set(
+        str(value)
+        for value in focus_settings.get(
+            "cfb_game_ids",
             [],
         )
     )
@@ -1463,99 +1584,33 @@ def focus_page():
         ),
     )
 
-    nfl_rows = ""
+    nfl_rows = _focus_game_rows(
+        latest_games,
+        "nfl",
+        selected_nfl_ids,
+        "focus_nfl_game",
+        "NFL",
+    )
 
-    for game in latest_games:
-        league_key, _ = get_game_league(
-            game
-        )
-
-        if league_key != "nfl":
-            continue
-
-        game_identifier = get_game_id(
-            game
-        )
-
-        checked = (
-            "checked"
-            if game_identifier
-            in selected_game_ids
-            else ""
-        )
-
-        safe_id = escape(
-            game_identifier,
-            quote=True,
-        )
-
-        safe_away = escape(
-            str(game.away)
-        )
-
-        safe_home = escape(
-            str(game.home)
-        )
-
-        safe_status = escape(
-            str(
-                get_display_status(
-                    game,
-                    "nfl",
-                )
-            )
-        )
-
-        away_score = escape(
-            str(
-                getattr(
-                    game,
-                    "away_score",
-                    0,
-                )
-            )
-        )
-
-        home_score = escape(
-            str(
-                getattr(
-                    game,
-                    "home_score",
-                    0,
-                )
-            )
-        )
-
-        nfl_rows += f"""
-        <label class="game-row">
-            <input
-                type="checkbox"
-                name="focus_nfl_game"
-                value="{safe_id}"
-                {checked}
-            >
-
-            <div class="game-info">
-                <div class="matchup">
-                    {safe_away} @ {safe_home}
-                </div>
-
-                <div class="details">
-                    {away_score} - {home_score}
-                    · {safe_status}
-                </div>
-            </div>
-
-            <div class="league-badge">
-                NFL
-            </div>
-        </label>
-        """
+    cfb_rows = _focus_game_rows(
+        latest_games,
+        "cfb",
+        selected_cfb_ids,
+        "focus_cfb_game",
+        "CFB",
+    )
 
     if not nfl_rows:
         nfl_rows = """
         <div class="empty">
             No NFL games loaded yet.
+        </div>
+        """
+
+    if not cfb_rows:
+        cfb_rows = """
+        <div class="empty">
+            No CFB games loaded yet.
         </div>
         """
 
@@ -1591,13 +1646,13 @@ def focus_page():
         >
             <div class="card">
                 <div class="card-title">
-                    NFL Focus Mode
+                    Focus Mode
                 </div>
 
                 <div class="hint"
                      style="margin-bottom: 14px;">
                     Replace the normal ticker with a
-                    full-screen NFL scoreboard.
+                    full-screen NFL or CFB scoreboard.
                 </div>
 
                 <label class="game-row">
@@ -1660,12 +1715,37 @@ def focus_page():
 
                     <div class="hint">
                         Only used when more than one
-                        NFL game is selected.
+                        NFL or CFB game is selected.
                     </div>
                 </div>
             </div>
 
             <div class="card">
+                <div class="card-title">
+                    Find a Game
+                </div>
+
+                <input
+                    class="search-input"
+                    type="search"
+                    id="focus_game_search"
+                    placeholder="Search teams, abbreviations, or status..."
+                    autocomplete="off"
+                    enterkeyhint="search"
+                    spellcheck="false"
+                >
+
+                <div class="hint">
+                    Filters both NFL and CFB lists.
+                    Checked games stay selected even
+                    if they are hidden by search.
+                </div>
+            </div>
+
+            <div
+                class="card focus-league-card"
+                data-league="nfl"
+            >
                 <div class="card-title">
                     NFL Games
                 </div>
@@ -1679,6 +1759,34 @@ def focus_page():
                 </div>
 
                 {nfl_rows}
+            </div>
+
+            <div
+                class="card focus-league-card"
+                data-league="cfb"
+            >
+                <div class="card-title">
+                    CFB Games
+                </div>
+
+                <div
+                    class="hint"
+                    style="margin-bottom: 14px;"
+                >
+                    Ranked teams show AP rank on the
+                    scoreboard. Select one or more
+                    games to display in Focus Mode.
+                </div>
+
+                {cfb_rows}
+            </div>
+
+            <div
+                id="focus_no_results"
+                class="empty"
+                hidden
+            >
+                No matching games.
             </div>
 
             <button
@@ -1708,6 +1816,75 @@ def focus_page():
                     rotationNumber.value;
             }}
         );
+
+        function filterFocusGames() {{
+            const searchInput = document.getElementById(
+                "focus_game_search"
+            );
+            const search = searchInput
+                ? searchInput.value.toLowerCase().trim()
+                : "";
+            const empty = document.getElementById(
+                "focus_no_results"
+            );
+            let visibleCount = 0;
+            let searchableCount = 0;
+
+            document.querySelectorAll(
+                ".focus-league-card"
+            ).forEach(function(card) {{
+                const rows = card.querySelectorAll(
+                    ".focus-game-row"
+                );
+                let visibleInCard = 0;
+
+                rows.forEach(function(row) {{
+                    searchableCount += 1;
+                    const haystack = (
+                        row.getAttribute("data-search")
+                        || row.innerText
+                    ).toLowerCase();
+                    const match = !search || haystack.indexOf(search) !== -1;
+                    row.style.display = match ? "" : "none";
+                    if (match) {{
+                        visibleInCard += 1;
+                    }}
+                }});
+
+                if (rows.length > 0) {{
+                    card.style.display = visibleInCard > 0 ? "" : "none";
+                    visibleCount += visibleInCard;
+                }}
+            }});
+
+            if (empty) {{
+                empty.hidden = !(
+                    search
+                    && searchableCount > 0
+                    && visibleCount === 0
+                );
+            }}
+        }}
+
+        const focusSearch = document.getElementById(
+            "focus_game_search"
+        );
+
+        if (focusSearch) {{
+            focusSearch.addEventListener(
+                "input",
+                filterFocusGames
+            );
+            focusSearch.addEventListener(
+                "keydown",
+                function(event) {{
+                    if (event.key === "Enter") {{
+                        event.preventDefault();
+                    }}
+                }}
+            );
+            filterFocusGames();
+        }}
     </script>
 </body>
 </html>
@@ -1719,9 +1896,15 @@ def focus_page():
 )
 @login_required
 def save_focus():
-    selected_game_ids = (
+    selected_nfl_ids = (
         request.form.getlist(
             "focus_nfl_game"
+        )
+    )
+
+    selected_cfb_ids = (
+        request.form.getlist(
+            "focus_cfb_game"
         )
     )
 
@@ -1732,12 +1915,27 @@ def save_focus():
         == "nfl"
     }
 
-    selected_game_ids = [
+    valid_cfb_game_ids = {
+        get_game_id(game)
+        for game in latest_games
+        if get_game_league(game)[0]
+        == "cfb"
+    }
+
+    selected_nfl_ids = [
         game_identifier
         for game_identifier
-        in selected_game_ids
+        in selected_nfl_ids
         if game_identifier
         in valid_nfl_game_ids
+    ]
+
+    selected_cfb_ids = [
+        game_identifier
+        for game_identifier
+        in selected_cfb_ids
+        if game_identifier
+        in valid_cfb_game_ids
     ]
 
     try:
@@ -1769,7 +1967,10 @@ def save_focus():
         "focus_mode": {
             "enabled": focus_enabled,
             "nfl_game_ids": (
-                selected_game_ids
+                selected_nfl_ids
+            ),
+            "cfb_game_ids": (
+                selected_cfb_ids
             ),
             "rotation_seconds": (
                 rotation_seconds

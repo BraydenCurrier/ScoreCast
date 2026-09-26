@@ -2,24 +2,24 @@ from common.football_focus import (
     FootballFocusStyle,
     render_football_focus,
 )
-from nfl.colors import team_color
-from nfl.nfl_renderer import (
+from cfb.colors import team_color
+from cfb.cfb_renderer import (
     draw_broadcast_logo,
     draw_team_logo,
 )
 
 
-NFL_FOCUS_STYLE = FootballFocusStyle(
+CFB_FOCUS_STYLE = FootballFocusStyle(
     team_color=team_color,
     draw_team_logo=draw_team_logo,
     draw_broadcast_logo=draw_broadcast_logo,
-    show_ranks=False,
+    show_ranks=True,
 )
 
 
-def render_nfl_focus(game, settings):
+def render_cfb_focus(game, settings):
     return render_football_focus(
         game,
         settings,
-        NFL_FOCUS_STYLE,
+        CFB_FOCUS_STYLE,
     )

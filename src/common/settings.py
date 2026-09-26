@@ -117,6 +117,13 @@ DEFAULT_SETTINGS = {
         "selected_leagues": [],
     },
 
+    "focus_mode": {
+        "enabled": False,
+        "nfl_game_ids": [],
+        "cfb_game_ids": [],
+        "rotation_seconds": 30,
+    },
+
 }
 
 
