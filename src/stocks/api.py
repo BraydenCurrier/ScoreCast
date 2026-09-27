@@ -3,9 +3,11 @@ from datetime import datetime, timezone
 from urllib.parse import quote
 import json
 import re
-import subprocess
 import time
 
+import requests
+
+from common.http import failure_text, get_body
 from common.settings import get_settings
 from stocks.models import StockQuote
 
@@ -113,47 +115,22 @@ def get_selected_symbols():
     return selected
 
 
-def _curl_json(url):
-    command = [
-        "curl",
-        "--silent",
-        "--show-error",
-        "--fail-with-body",
-        "--location",
-        "--compressed",
-        "--max-time",
-        str(HTTP_TIMEOUT[1]),
-        "--header",
-        "Accept: application/json",
-        "--header",
-        "User-Agent: Mozilla/5.0",
-        url,
-    ]
-
+def _get_json(url):
     try:
-        result = subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
+        body = get_body(
+            url,
+            HTTP_TIMEOUT,
+            headers={
+                "User-Agent": "Mozilla/5.0",
+            },
         )
-    except FileNotFoundError as exc:
+    except requests.RequestException as exc:
         raise RuntimeError(
-            "curl is required but is not installed"
-        ) from exc
-    except subprocess.CalledProcessError as exc:
-        response_text = (
-            exc.stdout
-            or exc.stderr
-            or "No response body"
-        ).strip()
-
-        raise RuntimeError(
-            f"Yahoo request failed: {response_text[:200]}"
+            f"Yahoo request failed: {failure_text(exc)[:200]}"
         ) from exc
 
     try:
-        data = json.loads(result.stdout)
+        data = json.loads(body)
     except json.JSONDecodeError as exc:
         raise ValueError(
             "Yahoo returned invalid JSON"
@@ -168,7 +145,7 @@ def search_symbols(query, limit=8):
     if len(query) < 1:
         return []
 
-    data = _curl_json(
+    data = _get_json(
         YAHOO_SEARCH_URL.format(
             query=quote(query)
         )
@@ -223,7 +200,7 @@ def fetch_yahoo_chart(symbol):
     encoded = quote(symbol, safe="-^")
     url = YAHOO_CHART_URL.format(symbol=encoded)
 
-    data = _curl_json(url)
+    data = _get_json(url)
 
     result_rows = (
         (data.get("chart") or {}).get("result")
