@@ -1,9 +1,11 @@
 from datetime import datetime
 
 import json
-import subprocess
+
+import requests
 
 from cfb.models import CollegeFootballGame
+from common.http import failure_text, get_body
 from common.settings import get_settings
 from common.timezone import get_local_timezone
 
@@ -67,47 +69,23 @@ def fetch_scoreboard_group(group_id):
         "&limit=200"
     )
 
-    command = [
-        "curl",
-        "--silent",
-        "--show-error",
-        "--fail-with-body",
-        "--location",
-        "--max-time",
-        str(HTTP_TIMEOUT[1]),
-        "--header",
-        "Accept: application/json",
-        url,
-    ]
-
     try:
-        result = subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
+        body = get_body(
+            url,
+            HTTP_TIMEOUT,
         )
-    except FileNotFoundError as exc:
+    except requests.RequestException as exc:
         raise RuntimeError(
-            "curl is not installed on this system"
-        ) from exc
-    except subprocess.CalledProcessError as exc:
-        response_text = (
-            exc.stdout
-            or exc.stderr
-            or "No response body"
-        ).strip()
-        raise RuntimeError(
-            "CFB curl request failed: "
-            f"{response_text[:300]}"
+            "CFB request failed: "
+            f"{failure_text(exc)[:300]}"
         ) from exc
 
     try:
-        data = json.loads(result.stdout)
+        data = json.loads(body)
     except json.JSONDecodeError as exc:
         raise ValueError(
             "CFB endpoint returned invalid JSON: "
-            f"{result.stdout[:300]}"
+            f"{body[:300]}"
         ) from exc
 
     if not isinstance(data, dict):
@@ -168,27 +146,12 @@ def fetch_rankings():
     ):
         return _rankings_cache
 
-    command = [
-        "curl",
-        "--silent",
-        "--show-error",
-        "--fail-with-body",
-        "--location",
-        "--max-time",
-        str(HTTP_TIMEOUT[1]),
-        "--header",
-        "Accept: application/json",
-        NCAAF_RANKINGS_URL,
-    ]
-
     try:
-        result = subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
+        body = get_body(
+            NCAAF_RANKINGS_URL,
+            HTTP_TIMEOUT,
         )
-        data = json.loads(result.stdout)
+        data = json.loads(body)
     except Exception as error:
         print(
             f"CFB rankings fetch failed: {error}"
@@ -271,6 +234,7 @@ def get_team_abbr(team):
         "TA&M": "TAMU",
         "M-OH": "MOH",
         "AFA": "AF",
+        "W&M": "WM",
     }
 
     return overrides.get(raw_abbr, raw_abbr)

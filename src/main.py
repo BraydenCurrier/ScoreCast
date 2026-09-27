@@ -96,11 +96,15 @@ UPDATE_POLL_INTERVAL = 0.25
 
 _games = []
 _games_lock = threading.Lock()
+_games_revision = 0
 _refresh_in_progress = False
 
 _card_cache = {}
 _visible_games_cache = []
 _cache_signature = None
+_built_games_revision = None
+_built_settings_signature = None
+_ticker_revision = 0
 
 SPORT_FETCHERS = {
     "mlb": get_live_mlb,
@@ -437,11 +441,21 @@ def render_error_card(game, error):
 
     return image
 
-def render_card(game, settings):
-    key = (
+_card_error_keys = set()
+
+
+def card_cache_key(game, settings, logo_signature=None):
+    if logo_signature is None:
+        logo_signature = logo_variants_signature(settings)
+
+    return (
         game_signature(game),
-        logo_variants_signature(settings),
+        logo_signature,
     )
+
+
+def render_card(game, settings):
+    key = card_cache_key(game, settings)
 
     cached = _card_cache.get(key)
 
@@ -471,19 +485,17 @@ def render_card(game, settings):
         traceback.print_exc()
 
         image = render_error_card(game, error)
+        _card_cache[key] = image
+        _card_error_keys.add(key)
+        return image
 
+    _card_error_keys.discard(key)
     _card_cache[key] = image
     return image
 
 
-def rebuild_visible_games_if_needed(settings):
-    global _visible_games_cache, _cache_signature, _card_cache
-
-    with _games_lock:
-        current_games = _games.copy()
-
-    signature = (
-        tuple(game_signature(g) for g in current_games),
+def card_settings_signature(settings):
+    return (
         tuple(settings.get("hidden_games", [])),
         tuple(settings.get("game_order", [])),
         tuple(
@@ -493,15 +505,79 @@ def rebuild_visible_games_if_needed(settings):
         logo_variants_signature(settings),
     )
 
+
+def publish_games(games):
+    global _games, _games_revision
+
+    with _games_lock:
+        _games = games
+        _games_revision += 1
+        set_latest_games(games)
+
+
+def rebuild_visible_games_if_needed(settings):
+    global _visible_games_cache, _cache_signature, _card_cache
+    global _ticker_revision
+    global _built_games_revision, _built_settings_signature
+
+    settings_signature = card_settings_signature(settings)
+
+    with _games_lock:
+        games_revision = _games_revision
+
+        if (
+            games_revision == _built_games_revision
+            and settings_signature == _built_settings_signature
+        ):
+            return _visible_games_cache
+
+        current_games = _games.copy()
+
+    logo_signature = settings_signature[-1]
+
+    signature = (
+        tuple(game_signature(g) for g in current_games),
+        settings_signature,
+    )
+
     if signature == _cache_signature:
+        if _card_error_keys:
+            _ticker_revision += 1
+            _card_cache = {
+                key: image
+                for key, image in _card_cache.items()
+                if key not in _card_error_keys
+            }
+            _card_error_keys.clear()
+
+        _built_games_revision = games_revision
+        _built_settings_signature = settings_signature
         return _visible_games_cache
 
     ordered_games = apply_saved_order(current_games, settings)
     visible_games = get_visible_games(ordered_games, settings)
 
+    live_keys = {
+        card_cache_key(game, settings, logo_signature)
+        for game in visible_games
+    }
+
+    # Keep bitmaps whose game data is unchanged. Retry cards that
+    # previously failed, and drop cards that are no longer shown.
+    if _card_error_keys:
+        _ticker_revision += 1
+
+    _card_cache = {
+        key: image
+        for key, image in _card_cache.items()
+        if key in live_keys and key not in _card_error_keys
+    }
+    _card_error_keys.clear()
+
     _visible_games_cache = visible_games
     _cache_signature = signature
-    _card_cache = {}
+    _built_games_revision = games_revision
+    _built_settings_signature = settings_signature
 
     return _visible_games_cache
 
@@ -561,7 +637,7 @@ def combine_sports_results(
     return combined_games
 
 def refresh_games_background():
-    global _games, _refresh_in_progress, _cache_signature
+    global _refresh_in_progress
 
     try:
         with _games_lock:
@@ -576,11 +652,7 @@ def refresh_games_background():
             use_test_fallback=False,
         )
 
-        with _games_lock:
-            _games = combined_games
-            set_latest_games(combined_games)
-
-        _cache_signature = None
+        publish_games(combined_games)
 
         if sports_errors:
             failed_sports = ", ".join(
@@ -658,11 +730,30 @@ threading.Thread(
 
 refresh_fantasy_avatars_on_startup()
 
-_games = load_initial_games()
-set_latest_games(_games)
+publish_games(load_initial_games())
 
 current_game = 0
 scroll_x = 0.0
+
+# Last ticker frame actually pushed to the panel.
+# Cleared whenever a non-ticker frame is shown.
+presented_scroll_column = None
+presented_game_index = None
+presented_frame_signature = None
+presented_ticker_revision = None
+
+
+def note_external_frame():
+    """Forget the ticker frame so the next ticker loop redraws it."""
+    global presented_scroll_column
+    global presented_game_index
+    global presented_frame_signature
+    global presented_ticker_revision
+
+    presented_scroll_column = None
+    presented_game_index = None
+    presented_frame_signature = None
+    presented_ticker_revision = None
 
 focus_game_index = 0
 focus_last_switch = time.monotonic()
@@ -732,6 +823,8 @@ while True:
     )
 
     if not display_enabled:
+        note_external_frame()
+
         if not display_sleeping:
             # Blank the physical LED matrix once.
             matrix.SetImage(black_frame)
@@ -766,6 +859,8 @@ while True:
         print("Display awake")
 
     if update_in_progress:
+        note_external_frame()
+
         if brightness != last_brightness:
             matrix.brightness = brightness
             last_brightness = brightness
@@ -809,6 +904,8 @@ while True:
     )
 
     if active_alert is not None:
+        note_external_frame()
+
         alert_frame = render_possession_alert(
             active_alert,
             now=now,
@@ -846,6 +943,8 @@ while True:
     )
 
     if focus_games:
+        note_external_frame()
+
         focus_settings = get_focus_settings(
             settings
         )
@@ -944,6 +1043,8 @@ while True:
     )
 
     if not visible_games:
+        note_external_frame()
+
         matrix.SetImage(
             render_idle_splash(
                 DISPLAY_WIDTH,
@@ -975,12 +1076,31 @@ while True:
         if current_game >= len(visible_games):
             current_game = 0
 
+    scroll_column = int(scroll_x)
+
+    # The panel only moves when the integer column changes.
+    # Identical columns already on the matrix stay there.
+    if (
+        scroll_column == presented_scroll_column
+        and current_game == presented_game_index
+        and _cache_signature == presented_frame_signature
+        and _ticker_revision == presented_ticker_revision
+        and presented_frame_signature is not None
+    ):
+        frame_elapsed = time.monotonic() - frame_started_at
+        sleep_time = frame_delay - frame_elapsed
+
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+
+        continue
+
     frame_image.paste(
         (0, 0, 0),
         (0, 0, DISPLAY_WIDTH, MATRIX_HEIGHT),
     )
 
-    x = int(scroll_x)
+    x = scroll_column
     game_index = current_game
 
     while x < DISPLAY_WIDTH:
@@ -1004,6 +1124,11 @@ while True:
             game_index = 0
 
     matrix.SetImage(frame_image)
+
+    presented_scroll_column = scroll_column
+    presented_game_index = current_game
+    presented_frame_signature = _cache_signature
+    presented_ticker_revision = _ticker_revision
 
     frame_elapsed = time.monotonic() - frame_started_at
     sleep_time = frame_delay - frame_elapsed

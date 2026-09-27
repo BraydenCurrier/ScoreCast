@@ -1,7 +1,9 @@
 from datetime import datetime
 import json
-import subprocess
-from zoneinfo import ZoneInfo
+
+import requests
+
+from common.http import failure_text, get_body
 from common.timezone import get_local_timezone
 
 from nba.models import BasketballGame
@@ -17,49 +19,23 @@ HTTP_TIMEOUT = (3.05, 10)
 
 
 def fetch_nba_scoreboard():
-    command = [
-        "curl",
-        "--silent",
-        "--show-error",
-        "--fail-with-body",
-        "--location",
-        "--compressed",
-        "--max-time",
-        str(HTTP_TIMEOUT[1]),
-        "--header",
-        "Accept: application/json",
-        NBA_SCOREBOARD_URL,
-    ]
-
     try:
-        result = subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
+        body = get_body(
+            NBA_SCOREBOARD_URL,
+            HTTP_TIMEOUT,
         )
-    except FileNotFoundError as exc:
-        raise RuntimeError(
-            "curl is required but is not installed"
-        ) from exc
-    except subprocess.CalledProcessError as exc:
-        response_text = (
-            exc.stdout
-            or exc.stderr
-            or "No response body"
-        ).strip()
-
+    except requests.RequestException as exc:
         raise RuntimeError(
             "NBA ESPN request failed: "
-            f"{response_text[:300]}"
+            f"{failure_text(exc)[:300]}"
         ) from exc
 
     try:
-        data = json.loads(result.stdout)
+        data = json.loads(body)
     except json.JSONDecodeError as exc:
         raise ValueError(
             "NBA ESPN endpoint returned invalid JSON: "
-            f"{result.stdout[:300]}"
+            f"{body[:300]}"
         ) from exc
 
     if not isinstance(data, dict):

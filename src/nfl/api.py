@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta
 import json
 import re
-import subprocess
 import threading
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
+
+import requests
+
+from common.http import failure_text, get_body
 from common.timezone import get_local_timezone
 
 from nfl.models import FootballGame
@@ -300,51 +303,25 @@ def _fetch_events_between(start_date, end_date):
             f"{urlencode(params)}"
         )
 
-        command = [
-            "curl",
-            "--silent",
-            "--show-error",
-            "--fail-with-body",
-            "--location",
-            "--compressed",
-            "--max-time",
-            str(HTTP_TIMEOUT[1]),
-            "--header",
-            "Accept: application/json",
-            request_url,
-        ]
-
         try:
-            result = subprocess.run(
-                command,
-                check=True,
-                capture_output=True,
-                text=True,
+            body = get_body(
+                request_url,
+                HTTP_TIMEOUT,
             )
-        except FileNotFoundError as exc:
-            raise RuntimeError(
-                "curl is required but is not installed"
-            ) from exc
-        except subprocess.CalledProcessError as exc:
-            response_text = (
-                exc.stdout
-                or exc.stderr
-                or "No response body"
-            ).strip()
-
+        except requests.RequestException as exc:
             raise RuntimeError(
                 "NFL ESPN request failed for "
                 f"{current_date.isoformat()}: "
-                f"{response_text[:300]}"
+                f"{failure_text(exc)[:300]}"
             ) from exc
 
         try:
-            data = json.loads(result.stdout)
+            data = json.loads(body)
         except json.JSONDecodeError as exc:
             raise ValueError(
                 "NFL ESPN endpoint returned invalid JSON for "
                 f"{current_date.isoformat()}: "
-                f"{result.stdout[:300]}"
+                f"{body[:300]}"
             ) from exc
 
         if not isinstance(data, dict):

@@ -272,7 +272,7 @@ TEAM_COLOR_ALIASES = {
     "AFA": "AF",    "IND": "IU",    "M-OH": "MOH",
     "MIN": "MINN",    "NCST": "NCSU",    "NW": "NU",
     "RUT": "RUTG",    "TA&M": "TAMU",    "USCG": "SC",
-    "UT": "TENN",
+    "UT": "TENN",    "W&M": "WM",
 }
 
 

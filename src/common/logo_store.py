@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -24,19 +25,13 @@ SUPPORTED_LEAGUES = frozenset(
 
 def normalize_identifier(value: str) -> str:
     identifier = str(value).strip().upper()
+    # ESPN CFB abbreviations can include "&" (W&M, TA&M).
+    identifier = identifier.replace("&", "")
+    identifier = re.sub(r"[^A-Z0-9_-]+", "", identifier)
 
     if not identifier:
         raise ValueError(
             "Logo identifier cannot be empty"
-        )
-
-    if not all(
-        character.isalnum()
-        or character in {"-", "_"}
-        for character in identifier
-    ):
-        raise ValueError(
-            f"Invalid logo identifier: {value!r}"
         )
 
     return identifier
@@ -256,9 +251,12 @@ def get_selected_logo_variant(
             f"Unsupported league: {league!r}"
         )
 
-    normalized_identifier = normalize_identifier(
-        identifier
-    )
+    try:
+        normalized_identifier = normalize_identifier(
+            identifier
+        )
+    except ValueError:
+        return "current"
 
     selected = (
         config

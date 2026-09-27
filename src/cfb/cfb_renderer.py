@@ -127,20 +127,23 @@ def draw_team_logo(
     y_start,
     settings,
 ):
-    variant = get_selected_logo_variant(
-        settings,
-        "cfb",
-        team_abbreviation,
-    )
+    try:
+        variant = get_selected_logo_variant(
+            settings,
+            "cfb",
+            team_abbreviation,
+        )
 
-    return draw_logo(
-        destination=image,
-        league="cfb",
-        identifier=team_abbreviation,
-        x=x_start,
-        y=y_start,
-        variant=variant,
-    )
+        return draw_logo(
+            destination=image,
+            league="cfb",
+            identifier=team_abbreviation,
+            x=x_start,
+            y=y_start,
+            variant=variant,
+        )
+    except (FileNotFoundError, ValueError, OSError, KeyError):
+        return False
 
 def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, home_team, home_color):
     GRASS = (0, 180, 30)
