@@ -166,6 +166,97 @@ def _get_possession_abbr(
     return ""
 
 
+def _last_play_fields(last_play):
+    last_play = last_play or {}
+    play_type = last_play.get("type") or {}
+
+    if isinstance(play_type, dict):
+        type_text = str(
+            play_type.get("text")
+            or play_type.get("abbreviation")
+            or ""
+        )
+    else:
+        type_text = str(play_type or "")
+
+    team = last_play.get("team") or {}
+    play_team = str(
+        (team.get("abbreviation") if isinstance(team, dict) else "")
+        or ""
+    ).upper()
+
+    if play_team == "WAS":
+        play_team = "WSH"
+    elif play_team == "LA":
+        play_team = "LAR"
+
+    yardage = last_play.get("statYardage")
+
+    try:
+        yardage = int(yardage)
+    except (TypeError, ValueError):
+        yardage = 0
+
+    athletes = []
+    involved = last_play.get("athletesInvolved")
+
+    if isinstance(involved, list):
+        athletes.extend(involved)
+
+    nested_athletes = last_play.get("athletes")
+
+    if isinstance(nested_athletes, list):
+        athletes.extend(nested_athletes)
+
+    participants = last_play.get("participants")
+
+    if isinstance(participants, list):
+        for participant in participants:
+            if not isinstance(participant, dict):
+                continue
+
+            athlete = participant.get("athlete")
+
+            if isinstance(athlete, dict):
+                athletes.append(athlete)
+
+    ids = []
+    names = []
+    seen = set()
+
+    for athlete in athletes:
+        if not isinstance(athlete, dict):
+            continue
+
+        athlete_id = str(athlete.get("id") or "").strip()
+        name = str(
+            athlete.get("displayName")
+            or athlete.get("fullName")
+            or athlete.get("shortName")
+            or ""
+        ).strip()
+        key = athlete_id or name.lower()
+
+        if not key or key in seen:
+            continue
+
+        seen.add(key)
+
+        if athlete_id:
+            ids.append(athlete_id)
+
+        if name:
+            names.append(name)
+
+    return {
+        "last_play_type": type_text,
+        "last_play_yardage": yardage,
+        "last_play_team": play_team,
+        "last_play_athlete_ids": tuple(ids),
+        "last_play_athlete_names": tuple(names),
+    }
+
+
 def _parse_field_position(
     situation,
     away_abbr,
@@ -751,6 +842,7 @@ def get_today_games():
             last_play_id=str(last_play.get("id", "")),
             last_play_text=str(last_play.get("text", "")),
             scoring_play=bool(last_play.get("scoringPlay", False)),
+            **_last_play_fields(last_play),
 
             yardline_side=yardline_side,
             yardline_number=yardline_number,

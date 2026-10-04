@@ -36,3 +36,8 @@ class FootballGame:
     last_play_id: str = ""
     last_play_text: str = ""
     scoring_play: bool = False
+    last_play_type: str = ""
+    last_play_yardage: int = 0
+    last_play_team: str = ""
+    last_play_athlete_ids: tuple = ()
+    last_play_athlete_names: tuple = ()

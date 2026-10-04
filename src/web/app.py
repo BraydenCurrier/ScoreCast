@@ -40,6 +40,17 @@ from alerts.teams import (
     NFL_TEAM_ALERTS,
     get_team_alert,
 )
+from nfl.player_directory import (
+    MAX_WATCHED_PLAYERS,
+    get_fantasy_alert_rosters,
+    hydrate_watched_players,
+    search_players,
+    watched_nfl_players,
+)
+from fantasy.api import (
+    connect_sleeper_user,
+    get_user_leagues,
+)
 
 from updater.status import read_status
 
@@ -233,6 +244,7 @@ def page_header(active_page="games"):
     focus_active = "active" if active_page == "focus" else ""
     fantasy_active = "active" if active_page == "fantasy" else ""
     alerts_active = "active" if active_page == "alerts" else ""
+    players_active = "active" if active_page == "players" else ""
     logos_active = "active" if active_page == "logos" else ""
     settings_active = "active" if active_page == "settings" else ""
     favorites_active = "active" if active_page == "favorites" else ""
@@ -322,6 +334,7 @@ def page_header(active_page="games"):
         <a class="tab {focus_active}" href="/focus">Focus</a>
         <a class="tab {fantasy_active}" href="/fantasy">Fantasy</a>
         <a class="tab {alerts_active}" href="/alerts">Alerts</a>
+        <a class="tab {players_active}" href="/players">Players</a>
         <a class="tab {logos_active}" href="/logos">Logos</a>
         <a class="tab {settings_active}" href="/settings">Settings</a>
         <a class="tab {favorites_active}" href="/favorites">Favorites</a>
@@ -1995,6 +2008,9 @@ def alerts_page():
         .lower()
     )
 
+    if requested_league == "players":
+        return redirect("/players")
+
     if requested_league not in {
         "nfl",
         "cfb",
@@ -2024,15 +2040,6 @@ def alerts_page():
         )
 
     if request.method == "POST":
-        selected_teams = [
-            abbreviation
-            for abbreviation
-            in available_teams
-            if request.form.get(
-                f"alert_team:{abbreviation}"
-            ) == "on"
-        ]
-
         def form_float(
             name: str,
             default: float,
@@ -2063,40 +2070,11 @@ def alerts_page():
 
             return max(minimum, min(maximum, value))
 
-        teams_by_league = alerts.get(
-            "teams",
-            {},
-        )
-
-        if not isinstance(
-            teams_by_league,
-            dict,
-        ):
-            teams_by_league = {}
-
-        # Import existing NFL selections from the
-        # old NFL-only settings format.
-        if "nfl" not in teams_by_league:
-            teams_by_league["nfl"] = [
-                str(team).upper()
-                for team in alerts.get(
-                    "possession_teams",
-                    [],
-                )
-            ]
-
-        teams_by_league[
-            requested_league
-        ] = sorted(
-            selected_teams
-        )
-
         updated_alerts = dict(alerts)
         updated_alerts.update({
             "enabled": (
                 request.form.get("enabled") == "on"
             ),
-            "teams": teams_by_league,
             "poll_interval_seconds": form_float(
                 "poll_interval_seconds",
                 3.0,
@@ -2128,6 +2106,44 @@ def alerts_page():
                 15.0,
             ),
         })
+
+        selected_teams = [
+            abbreviation
+            for abbreviation
+            in available_teams
+            if request.form.get(
+                f"alert_team:{abbreviation}"
+            ) == "on"
+        ]
+
+        teams_by_league = alerts.get(
+            "teams",
+            {},
+        )
+
+        if not isinstance(
+            teams_by_league,
+            dict,
+        ):
+            teams_by_league = {}
+
+        if "nfl" not in teams_by_league:
+            teams_by_league["nfl"] = [
+                str(team).upper()
+                for team in alerts.get(
+                    "possession_teams",
+                    [],
+                )
+            ]
+
+        teams_by_league[
+            requested_league
+        ] = sorted(
+            selected_teams
+        )
+        updated_alerts["teams"] = (
+            teams_by_league
+        )
 
         if requested_league == "mlb":
             updated_alerts["homerun_enabled"] = (
@@ -3068,6 +3084,802 @@ def alerts_page():
     </body>
     </html>
     """
+
+@app.route("/players/preview", methods=["POST"])
+def preview_player_alert():
+    is_local = request.remote_addr in {
+        "127.0.0.1",
+        "::1",
+    }
+
+    if not is_local and current_user() is None:
+        return redirect("/login")
+
+    possession_alert_manager.show_player_preview()
+
+    if is_local and request.args.get("plain") == "1":
+        return "ok\n", 200, {
+            "Content-Type": "text/plain"
+        }
+
+    return redirect("/players?preview=1")
+
+
+@app.route("/players", methods=["GET", "POST"])
+@login_required
+def players_page():
+    settings = get_settings()
+    alerts = settings.get("alerts", {})
+
+    if request.method == "POST":
+        players_by_league = alerts.get("players", {})
+
+        if not isinstance(players_by_league, dict):
+            players_by_league = {}
+
+        players_by_league = dict(players_by_league)
+        players_by_league["nfl"] = hydrate_watched_players(
+            request.form.getlist("player_ids"),
+            previous=players_by_league.get("nfl"),
+        )
+
+        updated_alerts = dict(alerts)
+        updated_alerts["enabled"] = (
+            request.form.get("enabled") == "on"
+        )
+        updated_alerts["player_alerts_enabled"] = (
+            request.form.get("player_alerts_enabled") == "on"
+        )
+        updated_alerts["players"] = players_by_league
+
+        update_settings({
+            "alerts": updated_alerts,
+        })
+
+        return redirect("/players?saved=1")
+
+    def checked(name: str, default: bool) -> str:
+        return (
+            "checked"
+            if bool(alerts.get(name, default))
+            else ""
+        )
+
+    saved_message = ""
+
+    if request.args.get("saved") == "1":
+        saved_message = """
+        <div class="alert-success">
+            Player alerts saved.
+        </div>
+        """
+    elif request.args.get("preview") == "1":
+        saved_message = """
+        <div class="alert-success">
+            Preview is on the scoreboard now.
+        </div>
+        """
+
+    player_watch_rows = ""
+    watched_players = watched_nfl_players(alerts)
+
+    for player in watched_players:
+        player_id = escape(
+            str(player.get("id") or ""),
+            quote=True,
+        )
+        player_name = escape(str(player.get("name") or ""))
+        player_team = escape(str(player.get("team") or ""))
+        player_position = escape(
+            str(player.get("position") or "")
+        )
+        player_watch_rows += f"""
+                    <div
+                        class="player-watch-row"
+                        data-player-id="{player_id}"
+                    >
+                        <input
+                            type="hidden"
+                            name="player_ids"
+                            value="{player_id}"
+                        >
+                        <div class="player-pos">
+                            {player_position}
+                        </div>
+                        <div class="game-info">
+                            <div class="matchup">
+                                {player_name}
+                            </div>
+                            <div class="details">
+                                {player_team} · {player_position}
+                            </div>
+                        </div>
+                        <button
+                            class="stock-remove-button"
+                            type="button"
+                            data-remove-player="{player_id}"
+                        >
+                            Remove
+                        </button>
+                    </div>
+        """
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>ScoreCast Players</title>
+
+        <meta
+            name="viewport"
+            content="
+                width=device-width,
+                initial-scale=1,
+                viewport-fit=cover
+            "
+        >
+
+        {page_styles()}
+
+        <style>
+            .alert-success {{
+                background: rgba(48, 209, 88, 0.14);
+                border: 1px solid rgba(48, 209, 88, 0.45);
+                color: #7ee893;
+                border-radius: 14px;
+                padding: 14px 16px;
+                margin-bottom: 16px;
+                font-size: 15px;
+                font-weight: 700;
+            }}
+
+            .alert-master-row,
+            .alert-type-row {{
+                display: flex;
+                align-items: center;
+                gap: 14px;
+                min-height: 70px;
+                padding: 14px 0;
+                border-bottom: 1px solid #2c2c35;
+                cursor: pointer;
+                -webkit-tap-highlight-color: transparent;
+            }}
+
+            .alert-master-row:last-child,
+            .alert-type-row:last-child {{
+                border-bottom: 0;
+            }}
+
+            .alert-master-row input,
+            .alert-type-row input {{
+                flex: 0 0 auto;
+                width: 24px;
+                height: 24px;
+                accent-color: #0a84ff;
+            }}
+
+            .alert-row-text {{
+                flex: 1;
+                min-width: 0;
+            }}
+
+            .alert-row-title {{
+                font-size: 17px;
+                line-height: 1.2;
+                font-weight: 750;
+            }}
+
+            .alert-row-description {{
+                color: #aaa;
+                font-size: 13px;
+                line-height: 1.4;
+                margin-top: 4px;
+            }}
+
+            .alert-icon {{
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex: 0 0 auto;
+                width: 42px;
+                height: 42px;
+                border-radius: 13px;
+                background: #24242c;
+                font-size: 21px;
+            }}
+
+            .alerts-save {{
+                position: sticky;
+                bottom: 12px;
+                z-index: 10;
+                box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+                margin-bottom: max(8px, env(safe-area-inset-bottom));
+            }}
+
+            .player-help {{
+                color: #8b909b;
+                font-size: 13px;
+                line-height: 1.45;
+                margin: -4px 0 14px;
+            }}
+
+            .player-pos {{
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex: 0 0 auto;
+                width: 42px;
+                height: 42px;
+                border-radius: 12px;
+                background: #24242c;
+                color: #f2f4f7;
+                font-size: 12px;
+                font-weight: 800;
+                letter-spacing: 0.04em;
+            }}
+
+            .player-watch-row,
+            .fantasy-player-row {{
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                padding: 12px 0;
+                border-bottom: 1px solid #2c2c35;
+            }}
+
+            .player-watch-row:last-child,
+            .fantasy-player-row:last-child {{
+                border-bottom: 0;
+            }}
+
+            .player-watch-row .game-info,
+            .fantasy-player-row .game-info {{
+                flex: 1;
+                min-width: 0;
+            }}
+
+            .fantasy-league {{
+                margin-bottom: 18px;
+            }}
+
+            .fantasy-league:last-child {{
+                margin-bottom: 0;
+            }}
+
+            .fantasy-league-name {{
+                font-size: 13px;
+                font-weight: 800;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+                color: #8b909b;
+                margin-bottom: 8px;
+            }}
+
+            .fantasy-team-card {{
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 14px;
+                background: #101117;
+                margin-bottom: 10px;
+                overflow: hidden;
+            }}
+
+            .fantasy-team-card summary {{
+                list-style: none;
+                cursor: pointer;
+                padding: 14px 16px;
+                font-weight: 750;
+            }}
+
+            .fantasy-team-card summary::-webkit-details-marker {{
+                display: none;
+            }}
+
+            .fantasy-team-body {{
+                padding: 0 16px 8px;
+                border-top: 1px solid rgba(255, 255, 255, 0.06);
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="page">
+            {page_header("players")}
+            {saved_message}
+
+            <form method="POST">
+                <div class="card">
+                    <div class="card-title">
+                        Player Alerts
+                    </div>
+
+                    <label class="alert-master-row">
+                        <input
+                            type="checkbox"
+                            name="enabled"
+                            {checked("enabled", False)}
+                        >
+                        <div class="alert-icon">🔔</div>
+                        <div class="alert-row-text">
+                            <div class="alert-row-title">
+                                Enable alerts
+                            </div>
+                            <div class="alert-row-description">
+                                Allow watched-player big plays
+                                to take over the scoreboard.
+                            </div>
+                        </div>
+                    </label>
+
+                    <label class="alert-type-row">
+                        <input
+                            type="checkbox"
+                            name="player_alerts_enabled"
+                            {checked("player_alerts_enabled", True)}
+                        >
+                        <div class="alert-icon">⚡</div>
+                        <div class="alert-row-text">
+                            <div class="alert-row-title">Big Plays</div>
+                            <div class="alert-row-description">
+                                Touchdowns, picks, sacks,
+                                fumbles, and 20+ yard gains.
+                            </div>
+                        </div>
+                    </label>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">
+                        Watched Players
+                    </div>
+
+                    <p class="player-help">
+                        Search the NFL roster and add
+                        up to {MAX_WATCHED_PLAYERS}
+                        players. Alerts fire only for
+                        big plays, not every carry.
+                    </p>
+
+                    <div class="stock-search player-search">
+                        <input
+                            class="search-input"
+                            id="player_search"
+                            type="search"
+                            placeholder="Search NFL players..."
+                            autocomplete="off"
+                        >
+                        <div
+                            class="stock-search-results"
+                            id="player_search_results"
+                            hidden
+                        ></div>
+                    </div>
+
+                    <div id="player_watch_list">
+                        {player_watch_rows}
+                    </div>
+
+                    <div
+                        class="empty"
+                        id="player_watch_empty"
+                        {"hidden" if player_watch_rows else ""}
+                    >
+                        No players selected yet.
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">
+                        Fantasy Teams
+                    </div>
+
+                    <p class="player-help">
+                        Pull players from your Sleeper
+                        leagues and tap to watch them.
+                    </p>
+
+                    <div id="fantasy_alert_rosters">
+                        <div class="empty">
+                            Loading fantasy rosters...
+                        </div>
+                    </div>
+                </div>
+
+                <button
+                    class="save-button alerts-save"
+                    type="submit"
+                >
+                    Save Player Alerts
+                </button>
+            </form>
+
+            <form method="POST" action="/players/preview">
+                <button
+                    class="secondary-button"
+                    type="submit"
+                    style="
+                        width: 100%;
+                        min-height: 48px;
+                        margin-bottom: max(
+                            8px,
+                            env(safe-area-inset-bottom)
+                        );
+                    "
+                >
+                    Preview on display
+                </button>
+            </form>
+        </div>
+
+        <script>
+            const search = document.getElementById("player_search");
+            const results = document.getElementById("player_search_results");
+            const list = document.getElementById("player_watch_list");
+            const empty = document.getElementById("player_watch_empty");
+            const fantasyRoot = document.getElementById("fantasy_alert_rosters");
+            const maxPlayers = {MAX_WATCHED_PLAYERS};
+            let searchTimer = null;
+
+            function selectedIds() {{
+                return Array.prototype.map.call(
+                    list.querySelectorAll('input[name="player_ids"]'),
+                    function (input) {{
+                        return input.value;
+                    }}
+                );
+            }}
+
+            function refreshEmpty() {{
+                empty.hidden = selectedIds().length > 0;
+            }}
+
+            function addPlayer(player) {{
+                const playerId = String((player && player.id) || "");
+
+                if (!playerId) {{
+                    return false;
+                }}
+
+                if (selectedIds().indexOf(playerId) !== -1) {{
+                    return true;
+                }}
+
+                if (selectedIds().length >= maxPlayers) {{
+                    results.innerHTML = (
+                        '<div class="stock-search-empty">'
+                        + "You can watch "
+                        + maxPlayers
+                        + " players.</div>"
+                    );
+                    results.hidden = false;
+                    return false;
+                }}
+
+                const row = document.createElement("div");
+                row.className = "player-watch-row";
+                row.dataset.playerId = playerId;
+
+                const hidden = document.createElement("input");
+                hidden.type = "hidden";
+                hidden.name = "player_ids";
+                hidden.value = playerId;
+
+                const pos = document.createElement("div");
+                pos.className = "player-pos";
+                pos.textContent = player.position || "";
+
+                const info = document.createElement("div");
+                info.className = "game-info";
+
+                const name = document.createElement("div");
+                name.className = "matchup";
+                name.textContent = player.name || "";
+
+                const details = document.createElement("div");
+                details.className = "details";
+                details.textContent = (
+                    (player.team || "")
+                    + " · "
+                    + (player.position || "")
+                ).replace(/^ · /, "");
+
+                info.appendChild(name);
+                info.appendChild(details);
+
+                const remove = document.createElement("button");
+                remove.type = "button";
+                remove.className = "stock-remove-button";
+                remove.textContent = "Remove";
+                remove.setAttribute("data-remove-player", playerId);
+
+                row.appendChild(hidden);
+                row.appendChild(pos);
+                row.appendChild(info);
+                row.appendChild(remove);
+                list.appendChild(row);
+                refreshEmpty();
+                syncFantasyButtons();
+                return true;
+            }}
+
+            function removePlayer(playerId) {{
+                const row = list.querySelector(
+                    '[data-player-id="' + playerId + '"]'
+                );
+
+                if (row) {{
+                    row.remove();
+                }}
+
+                refreshEmpty();
+                syncFantasyButtons();
+            }}
+
+            function hideResults() {{
+                results.hidden = true;
+                results.innerHTML = "";
+            }}
+
+            function renderResults(players) {{
+                if (!players.length) {{
+                    results.innerHTML = (
+                        '<div class="stock-search-empty">'
+                        + "No matching NFL players.</div>"
+                    );
+                    results.hidden = false;
+                    return;
+                }}
+
+                results.innerHTML = "";
+
+                players.forEach(function (player) {{
+                    const button = document.createElement("button");
+                    button.type = "button";
+                    button.className = "stock-search-result";
+                    button.innerHTML = (
+                        '<div class="matchup">'
+                        + player.name
+                        + '</div><div class="details">'
+                        + (player.team || "")
+                        + " · "
+                        + (player.position || "")
+                        + "</div>"
+                    );
+                    button.addEventListener("click", function () {{
+                        if (addPlayer(player)) {{
+                            search.value = "";
+                            hideResults();
+                        }}
+                    }});
+                    results.appendChild(button);
+                }});
+
+                results.hidden = false;
+            }}
+
+            search.addEventListener("input", function () {{
+                const query = search.value.trim();
+                window.clearTimeout(searchTimer);
+
+                if (query.length < 2) {{
+                    hideResults();
+                    return;
+                }}
+
+                searchTimer = window.setTimeout(function () {{
+                    fetch(
+                        "/api/alerts/players/search?q="
+                        + encodeURIComponent(query)
+                    )
+                        .then(function (response) {{
+                            return response.json();
+                        }})
+                        .then(function (payload) {{
+                            renderResults(
+                                (payload && payload.results) || []
+                            );
+                        }})
+                        .catch(function () {{
+                            renderResults([]);
+                        }});
+                }}, 200);
+            }});
+
+            list.addEventListener("click", function (event) {{
+                const button = event.target.closest("[data-remove-player]");
+
+                if (!button) {{
+                    return;
+                }}
+
+                removePlayer(button.getAttribute("data-remove-player"));
+            }});
+
+            document.addEventListener("click", function (event) {{
+                if (!event.target.closest(".player-search")) {{
+                    hideResults();
+                }}
+            }});
+
+            function syncFantasyButtons() {{
+                const selected = selectedIds();
+
+                document.querySelectorAll("[data-add-player]").forEach(
+                    function (button) {{
+                        const playerId = button.getAttribute(
+                            "data-add-player"
+                        );
+                        const watching = selected.indexOf(playerId) !== -1;
+                        button.textContent = watching ? "Watching" : "Watch";
+                        button.disabled = watching;
+                    }}
+                );
+            }}
+
+            function renderFantasy(payload) {{
+                if (!payload || !payload.connected) {{
+                    fantasyRoot.innerHTML = (
+                        '<div class="empty">'
+                        + "Connect Sleeper on the Fantasy "
+                        + "tab to pick players from your "
+                        + "leagues.</div>"
+                    );
+                    return;
+                }}
+
+                const leagues = payload.leagues || [];
+
+                if (!leagues.length) {{
+                    fantasyRoot.innerHTML = (
+                        '<div class="empty">'
+                        + "Select at least one Sleeper "
+                        + "league on the Fantasy tab.</div>"
+                    );
+                    return;
+                }}
+
+                fantasyRoot.innerHTML = "";
+
+                leagues.forEach(function (league) {{
+                    const wrap = document.createElement("div");
+                    wrap.className = "fantasy-league";
+
+                    const title = document.createElement("div");
+                    title.className = "fantasy-league-name";
+                    title.textContent = league.name || "League";
+                    wrap.appendChild(title);
+
+                    (league.teams || []).forEach(function (team) {{
+                        const card = document.createElement("details");
+                        card.className = "fantasy-team-card";
+                        if (team.mine) {{
+                            card.open = true;
+                        }}
+
+                        const summary = document.createElement("summary");
+                        summary.textContent = (
+                            (team.name || "Team")
+                            + " · "
+                            + ((team.players || []).length)
+                            + " players"
+                        );
+                        card.appendChild(summary);
+
+                        const body = document.createElement("div");
+                        body.className = "fantasy-team-body";
+
+                        (team.players || []).forEach(function (player) {{
+                            const row = document.createElement("div");
+                            row.className = "fantasy-player-row";
+
+                            const pos = document.createElement("div");
+                            pos.className = "player-pos";
+                            pos.textContent = player.position || "";
+
+                            const info = document.createElement("div");
+                            info.className = "game-info";
+                            const name = document.createElement("div");
+                            name.className = "matchup";
+                            name.textContent = player.name || "";
+                            const details = document.createElement("div");
+                            details.className = "details";
+                            details.textContent = (
+                                (player.team || "")
+                                + " · "
+                                + (player.position || "")
+                            ).replace(/^ · /, "");
+                            info.appendChild(name);
+                            info.appendChild(details);
+
+                            const button = document.createElement("button");
+                            button.type = "button";
+                            button.className = "stock-remove-button";
+                            button.setAttribute("data-add-player", player.id);
+                            button.addEventListener("click", function () {{
+                                addPlayer(player);
+                            }});
+
+                            row.appendChild(pos);
+                            row.appendChild(info);
+                            row.appendChild(button);
+                            body.appendChild(row);
+                        }});
+
+                        if (!(team.players || []).length) {{
+                            const none = document.createElement("div");
+                            none.className = "empty";
+                            none.textContent = "No skill players on this roster.";
+                            body.appendChild(none);
+                        }}
+
+                        card.appendChild(body);
+                        wrap.appendChild(card);
+                    }});
+
+                    fantasyRoot.appendChild(wrap);
+                }});
+
+                syncFantasyButtons();
+            }}
+
+            fetch("/api/alerts/players/fantasy")
+                .then(function (response) {{
+                    return response.json();
+                }})
+                .then(renderFantasy)
+                .catch(function () {{
+                    fantasyRoot.innerHTML = (
+                        '<div class="empty">'
+                        + "Could not load fantasy rosters.</div>"
+                    );
+                }});
+
+            refreshEmpty();
+        </script>
+    </body>
+    </html>
+    """
+
+
+@app.route("/api/alerts/players/search")
+@login_required
+def api_alert_player_search():
+    query = request.args.get("q", "")
+    league = (
+        request.args.get("league", "nfl")
+        .strip()
+        .lower()
+    )
+
+    if league != "nfl":
+        return jsonify({
+            "results": [],
+        })
+
+    try:
+        results = search_players(query)
+    except Exception:
+        return jsonify({
+            "results": [],
+            "error": "search_failed",
+        }), 502
+
+    return jsonify({
+        "results": results,
+    })
+
+
+@app.route("/api/alerts/players/fantasy")
+@login_required
+def api_alert_player_fantasy():
+    try:
+        payload = get_fantasy_alert_rosters()
+    except Exception:
+        return jsonify({
+            "connected": False,
+            "leagues": [],
+            "error": "fantasy_failed",
+        }), 502
+
+    return jsonify(payload)
 
 @app.route("/fantasy", methods=["GET", "POST"])
 @login_required

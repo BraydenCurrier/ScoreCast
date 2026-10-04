@@ -1,13 +1,20 @@
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from threading import RLock
 import re
 import time
 from typing import Optional
 
 from alerts.models import PossessionAlert
+from alerts.player_plays import (
+    classify_nfl_big_play,
+    compact_play_text,
+    last_name_for_alert,
+    player_in_last_play,
+)
 from alerts.teams import get_team_alert
 from nfl.models import FootballGame
+from nfl.player_directory import watched_nfl_players
 
 
 LIVE_STATUSES = {"STATUS_IN_PROGRESS", "IN_PROGRESS", "LIVE"}
@@ -62,6 +69,10 @@ class PossessionAlertManager:
         homerun_enabled = bool(alerts_settings.get("homerun_enabled", True))
         mlb_win_enabled = bool(alerts_settings.get("mlb_win_enabled", True))
         close_game_enabled = bool(alerts_settings.get("close_game_enabled", True))
+        player_alerts_enabled = bool(
+            alerts_settings.get("player_alerts_enabled", True)
+        )
+        watched_players = watched_nfl_players(alerts_settings)
 
         teams_by_league = alerts_settings.get(
             "teams",
@@ -147,6 +158,28 @@ class PossessionAlertManager:
 
                     self._initialize_or_sync_scores(state, game)
                     continue
+
+                if league == "nfl":
+                    self._process_player_alerts(
+                        game=game,
+                        state=state,
+                        watched_players=watched_players,
+                        enabled=enabled,
+                        player_alerts_enabled=(
+                            player_alerts_enabled
+                        ),
+                        cooldown_seconds=(
+                            cooldown_seconds
+                        ),
+                        chant_frame_seconds=(
+                            chant_frame_seconds
+                        ),
+                        details_frame_seconds=(
+                            details_frame_seconds
+                        ),
+                        now=now,
+                        created_alerts=created_alerts,
+                    )
 
                 self._process_scoring_alert(
                     game=game,
@@ -404,10 +437,13 @@ class PossessionAlertManager:
                 team=team,
                 headline=headline,
                 detail=detail,
-                chant=chant,
+                chant=(),
                 now=now,
                 chant_frame_seconds=chant_frame_seconds,
                 details_frame_seconds=details_frame_seconds,
+                play_text=compact_play_text(
+                    getattr(play, "description", "")
+                ),
             )
 
             if alert is not None:
@@ -647,6 +683,132 @@ class PossessionAlertManager:
         state.home_score = home_score
         state.last_play_id = play_id
         state.last_play_text = play_text
+
+    def _process_player_alerts(
+        self,
+        *,
+        game,
+        state,
+        watched_players,
+        enabled,
+        player_alerts_enabled,
+        cooldown_seconds,
+        chant_frame_seconds,
+        details_frame_seconds,
+        now,
+        created_alerts,
+    ):
+        play_id = str(
+            getattr(game, "last_play_id", "") or ""
+        ).strip()
+
+        if not play_id:
+            return
+
+        previous_play_id = str(state.last_play_id or "").strip()
+
+        if not previous_play_id:
+            return
+
+        if play_id == previous_play_id:
+            return
+
+        if (
+            not enabled
+            or not player_alerts_enabled
+            or not watched_players
+        ):
+            return
+
+        classification = classify_nfl_big_play(
+            play_type=getattr(game, "last_play_type", ""),
+            play_text=getattr(game, "last_play_text", ""),
+            yardage=self._nonnegative_int(
+                getattr(game, "last_play_yardage", 0)
+            ),
+            scoring=bool(
+                getattr(game, "scoring_play", False)
+            ),
+        )
+
+        if classification is None:
+            return
+
+        involved = [
+            player
+            for player in watched_players
+            if player_in_last_play(player, game)
+        ]
+
+        if not involved:
+            return
+
+        home = str(game.home or "").upper()
+        away = str(game.away or "").upper()
+        play_team = str(
+            getattr(game, "last_play_team", "") or ""
+        ).upper()
+
+        for player in involved:
+            player_id = str(player.get("id") or "")
+            team = str(player.get("team") or "").upper()
+
+            if team not in {home, away}:
+                if play_team in {home, away}:
+                    team = play_team
+                else:
+                    team = away or home
+
+            if not team:
+                continue
+
+            event_type = f"PLAYER:{player_id}"
+
+            if self._is_on_cooldown(
+                state=state,
+                event_type=event_type,
+                team=team,
+                now=now,
+                cooldown_seconds=cooldown_seconds,
+            ):
+                continue
+
+            player_name = str(
+                player.get("name") or ""
+            ).strip() or last_name_for_alert(player)
+
+            play_text = compact_play_text(
+                getattr(game, "last_play_text", "")
+            )
+
+            alert = self._enqueue_event_alert(
+                game=game,
+                alert_type=classification["kind"],
+                team=team,
+                headline=last_name_for_alert(player),
+                detail=classification["detail"],
+                chant=(),
+                now=now,
+                chant_frame_seconds=chant_frame_seconds,
+                details_frame_seconds=max(
+                    details_frame_seconds,
+                    6.5,
+                ),
+                is_player_alert=True,
+                play_text=play_text,
+                player_name=player_name,
+            )
+
+            if alert is None:
+                continue
+
+            created_alerts.append(alert)
+            self._mark_alert(
+                state=state,
+                event_type=event_type,
+                team=team,
+                now=now,
+            )
 
     def _process_redzone_alert(self, *, game, state, current_team, watched_teams, enabled, redzone_enabled, cooldown_seconds, chant_frame_seconds, details_frame_seconds, now, created_alerts):
         currently_in_redzone = self._is_redzone(game, current_team)
@@ -1122,6 +1284,9 @@ class PossessionAlertManager:
         now: float,
         chant_frame_seconds: float,
         details_frame_seconds: float,
+        is_player_alert: bool = False,
+        play_text: str = "",
+        player_name: str = "",
     ) -> Optional[PossessionAlert]:
         team = str(
             team
@@ -1153,6 +1318,30 @@ class PossessionAlertManager:
             if team == away
             else away
         )
+
+        clock = str(
+            getattr(game, "clock", "") or ""
+        )
+
+        if league == "mlb":
+            inning = self._nonnegative_int(
+                getattr(game, "inning", 0)
+            )
+
+            if str(alert_type).upper() == "WIN":
+                clock = "FINAL"
+            elif inning:
+                half = (
+                    "TOP"
+                    if getattr(game, "top_inning", False)
+                    else "BOT"
+                )
+                clock = f"{half} {inning}"
+
+        if not play_text:
+            play_text = compact_play_text(
+                getattr(game, "last_play_text", "")
+            )
 
         alert = PossessionAlert(
             game_id=self._game_id(game),
@@ -1193,15 +1382,24 @@ class PossessionAlertManager:
                 if getattr(game, "quarter", None) is not None
                 else getattr(game, "inning", 0)
             ),
-            clock=str(
-                getattr(game, "clock", "") or ""
-            ),
+            clock=clock,
             created_at=now,
             chant_frame_seconds=(
                 chant_frame_seconds
             ),
             details_frame_seconds=(
                 details_frame_seconds
+            ),
+            is_player_alert=bool(is_player_alert),
+            play_text=str(play_text or "").upper(),
+            player_name=str(player_name or "").upper(),
+            away=away,
+            home=home,
+            away_score=self._nonnegative_int(
+                getattr(game, "away_score", 0)
+            ),
+            home_score=self._nonnegative_int(
+                getattr(game, "home_score", 0)
             ),
         )
 
@@ -1238,37 +1436,9 @@ class PossessionAlertManager:
 
             # Reset the start time so queued alerts receive
             # their full animation duration.
-            self._active_alert = PossessionAlert(
-                game_id=queued_alert.game_id,
-                league=queued_alert.league,
-                alert_type=queued_alert.alert_type,
-                team=queued_alert.team,
-                opponent=queued_alert.opponent,
-                headline=queued_alert.headline,
-                detail=queued_alert.detail,
-                possession_label=(
-                    queued_alert.possession_label
-                ),
-                chant=queued_alert.chant,
-                primary=queued_alert.primary,
-                accent=queued_alert.accent,
-                down=queued_alert.down,
-                distance=queued_alert.distance,
-                yardline_side=(
-                    queued_alert.yardline_side
-                ),
-                yardline_number=(
-                    queued_alert.yardline_number
-                ),
-                quarter=queued_alert.quarter,
-                clock=queued_alert.clock,
+            self._active_alert = replace(
+                queued_alert,
                 created_at=now,
-                chant_frame_seconds=(
-                    queued_alert.chant_frame_seconds
-                ),
-                details_frame_seconds=(
-                    queued_alert.details_frame_seconds
-                ),
             )
 
             return self._active_alert
@@ -1624,6 +1794,52 @@ class PossessionAlertManager:
             minimum,
             min(maximum, parsed),
         )
+
+    def show_player_preview(self, now=None):
+        if now is None:
+            now = time.monotonic()
+
+        definition = get_team_alert("KC", league="nfl")
+
+        if definition is None:
+            return False
+
+        alert = PossessionAlert(
+            game_id="preview:player",
+            league="nfl",
+            alert_type="TOUCHDOWN",
+            team="KC",
+            opponent="BUF",
+            headline="MAHOMES",
+            detail="45 YD TD",
+            possession_label=definition.possession_label,
+            chant=(),
+            primary=definition.primary,
+            accent=definition.accent,
+            down=1,
+            distance=10,
+            yardline_side="BUF",
+            yardline_number=12,
+            quarter=2,
+            clock="8:12",
+            created_at=now,
+            chant_frame_seconds=0.65,
+            details_frame_seconds=8.0,
+            is_player_alert=True,
+            play_text=(
+                "P.MAHOMES PASS TO T.KELCE FOR 45 YD TD"
+            ),
+            player_name="PATRICK MAHOMES",
+            away="BUF",
+            home="KC",
+            away_score=17,
+            home_score=24,
+        )
+
+        with self._lock:
+            self._active_alert = alert
+
+        return True
 
 
 possession_alert_manager = (
