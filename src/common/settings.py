@@ -43,11 +43,16 @@ DEFAULT_SETTINGS = {
         "homerun_enabled": True,
         "mlb_win_enabled": True,
         "close_game_enabled": True,
+        "player_alerts_enabled": True,
 
         "teams": {
             "nfl": [],
             "cfb": [],
             "mlb": [],
+        },
+
+        "players": {
+            "nfl": [],
         },
 
         "cooldown_seconds": 20,

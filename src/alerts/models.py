@@ -23,12 +23,14 @@ class PossessionAlert:
     created_at: float
     chant_frame_seconds: float
     details_frame_seconds: float
+    is_player_alert: bool = False
+    play_text: str = ""
+    player_name: str = ""
+    away: str = ""
+    home: str = ""
+    away_score: int = 0
+    home_score: int = 0
 
     @property
     def total_duration(self) -> float:
-        word_duration = max(0.1, self.chant_frame_seconds)
-        blank_duration = max(0.05, word_duration * 0.30)
-
-        chant_duration = len(self.chant) * (word_duration + blank_duration)
-
-        return (chant_duration + self.details_frame_seconds)
+        return max(1.0, self.details_frame_seconds)
