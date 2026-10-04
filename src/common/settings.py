@@ -55,11 +55,12 @@ DEFAULT_SETTINGS = {
             "nfl": [],
         },
 
+        "chant_enabled": False,
         "cooldown_seconds": 20,
         "poll_interval_seconds": 3.0,
         "confirmations_required": 2,
         "chant_frame_seconds": 0.65,
-        "details_frame_seconds": 4.0,
+        "details_frame_seconds": 5.0,
     },
 
     "logo_variants": {

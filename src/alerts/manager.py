@@ -52,8 +52,8 @@ class PossessionAlertManager:
 
         self._game_states = {}
         self._queue = deque(maxlen=8)
-
         self._active_alert = None
+        self._chant_enabled = False
 
     def process_games(self, games, settings, now):
         if now is None:
@@ -71,6 +71,9 @@ class PossessionAlertManager:
         close_game_enabled = bool(alerts_settings.get("close_game_enabled", True))
         player_alerts_enabled = bool(
             alerts_settings.get("player_alerts_enabled", True)
+        )
+        self._chant_enabled = bool(
+            alerts_settings.get("chant_enabled", False)
         )
         watched_players = watched_nfl_players(alerts_settings)
 
@@ -1360,7 +1363,7 @@ class PossessionAlertManager:
             possession_label=(
                 team_definition.possession_label
             ),
-            chant=tuple(chant),
+            chant=tuple(team_definition.chant),
             primary=team_definition.primary,
             accent=team_definition.accent,
             down=self._nonnegative_int(
@@ -1401,6 +1404,7 @@ class PossessionAlertManager:
             home_score=self._nonnegative_int(
                 getattr(game, "home_score", 0)
             ),
+            chant_enabled=bool(self._chant_enabled),
         )
 
         self._queue.append(alert)
@@ -1799,6 +1803,24 @@ class PossessionAlertManager:
         if now is None:
             now = time.monotonic()
 
+        from common.settings import get_settings
+
+        alerts_settings = get_settings().get("alerts", {})
+
+        if not isinstance(alerts_settings, dict):
+            alerts_settings = {}
+
+        self._chant_enabled = bool(
+            alerts_settings.get("chant_enabled", False)
+        )
+
+        details_frame_seconds = self._safe_float(
+            alerts_settings.get("details_frame_seconds", 5.0),
+            default=5.0,
+            minimum=1.0,
+            maximum=15.0,
+        )
+
         definition = get_team_alert("KC", league="nfl")
 
         if definition is None:
@@ -1813,7 +1835,7 @@ class PossessionAlertManager:
             headline="MAHOMES",
             detail="45 YD TD",
             possession_label=definition.possession_label,
-            chant=(),
+            chant=tuple(definition.chant),
             primary=definition.primary,
             accent=definition.accent,
             down=1,
@@ -1823,8 +1845,8 @@ class PossessionAlertManager:
             quarter=2,
             clock="8:12",
             created_at=now,
-            chant_frame_seconds=0.65,
-            details_frame_seconds=8.0,
+            chant_frame_seconds=0.5,
+            details_frame_seconds=details_frame_seconds,
             is_player_alert=True,
             play_text=(
                 "P.MAHOMES PASS TO T.KELCE FOR 45 YD TD"
@@ -1834,6 +1856,7 @@ class PossessionAlertManager:
             home="KC",
             away_score=17,
             home_score=24,
+            chant_enabled=self._chant_enabled,
         )
 
         with self._lock:

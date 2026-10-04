@@ -5,6 +5,7 @@ from common.logo_store import draw_logo
 
 from common.config import PANEL_WIDTH, PANEL_HEIGHT
 from common.fonts import print_gfx_5x7, gfx_5x7_width
+from alerts.models import CHANT_BLANK_SECONDS, CHANT_WORD_SECONDS
 
 DISPLAY_WIDTH = PANEL_WIDTH
 DISPLAY_HEIGHT = PANEL_HEIGHT
@@ -258,8 +259,83 @@ def _render_alert_card(alert):
     return image
 
 
+def _create_chant_frame(alert):
+    image = Image.new(
+        "RGB",
+        (DISPLAY_WIDTH, DISPLAY_HEIGHT),
+        ALERT_BACKGROUND,
+    )
+    draw = ImageDraw.Draw(image)
+
+    draw.rectangle(
+        (0, 0, 2, DISPLAY_HEIGHT - 1),
+        fill=alert.accent,
+    )
+
+    logo_y = (DISPLAY_HEIGHT - LOGO_SIZE) // 2
+    draw_team_logo(image, alert.league, alert.team, 5, logo_y)
+    draw_team_logo(
+        image,
+        alert.league,
+        alert.team,
+        DISPLAY_WIDTH - LOGO_SIZE - 5,
+        logo_y,
+    )
+
+    return image, draw
+
+
+def _render_chant_frame(alert, chant_index):
+    image, draw = _create_chant_frame(alert)
+    words = alert.chant_words()
+    chant_text = str(words[chant_index]).upper()
+
+    text_left = LOGO_SIZE + 12
+    text_right = DISPLAY_WIDTH - LOGO_SIZE - 12
+    available_width = max(1, text_right - text_left)
+    text_width = max(1, gfx_5x7_width(chant_text))
+    source = Image.new("RGB", (text_width, 7), ALERT_BACKGROUND)
+    source_draw = ImageDraw.Draw(source)
+    print_gfx_5x7(source_draw, chant_text, 0, 0, alert.accent)
+
+    scale_x = max(1, available_width // source.width)
+    scale_y = max(1, DISPLAY_HEIGHT // source.height)
+    scale = max(1, min(scale_x, scale_y))
+
+    scaled_text = source.resize(
+        (source.width * scale, source.height * scale),
+        Image.Resampling.NEAREST,
+    )
+    text_x = text_left + (available_width - scaled_text.width) // 2
+    text_y = (DISPLAY_HEIGHT - scaled_text.height) // 2
+    image.paste(scaled_text, (text_x, text_y))
+
+    return image
+
+
 def render_possession_alert(alert, now):
     if now is None:
         now = time.monotonic()
+
+    elapsed = max(0.0, now - alert.created_at)
+    words = alert.chant_words()
+
+    if words:
+        current_time = 0.0
+
+        for chant_index, _word in enumerate(words):
+            word_end = current_time + CHANT_WORD_SECONDS
+
+            if elapsed < word_end:
+                return _render_chant_frame(alert, chant_index)
+
+            current_time = word_end
+            blank_end = current_time + CHANT_BLANK_SECONDS
+
+            if elapsed < blank_end:
+                image, _ = _create_chant_frame(alert)
+                return image
+
+            current_time = blank_end
 
     return _render_alert_card(alert)
