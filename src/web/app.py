@@ -2093,17 +2093,14 @@ def alerts_page():
                 0.0,
                 300.0,
             ),
-            "chant_frame_seconds": form_float(
-                "chant_frame_seconds",
-                0.9,
-                0.2,
-                3.0,
-            ),
             "details_frame_seconds": form_float(
                 "details_frame_seconds",
-                4.0,
+                5.0,
                 1.0,
                 15.0,
+            ),
+            "chant_enabled": (
+                request.form.get("chant_enabled") == "on"
             ),
         })
 
@@ -2440,17 +2437,10 @@ def alerts_page():
         )
     ))
 
-    chant_seconds = escape(str(
-        alerts.get(
-            "chant_frame_seconds",
-            0.9,
-        )
-    ))
-
     details_seconds = escape(str(
         alerts.get(
             "details_frame_seconds",
-            4.0,
+            5.0,
         )
     ))
 
@@ -2762,6 +2752,55 @@ def alerts_page():
 
                 <div class="card">
                     <div class="card-title">
+                        Display
+                    </div>
+
+                    <label class="alert-type-row">
+                        <input
+                            type="checkbox"
+                            name="chant_enabled"
+                            {checked("chant_enabled", False)}
+                        >
+                        <div class="alert-icon">📣</div>
+                        <div class="alert-row-text">
+                            <div class="alert-row-title">Team chant</div>
+                            <div class="alert-row-description">
+                                Flash the team chant, then
+                                show the play card.
+                            </div>
+                        </div>
+                    </label>
+
+                    <div class="alert-control" style="margin-top: 12px;">
+                        <div class="alert-control-heading">
+                            <label
+                                class="alert-control-title"
+                                for="details_frame_seconds"
+                            >
+                                Display duration
+                            </label>
+
+                            <input
+                                class="alert-control-input"
+                                id="details_frame_seconds"
+                                name="details_frame_seconds"
+                                type="number"
+                                min="1"
+                                max="15"
+                                step="0.5"
+                                value="{details_seconds}"
+                            >
+                        </div>
+
+                        <div class="alert-control-description">
+                            Seconds the play card stays
+                            on the scoreboard.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">
                         Teams
                     </div>
 
@@ -2910,96 +2949,6 @@ def alerts_page():
                                     alert-control-title
                                 "
                                 for="
-                                    chant_frame_seconds
-                                "
-                            >
-                                Word duration
-                            </label>
-
-                            <input
-                                class="
-                                    alert-control-input
-                                "
-                                id="
-                                    chant_frame_seconds
-                                "
-                                name="
-                                    chant_frame_seconds
-                                "
-                                type="number"
-                                min="0.2"
-                                max="3"
-                                step="0.1"
-                                value="{chant_seconds}"
-                            >
-                        </div>
-
-                        <div
-                            class="
-                                alert-control-description
-                            "
-                        >
-                            Seconds each animated alert
-                            word stays on the display.
-                        </div>
-                    </div>
-
-                    <div class="alert-control">
-                        <div
-                            class="
-                                alert-control-heading
-                            "
-                        >
-                            <label
-                                class="
-                                    alert-control-title
-                                "
-                                for="
-                                    details_frame_seconds
-                                "
-                            >
-                                Details duration
-                            </label>
-
-                            <input
-                                class="
-                                    alert-control-input
-                                "
-                                id="
-                                    details_frame_seconds
-                                "
-                                name="
-                                    details_frame_seconds
-                                "
-                                type="number"
-                                min="1"
-                                max="15"
-                                step="0.5"
-                                value="{details_seconds}"
-                            >
-                        </div>
-
-                        <div
-                            class="
-                                alert-control-description
-                            "
-                        >
-                            Seconds the final alert
-                            screen remains visible.
-                        </div>
-                    </div>
-
-                    <div class="alert-control">
-                        <div
-                            class="
-                                alert-control-heading
-                            "
-                        >
-                            <label
-                                class="
-                                    alert-control-title
-                                "
-                                for="
                                     cooldown_seconds
                                 "
                             >
@@ -3129,6 +3078,19 @@ def players_page():
         )
         updated_alerts["player_alerts_enabled"] = (
             request.form.get("player_alerts_enabled") == "on"
+        )
+        updated_alerts["chant_enabled"] = (
+            request.form.get("chant_enabled") == "on"
+        )
+        try:
+            display_seconds = float(
+                request.form.get("details_frame_seconds", 5.0)
+            )
+        except (TypeError, ValueError):
+            display_seconds = 5.0
+        updated_alerts["details_frame_seconds"] = max(
+            1.0,
+            min(15.0, display_seconds),
         )
         updated_alerts["players"] = players_by_league
 
@@ -3288,6 +3250,41 @@ def players_page():
                 font-size: 21px;
             }}
 
+            .alert-control {{
+                margin-top: 12px;
+            }}
+
+            .alert-control-heading {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 14px;
+                margin-bottom: 7px;
+            }}
+
+            .alert-control-title {{
+                font-size: 16px;
+                font-weight: 700;
+            }}
+
+            .alert-control-input {{
+                width: 96px;
+                min-height: 44px;
+                padding: 9px;
+                border-radius: 11px;
+                border: 1px solid #444;
+                background: #0f0f14;
+                color: white;
+                font-size: 16px;
+                text-align: center;
+            }}
+
+            .alert-control-description {{
+                color: #888;
+                font-size: 13px;
+                line-height: 1.4;
+            }}
+
             .alerts-save {{
                 position: sticky;
                 bottom: 12px;
@@ -3424,6 +3421,53 @@ def players_page():
                             </div>
                         </div>
                     </label>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">
+                        Display
+                    </div>
+
+                    <label class="alert-type-row">
+                        <input
+                            type="checkbox"
+                            name="chant_enabled"
+                            {checked("chant_enabled", False)}
+                        >
+                        <div class="alert-icon">📣</div>
+                        <div class="alert-row-text">
+                            <div class="alert-row-title">Team chant</div>
+                            <div class="alert-row-description">
+                                Flash the player's team chant,
+                                then show the play card.
+                            </div>
+                        </div>
+                    </label>
+
+                    <div class="alert-control">
+                        <div class="alert-control-heading">
+                            <label
+                                class="alert-control-title"
+                                for="details_frame_seconds"
+                            >
+                                Display duration
+                            </label>
+                            <input
+                                class="alert-control-input"
+                                id="details_frame_seconds"
+                                name="details_frame_seconds"
+                                type="number"
+                                min="1"
+                                max="15"
+                                step="0.5"
+                                value="{escape(str(alerts.get('details_frame_seconds', 5.0)))}"
+                            >
+                        </div>
+                        <div class="alert-control-description">
+                            Seconds the play card stays
+                            on the scoreboard.
+                        </div>
+                    </div>
                 </div>
 
                 <div class="card">

@@ -1,5 +1,8 @@
 from dataclasses import dataclass
 
+CHANT_WORD_SECONDS = 0.85
+CHANT_BLANK_SECONDS = 0.25
+
 
 @dataclass(frozen=True)
 class PossessionAlert:
@@ -30,7 +33,22 @@ class PossessionAlert:
     home: str = ""
     away_score: int = 0
     home_score: int = 0
+    chant_enabled: bool = False
+
+    def chant_words(self) -> tuple[str, ...]:
+        if not self.chant_enabled:
+            return ()
+
+        return tuple(
+            str(word).strip().upper()
+            for word in self.chant
+            if str(word).strip()
+        )
 
     @property
     def total_duration(self) -> float:
-        return max(1.0, self.details_frame_seconds)
+        chant_duration = len(self.chant_words()) * (
+            CHANT_WORD_SECONDS + CHANT_BLANK_SECONDS
+        )
+
+        return chant_duration + max(1.0, self.details_frame_seconds)
