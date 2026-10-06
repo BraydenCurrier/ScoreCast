@@ -23,6 +23,7 @@ from alerts.watcher import possession_watch_loop
 
 from mlb.api import get_today_games as get_live_mlb
 from mlb.mlb_renderer import render_game_strip_onto as draw_mlb_strip
+from mlb.focus_renderer import render_mlb_focus
 
 from nfl.api import get_today_games as get_live_nfl
 from nfl.nfl_renderer import render_game_strip_onto as draw_nfl_strip
@@ -75,7 +76,17 @@ SPORT_DISPLAY_ORDER = (
     "fantasy",
 )
 
+from bets.renderer import CARD_WIDTH as BET_CARD_WIDTH
+from bets.renderer import render_bet_notice, render_game_strip_onto as draw_bet_strip
+from bets.store import init_store as init_bet_store
+from bets.tracker import (
+    active_notice_frame,
+    bets_revision,
+    refresh_open_bets,
+    ticker_tickets,
+)
 from web.app import app, set_latest_games
+
 
 DEFAULT_FPS = 60
 MIN_FPS = 10
@@ -90,6 +101,7 @@ CFB_CARD_WIDTH = 162
 NFL_CARD_WIDTH = 130
 FANTASY_CARD_WIDTH = 143
 STOCK_CARD_WIDTH = 120
+BET_TICKER_WIDTH = BET_CARD_WIDTH
 
 SETTINGS_POLL_INTERVAL = 0.5
 UPDATE_POLL_INTERVAL = 0.25
@@ -143,8 +155,23 @@ def fetch_all_sports():
 
     return results, errors
 
+def _hashable(value):
+    if isinstance(value, dict):
+        return tuple(
+            sorted((key, _hashable(item)) for key, item in value.items())
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_hashable(item) for item in value)
+    if isinstance(value, set):
+        return tuple(sorted(_hashable(item) for item in value))
+    return value
+
+
 def game_signature(game):
-    return (game.__class__.__name__, tuple(sorted(vars(game).items())))
+    return (
+        game.__class__.__name__,
+        tuple(sorted((key, _hashable(item)) for key, item in vars(game).items())),
+    )
 
 def logo_variants_signature(settings):
     logo_variants = settings.get(
@@ -164,6 +191,13 @@ def logo_variants_signature(settings):
             for team, variant in teams.items()
         )
     )
+
+def is_bet_ticket(game):
+    return game.__class__.__name__ == "BetTicket"
+
+
+def is_mlb_game(game):
+    return game.__class__.__name__ == "BaseballGame"
 
 def is_cfb_game(game):
     return game.__class__.__name__ == "CollegeFootballGame" 
@@ -187,6 +221,9 @@ def is_fantasy_game(game):
     return game.__class__.__name__ == "FantasyMatchup"
 
 def game_id(game):
+    if is_bet_ticket(game):
+        return game.ticket_id
+
     if is_soccer_game(game) and getattr(game, "event_id", ""):
         return f"soccer:{game.event_id}"
 
@@ -216,6 +253,9 @@ def get_sport(game):
 
     if is_fantasy_game(game):
         return "fantasy"
+
+    if is_bet_ticket(game):
+        return "bets"
     
     return "mlb"
 
@@ -228,6 +268,8 @@ def get_game_width(game):
         return FANTASY_CARD_WIDTH
     if is_stock_quote(game):
         return STOCK_CARD_WIDTH
+    if is_bet_ticket(game):
+        return int(getattr(game, "width", None) or BET_TICKER_WIDTH)
 
     return DEFAULT_CARD_WIDTH
 
@@ -251,6 +293,8 @@ def draw_game(image, draw, game, x, settings):
         draw_stocks_strip(image, draw, game, x, settings)
     elif is_fantasy_game(game):
         draw_fantasy_strip(image, draw, game, x, settings)
+    elif is_bet_ticket(game):
+        draw_bet_strip(image, draw, game, x, settings)
     else:
         draw_mlb_strip(image, draw, game, x, settings)
 
@@ -375,8 +419,10 @@ def get_focus_games(
             return []
         return [str(value) for value in values]
 
-    selected_ids = _id_list("nfl_game_ids") + _id_list(
-        "cfb_game_ids"
+    selected_ids = (
+        _id_list("nfl_game_ids")
+        + _id_list("cfb_game_ids")
+        + _id_list("mlb_game_ids")
     )
 
     if not selected_ids:
@@ -391,6 +437,7 @@ def get_focus_games(
             (
                 is_nfl_game(game)
                 or is_cfb_game(game)
+                or is_mlb_game(game)
             )
             and game_id(game)
             in selected_set
@@ -503,6 +550,8 @@ def card_settings_signature(settings):
             for league, teams in sorted(settings.get("favorite_teams", {}).items())
         ),
         logo_variants_signature(settings),
+        bool((settings.get("bets") or {}).get("ticker_enabled", True)),
+        bets_revision(),
     )
 
 
@@ -533,7 +582,7 @@ def rebuild_visible_games_if_needed(settings):
 
         current_games = _games.copy()
 
-    logo_signature = settings_signature[-1]
+    logo_signature = logo_variants_signature(settings)
 
     signature = (
         tuple(game_signature(g) for g in current_games),
@@ -556,6 +605,9 @@ def rebuild_visible_games_if_needed(settings):
 
     ordered_games = apply_saved_order(current_games, settings)
     visible_games = get_visible_games(ordered_games, settings)
+    bets_settings = settings.get("bets") or {}
+    if bets_settings.get("ticker_enabled", True):
+        visible_games = list(ticker_tickets()) + visible_games
 
     live_keys = {
         card_cache_key(game, settings, logo_signature)
@@ -653,6 +705,10 @@ def refresh_games_background():
         )
 
         publish_games(combined_games)
+        try:
+            refresh_open_bets()
+        except Exception as error:
+            print("Bet refresh failed:", error)
 
         if sports_errors:
             failed_sports = ", ".join(
@@ -729,8 +785,17 @@ threading.Thread(
 ).start()
 
 refresh_fantasy_avatars_on_startup()
+try:
+    init_bet_store()
+    refresh_open_bets()
+except Exception as error:
+    print("Bet tracker init deferred:", error)
 
 publish_games(load_initial_games())
+try:
+    refresh_open_bets()
+except Exception as error:
+    print("Bet refresh deferred:", error)
 
 current_game = 0
 scroll_x = 0.0
@@ -1011,6 +1076,11 @@ while True:
                 focus_game,
                 settings,
             )
+        elif is_mlb_game(focus_game):
+            focus_frame = render_mlb_focus(
+                focus_game,
+                settings,
+            )
         else:
             focus_frame = render_nfl_focus(
                 focus_game,
@@ -1038,9 +1108,29 @@ while True:
 
         continue
 
-    visible_games = rebuild_visible_games_if_needed(
-        settings
+    bets_settings = settings.get("bets") or {}
+    notice = active_notice_frame(
+        now,
+        bool(bets_settings.get("notifications_enabled", True)),
     )
+    if notice is not None:
+        note_external_frame()
+        matrix.SetImage(render_bet_notice(notice))
+        frame_elapsed = time.monotonic() - frame_started_at
+        sleep_time = frame_delay - frame_elapsed
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+        last_frame_time = time.monotonic()
+        continue
+
+    try:
+        visible_games = rebuild_visible_games_if_needed(
+            settings
+        )
+    except Exception as error:
+        print("Ticker rebuild failed:", error)
+        traceback.print_exc()
+        visible_games = _visible_games_cache or []
 
     if not visible_games:
         note_external_frame()

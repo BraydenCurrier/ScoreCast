@@ -197,6 +197,70 @@ sudo systemctl start scorecast-update
 
 ---
 
+# Sports Bet Tracker
+
+ScoreCast can track sports bets you already placed. It is not a sportsbook: there
+are no deposits, withdrawals, or bet submissions.
+
+Open **Bets** in the dashboard (signed in). Add a single or a parlay, pick a
+league and game, then a player/market ScoreCast can actually see in its APIs.
+
+## Supported leagues and markets
+
+Tracked from existing ScoreCast data sources:
+
+- **NFL / CFB** (ESPN scoreboard + game summary box score): passing/rushing/receiving
+  yards and TDs, receptions, completions/attempts/INTs, rush+rec yards, anytime
+  TD as rush+rec TDs, moneyline, spread, game total, team total.
+- **NBA** (ESPN): points, rebounds, assists, threes, steals, blocks, turnovers,
+  P+R+A combos, moneyline, spread, totals.
+- **NHL** (ESPN): goals, assists, points, shots, saves, moneyline, spread, totals.
+- **MLB** (MLB Stats API live feed / box score): hits, total bases, HR, runs, RBI,
+  batter walks/Ks, pitcher Ks/walks/hits allowed, moneyline, spread, totals.
+
+If a market cannot be read from those feeds, it is not offered. Lines and odds
+are entered by you. ESPN game-center odds are not copied onto the slip.
+
+## How tracking works
+
+On each sports refresh, ScoreCast batches open bets by league and event, fetches
+one summary/box score per event, then updates every leg on that game. Missing
+stats are never graded as a loss. Overs on counting stats can clinch live once
+they clear the line. Unders wait for a final (or go dead if the over already
+cashed). Parlays lose if any leg loses; pushes/voids drop that leg instead of
+counting as a win.
+
+You can mark won/lost/push/void yourself if a sportsbook grades a weird market
+differently. Manual grades are stored separately from automatic ones.
+
+## Analytics and labels
+
+Record, hit rate, net, and ROI use only bets that have the required fields.
+Net/ROI ignore slips without stake+odds rather than treating them as $0.
+Labels such as Money Player or No-Go need at least five settled results in that
+bucket and describe *your* history, not whether a player is good.
+
+## ScoreCast Estimate
+
+Live hit chance, when shown, is a ScoreCast Estimate. It uses the player's
+cached game log, current stat, and remaining game fraction, then a simple
+normal remaining-production model. It is not a sportsbook probability.
+Same-game parlays do not get a multiplied joint probability.
+
+## LED board
+
+Settings on the Add Bet page:
+
+- Show open bets on the ticker
+- Brief HIT / WON notices (never override Alerts or Focus)
+
+## Storage
+
+Bets live in `/var/lib/scorecast/bets.sqlite` (or `$SCORECAST_CONFIG_DIR`).
+Existing ScoreCast installs create an empty database on first launch.
+
+---
+
 # APIs Used
 
 ## Sports
