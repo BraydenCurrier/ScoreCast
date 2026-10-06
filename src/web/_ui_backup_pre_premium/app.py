@@ -245,34 +245,20 @@ def page_header(active_page="games"):
     fantasy_active = "active" if active_page == "fantasy" else ""
     alerts_active = "active" if active_page == "alerts" else ""
     players_active = "active" if active_page == "players" else ""
-    bets_active = "active" if active_page == "bets" else ""
     logos_active = "active" if active_page == "logos" else ""
-    settings_active = "active" if active_page in ("settings", "profiles") else ""
+    settings_active = "active" if active_page == "settings" else ""
     favorites_active = "active" if active_page == "favorites" else ""
-    stocks_active = "active" if active_page == "stocks" else ""
-
-    page_titles = {
-        "games": ("Games", "Choose what scrolls on the board"),
-        "focus": ("Focus", "Pin one game full-width"),
-        "fantasy": ("Fantasy", "Sleeper matchups on the ticker"),
-        "alerts": ("Alerts", "Team takeovers and chants"),
-        "players": ("Players", "Big-play alerts for NFL stars"),
-        "bets": ("Bets", "Track slips you already placed"),
-        "logos": ("Logos", "Artwork that hits the LEDs"),
-        "settings": ("Settings", "Display, updates, and access"),
-        "favorites": ("Favorites", "Keep your teams first"),
-        "profiles": ("Settings", "Display, updates, and access"),
-        "stocks": ("Stocks", "Quotes that scroll on the board"),
-    }
-    page_title, page_lede = page_titles.get(
-        active_page,
-        ("ScoreCast", ""),
-    )
+    profiles_active = "active" if active_page == "profiles" else ""
 
     user = current_user()
     username = escape(user["username"]) if user else "Guest"
     is_root = bool(user and user["role"] == "root")
     root_badge = '<span class="account-role">Root</span>' if is_root else ""
+    profiles_tab = (
+        f'<a class="tab {profiles_active}" href="/profiles">Profiles</a>'
+        if is_root
+        else ""
+    )
 
     settings = get_settings()
 
@@ -299,19 +285,6 @@ def page_header(active_page="games"):
                 <div class="brand-mark" aria-hidden="true">SC</div>
                 <h1 class="title">ScoreCast</h1>
             </div>
-
-            <div class="topbar-actions">
-                <a
-                    class="icon-button {settings_active}"
-                    href="/settings"
-                    aria-label="Settings"
-                    title="Settings"
-                >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <circle cx="12" cy="12" r="3"></circle>
-                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"></path>
-                    </svg>
-                </a>
 
             <form
                 class="display-power-form"
@@ -345,7 +318,6 @@ def page_header(active_page="games"):
                     </svg>
                 </button>
             </form>
-            </div>
         </div>
 
         <div class="topbar-account">
@@ -357,34 +329,17 @@ def page_header(active_page="games"):
         </div>
     </header>
 
-    <nav class="tabs" id="scorecast-tabs" aria-label="ScoreCast">
+    <nav class="tabs" aria-label="ScoreCast">
         <a class="tab {games_active}" href="/games">Games</a>
-        <a class="tab {stocks_active}" href="/stocks">Stocks</a>
         <a class="tab {focus_active}" href="/focus">Focus</a>
+        <a class="tab {fantasy_active}" href="/fantasy">Fantasy</a>
         <a class="tab {alerts_active}" href="/alerts">Alerts</a>
         <a class="tab {players_active}" href="/players">Players</a>
-        <a class="tab {bets_active}" href="/bets">Bets</a>
-        <a class="tab {fantasy_active}" href="/fantasy">Fantasy</a>
-        <a class="tab {favorites_active}" href="/favorites">Favorites</a>
         <a class="tab {logos_active}" href="/logos">Logos</a>
+        <a class="tab {settings_active}" href="/settings">Settings</a>
+        <a class="tab {favorites_active}" href="/favorites">Favorites</a>
+        {profiles_tab}
     </nav>
-    <script>
-    (function () {{
-      var nav = document.getElementById("scorecast-tabs");
-      var active = nav && nav.querySelector(".tab.active");
-      if (!nav || !active) {{
-        return;
-      }}
-      var maxScroll = Math.max(0, nav.scrollWidth - nav.clientWidth);
-      var target = active.offsetLeft - ((nav.clientWidth - active.offsetWidth) / 2);
-      nav.scrollLeft = Math.max(0, Math.min(maxScroll, target));
-    }})();
-    </script>
-
-    <div class="page-intro">
-        <h2 class="page-title">{escape(page_title)}</h2>
-        <p class="page-lede">{escape(page_lede)}</p>
-    </div>
     """
 
 def page_head(title: str) -> str:
@@ -399,7 +354,7 @@ def page_head(title: str) -> str:
 
         <title>{escape(title)}</title>
 
-        <meta name="theme-color" content="#07080b">
+        <meta name="theme-color" content="#0b0c10">
 
         <meta
             name="apple-mobile-web-app-capable"
@@ -483,7 +438,7 @@ def page_head(title: str) -> str:
 
 def page_styles():
     return """
-    <link rel="stylesheet" href="/static/app.css?v=16">
+    <link rel="stylesheet" href="/static/app.css?v=7">
     <script>
     (function () {
       if (navigator.serviceWorker) {
@@ -501,275 +456,6 @@ def page_styles():
         });
       }
     })();
-    </script>
-    <script>
-    document.addEventListener("DOMContentLoaded", function () {
-      setupStockSearch();
-    });
-
-    function handleCfbConferenceChange(changedCheckbox) {
-      var allFbs = document.querySelector(
-        'input[name="cfb_conferences"][value="80"]'
-      );
-      var individualConferences = Array.from(
-        document.querySelectorAll(
-          'input[name="cfb_conferences"]:not([value="80"])'
-        )
-      );
-
-      if (changedCheckbox.value === "80" && changedCheckbox.checked) {
-        individualConferences.forEach(function(checkbox) {
-          checkbox.checked = false;
-        });
-        return;
-      }
-
-      if (
-        changedCheckbox.value !== "80"
-        && changedCheckbox.checked
-        && allFbs
-      ) {
-        allFbs.checked = false;
-      }
-
-      var anySelected = Array.from(
-        document.querySelectorAll(
-          'input[name="cfb_conferences"]:checked'
-        )
-      ).length > 0;
-
-      if (!anySelected && allFbs) {
-        allFbs.checked = true;
-      }
-    }
-
-    function setupStockSearch() {
-      var search = document.getElementById("stock_search");
-      var results = document.getElementById("stock_search_results");
-      var list = document.getElementById("stock_watchlist");
-      var empty = document.getElementById("stock_watchlist_empty");
-      var maxSymbols = Number(
-        (list && list.getAttribute("data-max-symbols")) || "25"
-      );
-
-      if (!search || !results || !list) {
-        return;
-      }
-
-      var timer = null;
-      var requestId = 0;
-
-      function selectedSymbols() {
-        return Array.from(
-          list.querySelectorAll('input[name="stock_symbols"]')
-        ).map(function(input) {
-          return input.value;
-        });
-      }
-
-      function refreshEmpty() {
-        if (!empty) {
-          return;
-        }
-        empty.style.display = selectedSymbols().length ? "none" : "block";
-      }
-
-      function hideResults() {
-        results.hidden = true;
-        results.innerHTML = "";
-      }
-
-      function addStock(symbol, name) {
-        symbol = String(symbol || "").toUpperCase();
-        name = String(name || "").trim();
-
-        if (!symbol) {
-          return;
-        }
-
-        if (selectedSymbols().indexOf(symbol) !== -1) {
-          search.value = "";
-          hideResults();
-          return;
-        }
-
-        if (selectedSymbols().length >= maxSymbols) {
-          results.innerHTML = (
-            '<div class="stock-search-empty">You can track '
-            + maxSymbols
-            + " stocks.</div>"
-          );
-          results.hidden = false;
-          return;
-        }
-
-        var row = document.createElement("div");
-        row.className = "stock-watch-row";
-
-        var label = document.createElement("label");
-        label.className = "game-row";
-
-        var checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.name = "stock_shown";
-        checkbox.value = symbol;
-        checkbox.checked = true;
-
-        var symbolInput = document.createElement("input");
-        symbolInput.type = "hidden";
-        symbolInput.name = "stock_symbols";
-        symbolInput.value = symbol;
-
-        var nameInput = document.createElement("input");
-        nameInput.type = "hidden";
-        nameInput.name = "stock_names";
-        nameInput.value = name;
-
-        var info = document.createElement("div");
-        info.className = "game-info";
-
-        var matchup = document.createElement("div");
-        matchup.className = "matchup";
-        matchup.textContent = symbol;
-
-        var details = document.createElement("div");
-        details.className = "details";
-        details.textContent = name || "Show this quote on the board";
-
-        info.appendChild(matchup);
-        info.appendChild(details);
-
-        label.appendChild(checkbox);
-        label.appendChild(symbolInput);
-        label.appendChild(nameInput);
-        label.appendChild(info);
-
-        var remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "stock-remove-button";
-        remove.textContent = "Remove";
-        remove.setAttribute("aria-label", "Remove " + symbol);
-
-        row.appendChild(label);
-        row.appendChild(remove);
-        list.appendChild(row);
-
-        search.value = "";
-        hideResults();
-        refreshEmpty();
-      }
-
-      function renderResults(items) {
-        results.innerHTML = "";
-
-        if (!items.length) {
-          results.innerHTML = (
-            '<div class="stock-search-empty">No matching stocks.</div>'
-          );
-          results.hidden = false;
-          return;
-        }
-
-        items.forEach(function(item) {
-          var button = document.createElement("button");
-          button.type = "button";
-          button.className = "stock-search-result";
-
-          var symbol = document.createElement("div");
-          symbol.className = "matchup";
-          symbol.textContent = item.symbol;
-
-          var meta = document.createElement("div");
-          meta.className = "details";
-          meta.textContent = [item.name, item.exchange]
-            .filter(Boolean)
-            .join(" · ");
-
-          button.appendChild(symbol);
-          button.appendChild(meta);
-          button.addEventListener("click", function() {
-            addStock(item.symbol, item.name);
-          });
-          results.appendChild(button);
-        });
-
-        results.hidden = false;
-      }
-
-      async function lookup(query) {
-        var currentId = ++requestId;
-
-        try {
-          var response = await fetch(
-            "/api/stocks/search?q=" + encodeURIComponent(query),
-            { method: "GET", cache: "no-store" }
-          );
-
-          if (!response.ok) {
-            throw new Error("search failed");
-          }
-
-          var payload = await response.json();
-
-          if (currentId !== requestId) {
-            return;
-          }
-
-          renderResults(payload.results || []);
-        } catch (error) {
-          if (currentId !== requestId) {
-            return;
-          }
-
-          results.innerHTML = (
-            '<div class="stock-search-empty">Unable to search right now.</div>'
-          );
-          results.hidden = false;
-        }
-      }
-
-      search.addEventListener("input", function() {
-        var query = search.value.trim();
-        window.clearTimeout(timer);
-
-        if (query.length < 1) {
-          hideResults();
-          return;
-        }
-
-        timer = window.setTimeout(function() {
-          lookup(query);
-        }, 250);
-      });
-
-      search.addEventListener("keydown", function(event) {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          var first = results.querySelector(".stock-search-result");
-          if (first) {
-            first.click();
-          }
-        }
-      });
-
-      list.addEventListener("click", function(event) {
-        var button = event.target.closest(".stock-remove-button");
-        if (!button) {
-          return;
-        }
-        var row = button.closest(".stock-watch-row");
-        if (row) {
-          row.remove();
-          refreshEmpty();
-        }
-      });
-
-      document.addEventListener("click", function(event) {
-        if (!event.target.closest(".stock-search")) {
-          hideResults();
-        }
-      });
-    }
     </script>
     """
 
@@ -1189,27 +875,125 @@ def logout():
 @app.route("/profiles", methods=["GET", "POST"])
 @root_required
 def profiles_page():
-    if request.method != "POST":
-        return redirect("/settings#profiles")
+    error = ""
+    saved_message = ""
 
-    username = request.form.get("username", "")
-    password = request.form.get("password", "")
-    confirm_password = request.form.get("confirm_password", "")
+    if request.args.get("saved") == "1":
+        saved_message = '<div class="hint" style="margin-bottom:12px;">Profile created.</div>'
+    elif request.args.get("deleted") == "1":
+        saved_message = '<div class="hint" style="margin-bottom:12px;">Profile deleted.</div>'
+    if request.args.get("error"):
+        error = request.args.get("error", "")
 
-    if password != confirm_password:
-        return redirect(
-            url_for("settings_page", error="Passwords do not match.")
-            + "#profiles"
-        )
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        confirm_password = request.form.get("confirm_password", "")
 
-    try:
-        create_user(username, password, role="user")
-    except UserError as exc:
-        return redirect(
-            url_for("settings_page", error=str(exc)) + "#profiles"
-        )
+        if password != confirm_password:
+            error = "Passwords do not match."
+        else:
+            try:
+                create_user(username, password, role="user")
+            except UserError as exc:
+                error = str(exc)
+            else:
+                return redirect("/profiles?saved=1")
 
-    return redirect(url_for("settings_page", saved="1") + "#profiles")
+    error_html = f"<div class='error'>{escape(error)}</div>" if error else ""
+    actor = current_user()
+    actor_id = actor["id"] if actor else ""
+
+    profile_rows = ""
+    for user in list_users():
+        is_root = user["role"] == "root"
+        role_label = "Root" if is_root else "Profile"
+        can_delete = user["id"] != actor_id and not is_root
+
+        delete_control = ""
+        if can_delete:
+            delete_control = f"""
+                <form method="POST" action="/profiles/delete">
+                    <input type="hidden" name="user_id" value="{escape(user['id'], quote=True)}">
+                    <button
+                        class="delete-profile-button"
+                        type="submit"
+                        onclick="return confirm('Delete this profile?');"
+                    >
+                        Delete
+                    </button>
+                </form>
+            """
+        else:
+            delete_control = """
+                <button class="delete-profile-button" type="button" disabled>
+                    Root
+                </button>
+            """
+
+        profile_rows += f"""
+            <div class="profile-row">
+                <div class="profile-meta">
+                    <div class="profile-name">{escape(user['username'])}</div>
+                    <div class="profile-details">{role_label}</div>
+                </div>
+                {delete_control}
+            </div>
+        """
+
+    return f"""
+<!DOCTYPE html>
+<html>
+{page_head("ScoreCast Profiles")}
+<body>
+    <div class="page">
+        {page_header("profiles")}
+
+        <div class="card">
+            <div class="card-title">Profiles</div>
+            {saved_message}
+            {profile_rows}
+        </div>
+
+        <form method="POST">
+            <div class="card">
+                <div class="card-title">Add profile</div>
+                <div class="hint" style="margin-bottom:12px;">
+                    New profiles can use the dashboard. Only the root user
+                    can create or delete them.
+                </div>
+                {error_html}
+                <input
+                    class="auth-input"
+                    type="text"
+                    name="username"
+                    placeholder="Username"
+                    autocomplete="off"
+                    value="{escape(request.form.get('username', ''), quote=True)}"
+                >
+                <input
+                    class="auth-input"
+                    type="password"
+                    name="password"
+                    placeholder="Password"
+                    autocomplete="new-password"
+                >
+                <input
+                    class="auth-input"
+                    type="password"
+                    name="confirm_password"
+                    placeholder="Confirm password"
+                    autocomplete="new-password"
+                >
+                <button class="save-button" type="submit">
+                    Create profile
+                </button>
+            </div>
+        </form>
+    </div>
+</body>
+</html>
+    """
 
 
 @app.route("/profiles/delete", methods=["POST"])
@@ -1226,10 +1010,10 @@ def delete_profile():
         )
     except UserError as exc:
         return redirect(
-            url_for("settings_page", error=str(exc)) + "#profiles"
+            url_for("profiles_page", error=str(exc))
         )
 
-    return redirect(url_for("settings_page", deleted="1") + "#profiles")
+    return redirect("/profiles?deleted=1")
 
 @app.route(
     "/display/power/toggle",
@@ -1300,213 +1084,11 @@ def restart_scorecast():
         "message": "ScoreCast is restarting.",
     })
 
-
-def _is_stock_id(game_id):
-    return str(game_id).startswith("stocks:")
-
-
-def _cfb_conference_rows(settings):
-    selected = {
-        str(group_id)
-        for group_id in settings.get("cfb", {}).get(
-            "selected_conferences",
-            ["80"],
-        )
-    }
-
-    rows = ""
-    for group_id, conference_name in CFB_CONFERENCE_OPTIONS:
-        checked = "checked" if group_id in selected else ""
-        rows += f"""
-        <label class="game-row">
-            <input
-                type="checkbox"
-                name="cfb_conferences"
-                value="{group_id}"
-                data-cfb-conference="{group_id}"
-                onchange="handleCfbConferenceChange(this)"
-                {checked}
-            >
-            <div class="game-info">
-                <div class="matchup">{escape(conference_name)}</div>
-                <div class="details">
-                    {"Show every FBS game" if group_id == "80" else "Show games involving this conference"}
-                </div>
-            </div>
-        </label>
-        """
-    return rows
-
-
-def _soccer_league_rows(settings):
-    selected = {
-        str(league_id)
-        for league_id in settings.get("soccer", {}).get(
-            "selected_leagues",
-            DEFAULT_SOCCER_LEAGUES,
-        )
-    }
-
-    rows = ""
-    for league_id, league_name in SOCCER_LEAGUE_OPTIONS:
-        checked = "checked" if league_id in selected else ""
-        rows += f"""
-        <label class="game-row">
-            <input
-                type="checkbox"
-                name="soccer_leagues"
-                value="{escape(league_id, quote=True)}"
-                {checked}
-            >
-            <div class="game-info">
-                <div class="matchup">{escape(league_name)}</div>
-                <div class="details">
-                    Show today's games from this league
-                </div>
-            </div>
-        </label>
-        """
-    return rows
-
-
-def _normalized_cfb_conferences(values):
-    valid_ids = {group_id for group_id, _ in CFB_CONFERENCE_OPTIONS}
-    selected = [
-        group_id
-        for group_id in values
-        if group_id in valid_ids
-    ]
-    if not selected:
-        selected = ["80"]
-    if "80" in selected:
-        selected = ["80"]
-    return selected
-
-
-def _normalized_soccer_leagues(values):
-    valid_ids = set(SOCCER_LEAGUES)
-    selected = [
-        league_id
-        for league_id in values
-        if league_id in valid_ids
-    ]
-    if not selected:
-        selected = list(DEFAULT_SOCCER_LEAGUES)
-    return selected
-
-
-def _profiles_cards_html(saved_message="", error=""):
-    error_html = f"<div class='error'>{escape(error)}</div>" if error else ""
-    actor = current_user()
-    actor_id = actor["id"] if actor else ""
-
-    profile_rows = ""
-    for user in list_users():
-        is_root = user["role"] == "root"
-        role_label = "Root" if is_root else "Profile"
-        can_delete = user["id"] != actor_id and not is_root
-
-        if can_delete:
-            delete_control = f"""
-                <form method="POST" action="/profiles/delete">
-                    <input type="hidden" name="user_id" value="{escape(user['id'], quote=True)}">
-                    <button
-                        class="delete-profile-button"
-                        type="submit"
-                        onclick="return confirm('Delete this profile?');"
-                    >
-                        Delete
-                    </button>
-                </form>
-            """
-        else:
-            delete_control = """
-                <button class="delete-profile-button" type="button" disabled>
-                    Root
-                </button>
-            """
-
-        profile_rows += f"""
-            <div class="profile-row">
-                <div class="profile-meta">
-                    <div class="profile-name">{escape(user['username'])}</div>
-                    <div class="profile-details">{role_label}</div>
-                </div>
-                {delete_control}
-            </div>
-        """
-
-    return f"""
-        <div class="card" id="profiles">
-            <div class="card-title">Profiles</div>
-            <div class="hint" style="margin-bottom:12px;">
-                People who can sign in to this display.
-                Only the root user can add or remove them.
-            </div>
-            {saved_message}
-            {profile_rows}
-        </div>
-
-        <form method="POST" action="/profiles">
-            <div class="card">
-                <div class="card-title">Add profile</div>
-                {error_html}
-                <input
-                    class="auth-input"
-                    type="text"
-                    name="username"
-                    placeholder="Username"
-                    autocomplete="off"
-                    value="{escape(request.form.get('username', ''), quote=True)}"
-                >
-                <input
-                    class="auth-input"
-                    type="password"
-                    name="password"
-                    placeholder="Password"
-                    autocomplete="new-password"
-                >
-                <input
-                    class="auth-input"
-                    type="password"
-                    name="confirm_password"
-                    placeholder="Confirm password"
-                    autocomplete="new-password"
-                >
-                <button class="save-button" type="submit">
-                    Create profile
-                </button>
-            </div>
-        </form>
-    """
-
-
 @app.route("/games")
 @login_required
 def games():
     settings = get_settings()
     hidden = set(settings.get("hidden_games", []))
-    league_filters = {
-        "selected",
-        "all",
-        "mlb",
-        "nfl",
-        "cfb",
-        "top25",
-        "soccer",
-        "nba",
-        "nhl",
-        "fantasy",
-    }
-    selected_league_filter = request.args.get("league", "selected")
-    if selected_league_filter not in league_filters:
-        selected_league_filter = "selected"
-
-    def league_option(value, label):
-        selected = "selected" if selected_league_filter == value else ""
-        return (
-            f'<option value="{value}" {selected}>{label}</option>'
-        )
 
     game_rows = ""
 
@@ -1530,10 +1112,6 @@ def games():
         )
 
         league_key, league_label = get_game_league(game)
-
-        if league_key == "stocks":
-            continue
-
         display_status = get_display_status(game, league_key)
         is_live = is_game_live(game)
 
@@ -1551,20 +1129,38 @@ def games():
             " · Favorite" if favorite_game else ""
         )
 
-        matchup = (
-            f"{escape(str(game.away))} @ "
-            f"{escape(str(game.home))}"
-        )
-        away_score = escape(
-            str(getattr(game, "away_score", 0))
-        )
-        home_score = escape(
-            str(getattr(game, "home_score", 0))
-        )
-        details = (
-            f"{away_score} - {home_score} · "
-            f"{safe_status}{favorite_suffix}"
-        )
+        if league_key == "stocks":
+            symbol = escape(
+                str(getattr(game, "symbol", game.away))
+            )
+            name = str(getattr(game, "name", "") or "")
+            price = float(getattr(game, "price", 0) or 0)
+            matchup = symbol
+
+            if name and name.upper() != symbol.upper():
+                matchup = (
+                    f"{symbol} · {escape(name)}"
+                )
+
+            details = (
+                f"{price:.2f} · {safe_status}"
+                f"{favorite_suffix}"
+            )
+        else:
+            matchup = (
+                f"{escape(str(game.away))} @ "
+                f"{escape(str(game.home))}"
+            )
+            away_score = escape(
+                str(getattr(game, "away_score", 0))
+            )
+            home_score = escape(
+                str(getattr(game, "home_score", 0))
+            )
+            details = (
+                f"{away_score} - {home_score} · "
+                f"{safe_status}{favorite_suffix}"
+            )
 
         game_rows += f"""
         <div class="game-row-container" draggable="true" data-id="{safe_game_id}" data-league="{league_key}" data-top25="{"true" if is_top_25 else "false"}" data-live="{"true" if is_live else "false"}">
@@ -1607,6 +1203,8 @@ def games():
 
         <form method="POST" action="/save_games">
             <div class="card" id="games_card">
+                <div class="card-title">Games</div>
+
                 <input
                     class="search-input"
                     type="text"
@@ -1617,16 +1215,17 @@ def games():
 
                 <div class="filter-row">
                     <select id="league_filter" class="select-input" onchange="filterGames()">
-                        {league_option("selected", "Selected Games")}
-                        {league_option("all", "All Sports")}
-                        {league_option("mlb", "MLB")}
-                        {league_option("nfl", "NFL")}
-                        {league_option("cfb", "CFB")}
-                        {league_option("top25", "Top 25 CFB")}
-                        {league_option("soccer", "Soccer")}
-                        {league_option("nba", "NBA")}
-                        {league_option("nhl", "NHL")}
-                        {league_option("fantasy", "Fantasy")}
+                        <option value="selected">Selected Games</option>
+                        <option value="all">All Sports</option>
+                        <option value="mlb">MLB</option>
+                        <option value="nfl">NFL</option>
+                        <option value="cfb">CFB</option>
+                        <option value="top25">Top 25 CFB</option>
+                        <option value="soccer">Soccer</option>
+                        <option value="stocks">Stocks</option>
+                        <option value="nba">NBA</option>
+                        <option value="nhl">NHL</option>
+                        <option value="fantasy">Fantasy</option>
                     </select>
 
                     <label class="live-filter">
@@ -1647,47 +1246,6 @@ def games():
 
             <button class="save-button" type="submit">
                 Save Games
-            </button>
-        </form>
-
-        <form
-            method="POST"
-            action="/save_cfb_conferences"
-            id="cfb_panel"
-            class="league-setup-card"
-            hidden
-        >
-            <div class="card">
-                <div class="card-title">College Football Conferences</div>
-                <div class="hint" style="margin-bottom: 12px;">
-                    Choose All FBS or select one or more conferences.
-                    Games from those conferences show up here.
-                </div>
-                {_cfb_conference_rows(settings)}
-            </div>
-            <button class="save-button" type="submit">
-                Save Conferences
-            </button>
-        </form>
-
-        <form
-            method="POST"
-            action="/save_soccer_leagues"
-            id="soccer_panel"
-            class="league-setup-card"
-            hidden
-        >
-            <div class="card">
-                <div class="card-title">Soccer Leagues</div>
-                <div class="hint" style="margin-bottom: 12px;">
-                    Choose the soccer competitions to load.
-                    Premier League, Champions League, and MLS
-                    are on by default.
-                </div>
-                {_soccer_league_rows(settings)}
-            </div>
-            <button class="save-button" type="submit">
-                Save Leagues
             </button>
         </form>
     </div>
@@ -1755,25 +1313,6 @@ def games():
                     && matchesLive
                 ) ? "" : "none";
             }});
-
-            syncLeaguePanels();
-        }}
-
-        function syncLeaguePanels() {{
-            const selectedFilter = getCurrentLeagueFilter();
-            const cfbPanel = document.getElementById("cfb_panel");
-            const soccerPanel = document.getElementById("soccer_panel");
-
-            if (cfbPanel) {{
-                cfbPanel.hidden = !(
-                    selectedFilter === "cfb"
-                    || selectedFilter === "top25"
-                );
-            }}
-
-            if (soccerPanel) {{
-                soccerPanel.hidden = selectedFilter !== "soccer";
-            }}
         }}
 
         function handleGameSelectionChange() {{
@@ -1887,126 +1426,6 @@ def games():
 </body>
 </html>
     """
-
-@app.route("/stocks")
-@login_required
-def stocks_page():
-    settings = get_settings()
-    hidden = set(settings.get("hidden_games", []))
-    stocks_settings = settings.get("stocks", {})
-    selected_stock_symbols = parse_symbol_list(
-        stocks_settings.get(
-            "symbols",
-            DEFAULT_STOCK_SYMBOLS,
-        )
-    )
-    stock_names = stocks_settings.get("names", {})
-    if not isinstance(stock_names, dict):
-        stock_names = {}
-
-    popular_names = dict(POPULAR_SYMBOLS)
-    stock_watchlist_rows = ""
-
-    for symbol in selected_stock_symbols:
-        name = str(
-            stock_names.get(symbol)
-            or popular_names.get(symbol)
-            or ""
-        ).strip()
-        safe_symbol = escape(symbol, quote=True)
-        safe_name = escape(name, quote=True)
-        safe_name_label = escape(name) if name else "Show this quote on the board"
-        shown = "" if f"stocks:{symbol}" in hidden else "checked"
-
-        stock_watchlist_rows += f"""
-        <div class="stock-watch-row">
-            <label class="game-row">
-                <input
-                    type="checkbox"
-                    name="stock_shown"
-                    value="{safe_symbol}"
-                    {shown}
-                >
-                <input type="hidden" name="stock_symbols" value="{safe_symbol}">
-                <input type="hidden" name="stock_names" value="{safe_name}">
-                <div class="game-info">
-                    <div class="matchup">{escape(symbol)}</div>
-                    <div class="details">{safe_name_label}</div>
-                </div>
-            </label>
-            <button
-                type="button"
-                class="stock-remove-button"
-                aria-label="Remove {safe_symbol}"
-            >Remove</button>
-        </div>
-        """
-
-    stock_empty_display = "none" if selected_stock_symbols else "block"
-    saved_message = ""
-    if request.args.get("saved") == "1":
-        saved_message = '<div class="hint" style="margin-bottom:12px;">Stock list saved.</div>'
-
-    return f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>ScoreCast Stocks</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    {page_styles()}
-</head>
-<body>
-    <div class="page">
-        {page_header("stocks")}
-        {saved_message}
-
-        <form method="POST" action="/save_stocks">
-            <div class="card">
-                <div class="card-title">Watchlist</div>
-                <div class="hint" style="margin-bottom: 12px;">
-                    Search for a company or ticker, then tap it to add it.
-                    Checked quotes scroll on the board. You can track
-                    up to {MAX_SYMBOLS}.
-                </div>
-
-                <div class="stock-search">
-                    <input
-                        class="search-input"
-                        type="search"
-                        id="stock_search"
-                        placeholder="Search Apple, NVDA, Bitcoin…"
-                        autocomplete="off"
-                        enterkeyhint="search"
-                    >
-                    <div
-                        id="stock_search_results"
-                        class="stock-search-results"
-                        hidden
-                    ></div>
-                </div>
-
-                <div
-                    id="stock_watchlist_empty"
-                    class="empty"
-                    style="display:{stock_empty_display};"
-                >
-                    No stocks yet. Search to add one.
-                </div>
-
-                <div id="stock_watchlist" data-max-symbols="{MAX_SYMBOLS}">
-                    {stock_watchlist_rows}
-                </div>
-            </div>
-
-            <button class="save-button" type="submit">
-                Save Stocks
-            </button>
-        </form>
-    </div>
-</body>
-</html>
-    """
-
 
 def _focus_search_blob(game, league_key):
     parts = [
@@ -2160,14 +1579,6 @@ def focus_page():
         )
     )
 
-    selected_mlb_ids = set(
-        str(value)
-        for value in focus_settings.get(
-            "mlb_game_ids",
-            [],
-        )
-    )
-
     try:
         rotation_seconds = int(
             focus_settings.get(
@@ -2202,14 +1613,6 @@ def focus_page():
         "CFB",
     )
 
-    mlb_rows = _focus_game_rows(
-        latest_games,
-        "mlb",
-        selected_mlb_ids,
-        "focus_mlb_game",
-        "MLB",
-    )
-
     if not nfl_rows:
         nfl_rows = """
         <div class="empty">
@@ -2221,13 +1624,6 @@ def focus_page():
         cfb_rows = """
         <div class="empty">
             No CFB games loaded yet.
-        </div>
-        """
-
-    if not mlb_rows:
-        mlb_rows = """
-        <div class="empty">
-            No MLB games loaded yet.
         </div>
         """
 
@@ -2262,10 +1658,14 @@ def focus_page():
             action="/save_focus"
         >
             <div class="card">
+                <div class="card-title">
+                    Focus Mode
+                </div>
+
                 <div class="hint"
                      style="margin-bottom: 14px;">
                     Replace the normal ticker with a
-                    full-screen NFL, CFB, or MLB scoreboard.
+                    full-screen NFL or CFB scoreboard.
                 </div>
 
                 <label class="game-row">
@@ -2328,7 +1728,7 @@ def focus_page():
 
                     <div class="hint">
                         Only used when more than one
-                        game is selected.
+                        NFL or CFB game is selected.
                     </div>
                 </div>
             </div>
@@ -2349,7 +1749,7 @@ def focus_page():
                 >
 
                 <div class="hint">
-                    Filters NFL, CFB, and MLB lists.
+                    Filters both NFL and CFB lists.
                     Checked games stay selected even
                     if they are hidden by search.
                 </div>
@@ -2392,27 +1792,6 @@ def focus_page():
                 </div>
 
                 {cfb_rows}
-            </div>
-
-            <div
-                class="card focus-league-card"
-                data-league="mlb"
-            >
-                <div class="card-title">
-                    MLB Games
-                </div>
-
-                <div
-                    class="hint"
-                    style="margin-bottom: 14px;"
-                >
-                    Live games show the scorecard,
-                    count, batter, pitcher, and a
-                    strike zone of every pitch in
-                    the current at-bat.
-                </div>
-
-                {mlb_rows}
             </div>
 
             <div
@@ -2542,12 +1921,6 @@ def save_focus():
         )
     )
 
-    selected_mlb_ids = (
-        request.form.getlist(
-            "focus_mlb_game"
-        )
-    )
-
     valid_nfl_game_ids = {
         get_game_id(game)
         for game in latest_games
@@ -2560,13 +1933,6 @@ def save_focus():
         for game in latest_games
         if get_game_league(game)[0]
         == "cfb"
-    }
-
-    valid_mlb_game_ids = {
-        get_game_id(game)
-        for game in latest_games
-        if get_game_league(game)[0]
-        == "mlb"
     }
 
     selected_nfl_ids = [
@@ -2583,14 +1949,6 @@ def save_focus():
         in selected_cfb_ids
         if game_identifier
         in valid_cfb_game_ids
-    ]
-
-    selected_mlb_ids = [
-        game_identifier
-        for game_identifier
-        in selected_mlb_ids
-        if game_identifier
-        in valid_mlb_game_ids
     ]
 
     try:
@@ -2626,9 +1984,6 @@ def save_focus():
             ),
             "cfb_game_ids": (
                 selected_cfb_ids
-            ),
-            "mlb_game_ids": (
-                selected_mlb_ids
             ),
             "rotation_seconds": (
                 rotation_seconds
@@ -3287,7 +2642,7 @@ def alerts_page():
             <form method="POST">
                 <div class="card">
                     <div class="card-title">
-                        League
+                        Alerts
                     </div>
 
                     <div
@@ -3295,6 +2650,17 @@ def alerts_page():
                             margin-bottom: 16px;
                         "
                     >
+                        <label
+                            for="alert_league"
+                            style="
+                                display: block;
+                                margin-bottom: 7px;
+                                font-weight: 700;
+                            "
+                        >
+                            League
+                        </label>
+
                         <select
                             class="select-input"
                             id="alert_league"
@@ -4019,7 +3385,7 @@ def players_page():
             <form method="POST">
                 <div class="card">
                     <div class="card-title">
-                        Watch
+                        Player Alerts
                     </div>
 
                     <label class="alert-master-row">
@@ -5208,24 +4574,130 @@ def settings_page():
     software_version = get_scorecast_version()
     settings = get_settings()
 
+    cfb_settings = settings.get("cfb", {})
+    soccer_settings = settings.get("soccer", {})
+
+    selected_cfb_conferences = {
+        str(group_id)
+        for group_id in cfb_settings.get(
+            "selected_conferences",
+            ["80"],
+        )
+    }
+
+    selected_soccer_leagues = {
+        str(league_id)
+        for league_id in soccer_settings.get(
+            "selected_leagues",
+            DEFAULT_SOCCER_LEAGUES,
+        )
+    }
+
+    stocks_settings = settings.get("stocks", {})
+    selected_stock_symbols = parse_symbol_list(
+        stocks_settings.get(
+            "symbols",
+            DEFAULT_STOCK_SYMBOLS,
+        )
+    )
+    stock_names = stocks_settings.get("names", {})
+
+    if not isinstance(stock_names, dict):
+        stock_names = {}
+
+    popular_names = dict(POPULAR_SYMBOLS)
+    stock_watchlist_rows = ""
+
+    for symbol in selected_stock_symbols:
+        name = str(
+            stock_names.get(symbol)
+            or popular_names.get(symbol)
+            or ""
+        ).strip()
+        safe_symbol = escape(symbol, quote=True)
+        safe_name = escape(name, quote=True)
+        safe_name_label = escape(name) if name else "Tracked quote"
+
+        stock_watchlist_rows += f"""
+        <div class="stock-watch-row">
+            <input type="hidden" name="stock_symbols" value="{safe_symbol}">
+            <input type="hidden" name="stock_names" value="{safe_name}">
+            <div class="game-info">
+                <div class="matchup">{escape(symbol)}</div>
+                <div class="details">{safe_name_label}</div>
+            </div>
+            <button
+                type="button"
+                class="stock-remove-button"
+                aria-label="Remove {safe_symbol}"
+            >Remove</button>
+        </div>
+        """
+
+    stock_empty_display = (
+        "none" if selected_stock_symbols else "block"
+    )
+
+    soccer_league_rows = ""
+
+    for league_id, league_name in SOCCER_LEAGUE_OPTIONS:
+        checked = (
+            "checked"
+            if league_id in selected_soccer_leagues
+            else ""
+        )
+
+        soccer_league_rows += f"""
+        <label class="game-row">
+            <input
+                type="checkbox"
+                name="soccer_leagues"
+                value="{escape(league_id, quote=True)}"
+                {checked}
+            >
+
+            <div class="game-info">
+                <div class="matchup">{escape(league_name)}</div>
+                <div class="details">
+                    Show today's games from this league
+                </div>
+            </div>
+        </label>
+        """
+
+    cfb_conference_rows = ""
+
+    for group_id, conference_name in CFB_CONFERENCE_OPTIONS:
+        checked = (
+            "checked"
+            if group_id in selected_cfb_conferences
+            else ""
+        )
+
+        cfb_conference_rows += f"""
+        <label class="game-row">
+            <input
+                type="checkbox"
+                name="cfb_conferences"
+                value="{group_id}"
+                data-cfb-conference="{group_id}"
+                onchange="handleCfbConferenceChange(this)"
+                {checked}
+            >
+
+            <div class="game-info">
+                <div class="matchup">{escape(conference_name)}</div>
+                <div class="details">
+                    {"Show every FBS game" if group_id == "80" else "Show games involving this conference"}
+                </div>
+            </div>
+        </label>
+        """
+
     scroll_speed = settings.get("scroll_speed", 0.4)
     brightness = settings.get("brightness", 50)
     refresh_interval = settings.get("refresh_interval", 120)
     fps = settings.get("fps", 60)
-
-    user = current_user()
-    is_root = bool(user and user["role"] == "root")
-    saved_message = ""
-    if request.args.get("saved") == "1":
-        saved_message = '<div class="hint" style="margin-bottom:12px;">Profile created.</div>'
-    elif request.args.get("deleted") == "1":
-        saved_message = '<div class="hint" style="margin-bottom:12px;">Profile deleted.</div>'
-    error = request.args.get("error", "")
-    profiles_html = (
-        _profiles_cards_html(saved_message, error)
-        if is_root
-        else ""
-    )
 
     return f"""
 <!DOCTYPE html>
@@ -5263,8 +4735,8 @@ def settings_page():
                     </div>
                 </div>
 
-                <div class="control">
-                    <div class="control-top">
+                <div class="setting-group">
+                    <div class="setting-header">
                         <label for="fps">Frames Per Second</label>
 
                         <input
@@ -5330,113 +4802,192 @@ def settings_page():
             </div>
 
             <div class="card">
-                <div class="card-title">Software</div>
+                <div class="card-title">College Football Conferences</div>
 
-                <div class="settings-row">
-                    <div class="settings-row-copy">
-                        <div class="settings-row-title">Version</div>
+                <div class="hint" style="margin-bottom: 12px;">
+                    Choose All FBS or select one or more individual conferences.
+                    Games involving a selected conference will appear on the Games page.
+                </div>
+
+                {cfb_conference_rows}
+            </div>
+
+            <div class="card">
+                <div class="card-title">Soccer Leagues</div>
+
+                <div class="hint" style="margin-bottom: 12px;">
+                    Choose the soccer competitions to load.
+                    Premier League, Champions League, and MLS
+                    are on by default.
+                </div>
+
+                {soccer_league_rows}
+            </div>
+
+            <div class="card">
+                <div class="card-title">Stock Ticker</div>
+
+                <div class="hint" style="margin-bottom: 12px;">
+                    Search for a company or ticker, then tap
+                    it to add it to the board. You can track
+                    up to {MAX_SYMBOLS}.
+                </div>
+
+                <div class="stock-search">
+                    <input
+                        class="search-input"
+                        type="search"
+                        id="stock_search"
+                        placeholder="Search Apple, NVDA, Bitcoin…"
+                        autocomplete="off"
+                        enterkeyhint="search"
+                    >
+                    <div
+                        id="stock_search_results"
+                        class="stock-search-results"
+                        hidden
+                    ></div>
+                </div>
+
+                <div
+                    id="stock_watchlist_empty"
+                    class="empty"
+                    style="display:{stock_empty_display};"
+                >
+                    No stocks yet. Search to add one.
+                </div>
+
+                <div id="stock_watchlist">
+                    {stock_watchlist_rows}
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    Software Update
+                </div>
+
+                <div class="settings-version">
+                    <div class="settings-version-label">
+                        Software Version
                     </div>
-                    <div class="settings-row-value">
-                        v{escape(software_version)}
+
+                    <div class="settings-version-value">
+                        ScoreCast v{escape(software_version)}
                     </div>
                 </div>
 
-                <div class="settings-row settings-row-stack">
-                    <div class="settings-row-copy">
-                        <div class="settings-row-title">Updates</div>
-                        <div class="hint">
-                            Latest stable release from GitHub.
-                        </div>
+                <div class="hint">
+                    Install the latest stable ScoreCast
+                    release from GitHub.
+                </div>
+
+                <div
+                    id="update_status_box"
+                    style="
+                        margin-top: 14px;
+                        padding: 12px;
+                        border-radius: 8px;
+                        background: rgba(255, 255, 255, 0.05);
+                    "
+                >
+                    <div
+                        id="update_status_message"
+                        style="font-weight: 600;"
+                    >
+                        Loading update status...
                     </div>
 
                     <div
-                        id="update_status_box"
-                        class="update-status-box"
+                        id="update_status_details"
+                        class="hint"
+                        style="margin-top: 5px;"
+                    ></div>
+                </div>
+
+                <div
+                    id="update_progress_container"
+                    class="update-progress"
+                    style="display:none;"
+                >
+                    <div class="update-progress-heading">
+                        <span id="update_progress_step">
+                            Preparing update
+                        </span>
+
+                        <strong id="update_progress_percent">
+                            0%
+                        </strong>
+                    </div>
+
+                    <div
+                        id="update_progress_track"
+                        class="update-progress-track"
+                        role="progressbar"
+                        aria-label="Update progress"
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                        aria-valuenow="0"
                     >
-                        <div id="update_status_message">
-                            Loading update status...
-                        </div>
                         <div
-                            id="update_status_details"
-                            class="hint"
+                            id="update_progress_bar"
+                            class="update-progress-fill"
                         ></div>
                     </div>
 
                     <div
-                        id="update_progress_container"
-                        class="update-progress"
-                        style="display:none;"
+                        id="update_progress_note"
+                        class="update-progress-note"
                     >
-                        <div class="update-progress-heading">
-                            <span id="update_progress_step">
-                                Preparing update
-                            </span>
-                            <strong id="update_progress_percent">
-                                0%
-                            </strong>
-                        </div>
-                        <div
-                            id="update_progress_track"
-                            class="update-progress-track"
-                            role="progressbar"
-                            aria-label="Update progress"
-                            aria-valuemin="0"
-                            aria-valuemax="100"
-                            aria-valuenow="0"
-                        >
-                            <div
-                                id="update_progress_bar"
-                                class="update-progress-fill"
-                            ></div>
-                        </div>
-                        <div
-                            id="update_progress_note"
-                            class="update-progress-note"
-                        >
-                            Progress is based on completed
-                            installation steps.
-                        </div>
+                        Progress is based on completed
+                        installation steps.
                     </div>
-
-                    <button
-                        type="button"
-                        id="update_button"
-                        class="ghost-button"
-                        onclick="startScoreCastUpdate()"
-                    >
-                        Check for update
-                    </button>
                 </div>
 
-                <div class="settings-row">
-                    <div class="settings-row-copy">
-                        <div class="settings-row-title">Restart</div>
-                        <div class="hint">
-                            Restarts the app, not the Pi.
-                            The board reconnects in a few seconds.
-                        </div>
-                        <div
-                            id="system_restart_status"
-                            class="hint"
-                        ></div>
-                    </div>
-                    <button
-                        type="button"
-                        id="system_restart_button"
-                        class="quiet-button"
-                        onclick="restartScoreCast()"
-                    >
-                        Restart
-                    </button>
+                <button
+                    type="button"
+                    id="update_button"
+                    class="save-button"
+                    style="margin-top: 14px;"
+                    onclick="startScoreCastUpdate()"
+                >
+                    Check and Install Update
+                </button>
+            </div>
+
+
+            <div class="card">
+                <div class="card-title">
+                    System
                 </div>
+
+                <div class="hint">
+                    Restart the ScoreCast application without rebooting
+                    the Raspberry Pi. The display and dashboard will
+                    briefly disconnect.
+                </div>
+
+                <div
+                    id="system_restart_status"
+                    class="hint"
+                    style="margin-top: 12px;"
+                ></div>
+
+                <button
+                    type="button"
+                    id="system_restart_button"
+                    class="save-button"
+                    style="margin-top: 14px;"
+                    onclick="restartScoreCast()"
+                >
+                    Restart ScoreCast
+                </button>
             </div>
 
             <button class="save-button" type="submit">
                 Save Settings
             </button>
         </form>
-
-        {profiles_html}
     </div>
 
     <script>
@@ -5589,7 +5140,7 @@ def settings_page():
 
             button.textContent = active
                 ? "Updating…"
-                : "Check for update";
+                : "Check and Install Update";
 
             container.style.display = (
                 active
@@ -5846,7 +5397,7 @@ def settings_page():
                 if (button) {{
                     button.disabled = false;
                     button.textContent = (
-                        "Check for update"
+                        "Check and Install Update"
                     );
                 }}
             }}
@@ -5944,7 +5495,7 @@ def settings_page():
 
                 if (button) {{
                     button.disabled = false;
-                    button.textContent = "Restart";
+                    button.textContent = "Restart ScoreCast";
                 }}
             }}
         }}
@@ -5953,26 +5504,290 @@ def settings_page():
             const number = document.getElementById(numberId);
             const slider = document.getElementById(sliderId);
 
-            if (!number || !slider) {{
-                return;
-            }}
-
             number.addEventListener("input", function() {{
                 slider.value = number.value;
             }});
+        }}
+
+        function setupStockSearch() {{
+            const search = document.getElementById("stock_search");
+            const results = document.getElementById("stock_search_results");
+            const list = document.getElementById("stock_watchlist");
+            const empty = document.getElementById("stock_watchlist_empty");
+            const maxSymbols = {MAX_SYMBOLS};
+
+            if (!search || !results || !list) {{
+                return;
+            }}
+
+            let timer = null;
+            let requestId = 0;
+
+            function selectedSymbols() {{
+                return Array.from(
+                    list.querySelectorAll('input[name="stock_symbols"]')
+                ).map(function(input) {{
+                    return input.value;
+                }});
+            }}
+
+            function refreshEmpty() {{
+                if (!empty) {{
+                    return;
+                }}
+
+                empty.style.display = selectedSymbols().length
+                    ? "none"
+                    : "block";
+            }}
+
+            function hideResults() {{
+                results.hidden = true;
+                results.innerHTML = "";
+            }}
+
+            function addStock(symbol, name) {{
+                symbol = String(symbol || "").toUpperCase();
+                name = String(name || "").trim();
+
+                if (!symbol) {{
+                    return;
+                }}
+
+                if (selectedSymbols().indexOf(symbol) !== -1) {{
+                    search.value = "";
+                    hideResults();
+                    return;
+                }}
+
+                if (selectedSymbols().length >= maxSymbols) {{
+                    results.innerHTML = (
+                        '<div class="stock-search-empty">'
+                        + "You can track "
+                        + maxSymbols
+                        + " stocks.</div>"
+                    );
+                    results.hidden = false;
+                    return;
+                }}
+
+                const row = document.createElement("div");
+                row.className = "stock-watch-row";
+
+                const symbolInput = document.createElement("input");
+                symbolInput.type = "hidden";
+                symbolInput.name = "stock_symbols";
+                symbolInput.value = symbol;
+
+                const nameInput = document.createElement("input");
+                nameInput.type = "hidden";
+                nameInput.name = "stock_names";
+                nameInput.value = name;
+
+                const info = document.createElement("div");
+                info.className = "game-info";
+
+                const matchup = document.createElement("div");
+                matchup.className = "matchup";
+                matchup.textContent = symbol;
+
+                const details = document.createElement("div");
+                details.className = "details";
+                details.textContent = name || "Tracked quote";
+
+                info.appendChild(matchup);
+                info.appendChild(details);
+
+                const remove = document.createElement("button");
+                remove.type = "button";
+                remove.className = "stock-remove-button";
+                remove.textContent = "Remove";
+                remove.setAttribute(
+                    "aria-label",
+                    "Remove " + symbol
+                );
+
+                row.appendChild(symbolInput);
+                row.appendChild(nameInput);
+                row.appendChild(info);
+                row.appendChild(remove);
+                list.appendChild(row);
+
+                search.value = "";
+                hideResults();
+                refreshEmpty();
+            }}
+
+            function renderResults(items) {{
+                results.innerHTML = "";
+
+                if (!items.length) {{
+                    results.innerHTML = (
+                        '<div class="stock-search-empty">'
+                        + "No matching stocks.</div>"
+                    );
+                    results.hidden = false;
+                    return;
+                }}
+
+                items.forEach(function(item) {{
+                    const button = document.createElement("button");
+                    button.type = "button";
+                    button.className = "stock-search-result";
+
+                    const symbol = document.createElement("div");
+                    symbol.className = "matchup";
+                    symbol.textContent = item.symbol;
+
+                    const meta = document.createElement("div");
+                    meta.className = "details";
+                    meta.textContent = [
+                        item.name,
+                        item.exchange
+                    ].filter(Boolean).join(" · ");
+
+                    button.appendChild(symbol);
+                    button.appendChild(meta);
+                    button.addEventListener("click", function() {{
+                        addStock(item.symbol, item.name);
+                    }});
+                    results.appendChild(button);
+                }});
+
+                results.hidden = false;
+            }}
+
+            async function lookup(query) {{
+                const currentId = ++requestId;
+
+                try {{
+                    const response = await fetch(
+                        "/api/stocks/search?q="
+                        + encodeURIComponent(query),
+                        {{
+                            method: "GET",
+                            cache: "no-store"
+                        }}
+                    );
+
+                    if (!response.ok) {{
+                        throw new Error("search failed");
+                    }}
+
+                    const payload = await response.json();
+
+                    if (currentId !== requestId) {{
+                        return;
+                    }}
+
+                    renderResults(payload.results || []);
+                }} catch (error) {{
+                    if (currentId !== requestId) {{
+                        return;
+                    }}
+
+                    results.innerHTML = (
+                        '<div class="stock-search-empty">'
+                        + "Unable to search right now.</div>"
+                    );
+                    results.hidden = false;
+                }}
+            }}
+
+            search.addEventListener("input", function() {{
+                const query = search.value.trim();
+                window.clearTimeout(timer);
+
+                if (query.length < 1) {{
+                    hideResults();
+                    return;
+                }}
+
+                timer = window.setTimeout(function() {{
+                    lookup(query);
+                }}, 250);
+            }});
+
+            search.addEventListener("keydown", function(event) {{
+                if (event.key === "Enter") {{
+                    event.preventDefault();
+                    const first = results.querySelector(
+                        ".stock-search-result"
+                    );
+                    if (first) {{
+                        first.click();
+                    }}
+                }}
+            }});
+
+            list.addEventListener("click", function(event) {{
+                const button = event.target.closest(
+                    ".stock-remove-button"
+                );
+
+                if (!button) {{
+                    return;
+                }}
+
+                const row = button.closest(".stock-watch-row");
+
+                if (row) {{
+                    row.remove();
+                    refreshEmpty();
+                }}
+            }});
+
+            document.addEventListener("click", function(event) {{
+                if (!event.target.closest(".stock-search")) {{
+                    hideResults();
+                }}
+            }});
+        }}
+
+        setupStockSearch();
+
+        function handleCfbConferenceChange(changedCheckbox) {{
+            const allFbs = document.querySelector(
+                'input[name="cfb_conferences"][value="80"]'
+            );
+
+            const individualConferences = Array.from(
+                document.querySelectorAll(
+                    'input[name="cfb_conferences"]:not([value="80"])'
+                )
+            );
+
+            if (changedCheckbox.value === "80" && changedCheckbox.checked) {{
+                individualConferences.forEach(function(checkbox) {{
+                    checkbox.checked = false;
+                }});
+
+                return;
+            }}
+
+            if (
+                changedCheckbox.value !== "80"
+                && changedCheckbox.checked
+                && allFbs
+            ) {{
+                allFbs.checked = false;
+            }}
+
+            const anySelected = Array.from(
+                document.querySelectorAll(
+                    'input[name="cfb_conferences"]:checked'
+                )
+            ).length > 0;
+
+            if (!anySelected && allFbs) {{
+                allFbs.checked = true;
+            }}
         }}
 
         bindNumberToSlider("scroll_speed_number", "scroll_speed");
         bindNumberToSlider("brightness_number", "brightness");
         bindNumberToSlider("refresh_interval_number", "refresh_interval");
         bindNumberToSlider("fps_number", "fps");
-
-        if (location.hash === "#profiles") {{
-            const profiles = document.getElementById("profiles");
-            if (profiles) {{
-                profiles.scrollIntoView();
-            }}
-        }}
 
         loadUpdateStatus();
         updateStatusTimer = setInterval(loadUpdateStatus, 2000);
@@ -6302,100 +6117,85 @@ def save_favorites():
 @app.route("/save_games", methods=["POST"])
 @login_required
 def save_games():
-    settings = get_settings()
+    visible_games = request.form.getlist("game")
+
     all_game_ids = [
         get_game_id(game)
         for game in latest_games
     ]
-    sport_ids = [
-        game_id
-        for game_id in all_game_ids
-        if not _is_stock_id(game_id)
-    ]
 
-    visible_games = [
-        game_id
-        for game_id in request.form.getlist("game")
-        if not _is_stock_id(game_id)
-    ]
+    settings = get_settings()
 
     favorite_game_ids = {
         get_game_id(game)
         for game in latest_games
-        if (
-            not _is_stock_id(get_game_id(game))
-            and is_favorite_game(game, settings)
-        )
+        if is_favorite_game(game, settings)
     }
 
     visible_games = list(dict.fromkeys(
         visible_games
         + [
             game_id
-            for game_id in sport_ids
+            for game_id in all_game_ids
             if game_id in favorite_game_ids
         ]
     ))
 
-    hidden_sports = [
+    hidden_games = [
         game_id
-        for game_id in sport_ids
+        for game_id in all_game_ids
         if game_id not in visible_games
     ]
 
-    previous_hidden = settings.get("hidden_games", [])
-    previous_order = settings.get("game_order", [])
-    stock_hidden = [
-        game_id
-        for game_id in previous_hidden
-        if _is_stock_id(game_id)
-    ]
-    stock_order = [
-        game_id
-        for game_id in previous_order
-        if _is_stock_id(game_id)
-    ]
-    for game_id in all_game_ids:
-        if _is_stock_id(game_id) and game_id not in stock_order:
-            stock_order.append(game_id)
-
     update_settings({
-        "hidden_games": hidden_sports + stock_hidden,
-        "game_order": visible_games + hidden_sports + stock_order,
+        "hidden_games": hidden_games,
+        "game_order": visible_games + hidden_games
     })
 
     return redirect("/games")
 
 
-@app.route("/save_cfb_conferences", methods=["POST"])
+@app.route("/save_settings", methods=["POST"])
 @login_required
-def save_cfb_conferences():
-    update_settings({
-        "cfb": {
-            "selected_conferences": _normalized_cfb_conferences(
-                request.form.getlist("cfb_conferences")
-            ),
-        },
-    })
-    return redirect("/games?league=cfb")
+def save_settings():
+    selected_cfb_conferences = request.form.getlist(
+        "cfb_conferences"
+    )
 
+    valid_conference_ids = {
+        group_id
+        for group_id, _ in CFB_CONFERENCE_OPTIONS
+    }
 
-@app.route("/save_soccer_leagues", methods=["POST"])
-@login_required
-def save_soccer_leagues():
-    update_settings({
-        "soccer": {
-            "selected_leagues": _normalized_soccer_leagues(
-                request.form.getlist("soccer_leagues")
-            ),
-        },
-    })
-    return redirect("/games?league=soccer")
+    selected_cfb_conferences = [
+        group_id
+        for group_id in selected_cfb_conferences
+        if group_id in valid_conference_ids
+    ]
 
+    if not selected_cfb_conferences:
+        selected_cfb_conferences = ["80"]
 
-@app.route("/save_stocks", methods=["POST"])
-@login_required
-def save_stocks():
+    if "80" in selected_cfb_conferences:
+        selected_cfb_conferences = ["80"]
+
+    selected_soccer_leagues = request.form.getlist(
+        "soccer_leagues"
+    )
+
+    valid_soccer_ids = set(SOCCER_LEAGUES)
+
+    selected_soccer_leagues = [
+        league_id
+        for league_id in selected_soccer_leagues
+        if league_id in valid_soccer_ids
+    ]
+
+    if not selected_soccer_leagues:
+        selected_soccer_leagues = list(
+            DEFAULT_SOCCER_LEAGUES
+        )
+
     selected_stock_symbols = parse_symbol_list(
         request.form.getlist("stock_symbols")
     )
@@ -6407,51 +6207,10 @@ def save_stocks():
             break
 
         name = str(stock_name_values[index] or "").strip()
+
         if name:
             stock_names[symbol] = name[:80]
 
-    shown = {
-        str(symbol).strip().upper()
-        for symbol in request.form.getlist("stock_shown")
-        if str(symbol).strip()
-    }
-
-    settings = get_settings()
-    previous_hidden = settings.get("hidden_games", [])
-    previous_order = settings.get("game_order", [])
-    kept_hidden = [
-        game_id
-        for game_id in previous_hidden
-        if not _is_stock_id(game_id)
-    ]
-    kept_order = [
-        game_id
-        for game_id in previous_order
-        if not _is_stock_id(game_id)
-    ]
-
-    stock_ids = [f"stocks:{symbol}" for symbol in selected_stock_symbols]
-    stock_hidden = [
-        f"stocks:{symbol}"
-        for symbol in selected_stock_symbols
-        if symbol not in shown
-    ]
-
-    update_settings({
-        "stocks": {
-            "symbols": selected_stock_symbols,
-            "names": stock_names,
-        },
-        "hidden_games": kept_hidden + stock_hidden,
-        "game_order": kept_order + stock_ids,
-    })
-
-    return redirect("/stocks?saved=1")
-
-
-@app.route("/save_settings", methods=["POST"])
-@login_required
-def save_settings():
     update_settings({
         "scroll_speed": float(
             request.form["scroll_speed"]
@@ -6465,6 +6224,20 @@ def save_settings():
         "fps": int(
             request.form["fps"]
         ),
+        "cfb": {
+            "selected_conferences": (
+                selected_cfb_conferences
+            ),
+        },
+        "soccer": {
+            "selected_leagues": (
+                selected_soccer_leagues
+            ),
+        },
+        "stocks": {
+            "symbols": selected_stock_symbols,
+            "names": stock_names,
+        },
     })
 
     return redirect("/settings")
@@ -6570,20 +6343,3 @@ def api_start_update():
             "ScoreCast update started."
         ),
     })
-
-
-from bets.web import register_bet_routes
-from bets.store import init_store as init_bet_store
-
-try:
-    init_bet_store()
-except Exception as error:
-    print("Bet store init deferred:", error)
-
-register_bet_routes(
-    app,
-    login_required=login_required,
-    current_user=current_user,
-    page_header=page_header,
-    page_styles=page_styles,
-)

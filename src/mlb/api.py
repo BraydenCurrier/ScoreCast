@@ -1,15 +1,29 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+import unicodedata
 
 from common.timezone import get_local_timezone
 
 import requests
 
-from mlb.models import BaseballGame, MlbScoringPlay
+from mlb.models import BaseballGame, MlbPitch, MlbScoringPlay
 
 MLB_SCHEDULE_URL = "https://statsapi.mlb.com/api/v1/schedule"
+MLB_LIVE_FEED_URL = "https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 HTTP_TIMEOUT = (3.05, 10)
+LIVE_FEED_TIMEOUT = (2.05, 6)
+
+LIVE_FEED_FIELDS = (
+    "liveData,plays,currentPlay,matchup,batter,pitcher,fullName,"
+    "lastName,boxscoreName,id,"
+    "playEvents,details,isPitch,call,description,code,"
+    "pitchData,coordinates,pX,pZ,strikeZoneTop,strikeZoneBottom,startSpeed,"
+    "type,"
+    "boxscore,teams,home,away,players,stats,pitching,batting,"
+    "seasonStats,numberOfPitches,pitchesThrown,atBats,hits,avg"
+)
 
 _session = requests.Session()
 _session.headers.update({
@@ -53,15 +67,68 @@ def get_record(team_data):
     }
 
 
-def _batter_last_name(play):
-    matchup = play.get("matchup") or {}
-    batter = matchup.get("batter") or {}
-    full_name = str(batter.get("fullName") or "").strip()
+_NAME_SUFFIXES = {
+    "JR": "JR",
+    "JR.": "JR",
+    "JUNIOR": "JR",
+    "SR": "SR",
+    "SR.": "SR",
+    "SENIOR": "SR",
+    "II": "II",
+    "III": "III",
+    "IV": "IV",
+    "V": "V",
+}
 
-    if not full_name:
+
+def _last_name_from_full(full_name):
+    parts = [
+        part
+        for part in str(full_name or "").replace(",", " ").split()
+        if part
+    ]
+    if not parts:
         return ""
 
-    return full_name.split()[-1]
+    suffix_key = parts[-1].upper()
+    suffix = _NAME_SUFFIXES.get(suffix_key)
+    if suffix and len(parts) >= 2:
+        last = parts[-2]
+        return f"{last} {suffix}"
+
+    return parts[-1]
+
+
+def _person_last_name(person):
+    if not isinstance(person, dict):
+        return ""
+
+    last_name = str(person.get("lastName") or "").strip()
+    full_name = str(
+        person.get("fullName")
+        or person.get("boxscoreName")
+        or ""
+    ).strip()
+
+    display = ""
+    if last_name:
+        display = _last_name_from_full(last_name)
+        if display.replace(".", "").upper() in _NAME_SUFFIXES:
+            display = ""
+
+    if not display:
+        display = _last_name_from_full(full_name)
+
+    folded = unicodedata.normalize("NFKD", str(display))
+    ascii_name = "".join(
+        char for char in folded if not unicodedata.combining(char)
+    )
+    return ascii_name.replace(".", "").upper()
+
+
+def _batter_last_name(play):
+    matchup = play.get("matchup") or {}
+    return _person_last_name(matchup.get("batter"))
 
 
 def _parse_scoring_plays(game, away, home):
@@ -104,6 +171,241 @@ def _parse_scoring_plays(game, away, home):
     return tuple(plays)
 
 
+def _pitch_result(event):
+    details = event.get("details") or {}
+    call = details.get("call") or {}
+    if not isinstance(call, dict):
+        call = {}
+
+    code = str(
+        call.get("code")
+        or details.get("code")
+        or ""
+    ).upper()
+    description = str(details.get("description") or "").lower()
+
+    if code == "B" or (
+        "ball" in description
+        and "in play" not in description
+        and "foul" not in description
+    ):
+        return "ball"
+
+    if code in {"F", "L"} or "foul" in description:
+        return "foul"
+
+    if (
+        code in {"X", "E", "D", "H"}
+        or description.startswith("in play")
+    ):
+        return "in_play"
+
+    return "strike"
+
+
+def _boxscore_player(payload, person_id):
+    if not person_id:
+        return {}
+
+    key = f"ID{person_id}"
+    teams = (
+        ((payload.get("liveData") or {}).get("boxscore") or {})
+        .get("teams")
+        or {}
+    )
+
+    for side in ("home", "away"):
+        players = (teams.get(side) or {}).get("players") or {}
+        person = players.get(key)
+        if isinstance(person, dict):
+            return person
+
+    return {}
+
+
+def _pitcher_pitch_count(payload, pitcher_id):
+    pitching = (
+        (_boxscore_player(payload, pitcher_id).get("stats") or {})
+        .get("pitching")
+        or {}
+    )
+    for field in ("numberOfPitches", "pitchesThrown"):
+        try:
+            value = int(pitching.get(field) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            return value
+    return 0
+
+
+def _batter_stat_line(payload, batter_id):
+    player = _boxscore_player(payload, batter_id)
+    game_batting = (player.get("stats") or {}).get("batting") or {}
+    season_batting = (player.get("seasonStats") or {}).get("batting") or {}
+
+    try:
+        at_bats = int(game_batting.get("atBats") or 0)
+    except (TypeError, ValueError):
+        at_bats = 0
+    try:
+        hits = int(game_batting.get("hits") or 0)
+    except (TypeError, ValueError):
+        hits = 0
+
+    if at_bats > 0:
+        return f"{hits}-{at_bats}"
+
+    avg = str(
+        season_batting.get("avg")
+        or game_batting.get("avg")
+        or ""
+    ).strip()
+    if avg.startswith("0.") and len(avg) > 2:
+        avg = avg[1:]
+    return avg
+
+
+def _parse_current_at_bat(payload):
+    current_play = (
+        ((payload.get("liveData") or {}).get("plays") or {})
+        .get("currentPlay")
+        or {}
+    )
+    matchup = current_play.get("matchup") or {}
+    batter_person = matchup.get("batter") if isinstance(matchup.get("batter"), dict) else {}
+    pitcher_person = matchup.get("pitcher") if isinstance(matchup.get("pitcher"), dict) else {}
+    batter = _person_last_name(batter_person)
+    pitcher = _person_last_name(pitcher_person)
+    pitcher_pitches = _pitcher_pitch_count(payload, pitcher_person.get("id"))
+    batter_stat = _batter_stat_line(payload, batter_person.get("id"))
+    pitches = []
+    zone_top = 3.5
+    zone_bottom = 1.5
+
+    for event in current_play.get("playEvents") or []:
+        if not isinstance(event, dict):
+            continue
+        if not event.get("isPitch"):
+            continue
+
+        pitch_data = event.get("pitchData") or {}
+        coordinates = pitch_data.get("coordinates") or {}
+        px = coordinates.get("pX")
+        pz = coordinates.get("pZ")
+
+        if px is None or pz is None:
+            continue
+
+        top = float(pitch_data.get("strikeZoneTop") or zone_top)
+        bottom = float(pitch_data.get("strikeZoneBottom") or zone_bottom)
+        zone_top = top
+        zone_bottom = bottom
+
+        try:
+            speed = float(pitch_data.get("startSpeed") or 0)
+        except (TypeError, ValueError):
+            speed = 0.0
+        type_info = (event.get("details") or {}).get("type") or {}
+        if not isinstance(type_info, dict):
+            type_info = {}
+        pitch_type = str(type_info.get("code") or "").upper()
+        pitch_name = str(type_info.get("description") or "").strip()
+
+        pitches.append(
+            MlbPitch(
+                px=float(px),
+                pz=float(pz),
+                result=_pitch_result(event),
+                strike_zone_top=top,
+                strike_zone_bottom=bottom,
+                speed=speed,
+                pitch_type=pitch_type,
+                pitch_name=pitch_name,
+            )
+        )
+
+    return {
+        "batter": batter,
+        "pitcher": pitcher,
+        "pitcher_pitches": pitcher_pitches,
+        "batter_stat": batter_stat,
+        "pitches": tuple(pitches),
+        "strike_zone_top": zone_top,
+        "strike_zone_bottom": zone_bottom,
+    }
+
+
+def fetch_current_at_bat(game_pk):
+    pk = str(game_pk or "").strip()
+    if not pk:
+        return {}
+
+    try:
+        response = _session.get(
+            MLB_LIVE_FEED_URL.format(game_pk=pk),
+            params={"fields": LIVE_FEED_FIELDS},
+            timeout=LIVE_FEED_TIMEOUT,
+            verify=CA_BUNDLE,
+        )
+        response.raise_for_status()
+        return _parse_current_at_bat(response.json())
+    except (OSError, ValueError, requests.RequestException):
+        return {}
+
+
+def _enrich_live_at_bats(games):
+    live_games = [
+        game
+        for game in games
+        if str(game.status).lower() == "live"
+        and game.game_pk
+    ]
+
+    if not live_games:
+        return games
+
+    updates = {}
+    workers = min(6, len(live_games))
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(fetch_current_at_bat, game.game_pk): game.game_pk
+            for game in live_games
+        }
+
+        for future in as_completed(futures):
+            game_pk = futures[future]
+            try:
+                payload = future.result()
+            except Exception:
+                payload = {}
+
+            if payload:
+                updates[game_pk] = payload
+
+    for game in games:
+        payload = updates.get(game.game_pk)
+        if not payload:
+            continue
+
+        if payload.get("batter"):
+            game.batter = payload["batter"]
+        if payload.get("pitcher"):
+            game.pitcher = payload["pitcher"]
+        game.pitcher_pitches = int(payload.get("pitcher_pitches") or 0)
+        game.batter_stat = str(payload.get("batter_stat") or "")
+        game.pitches = payload.get("pitches") or ()
+        game.strike_zone_top = float(
+            payload.get("strike_zone_top") or game.strike_zone_top
+        )
+        game.strike_zone_bottom = float(
+            payload.get("strike_zone_bottom") or game.strike_zone_bottom
+        )
+
+    return games
+
+
 def _parse_game(game, include_scoring_plays=False):
     linescore = game.get("linescore", {})
 
@@ -118,6 +420,8 @@ def _parse_game(game, include_scoring_plays=False):
     away = get_team_abbr(away_team)
     home = get_team_abbr(home_team)
     scoring_plays = ()
+    offense = linescore.get("offense") or {}
+    defense = linescore.get("defense") or {}
 
     if include_scoring_plays:
         scoring_plays = _parse_scoring_plays(
@@ -145,6 +449,10 @@ def _parse_game(game, include_scoring_plays=False):
         outs=linescore.get("outs", 0) or 0,
         game_pk=str(game.get("gamePk") or ""),
         scoring_plays=scoring_plays,
+        balls=int(linescore.get("balls", 0) or 0),
+        strikes=int(linescore.get("strikes", 0) or 0),
+        batter=_person_last_name(offense.get("batter")),
+        pitcher=_person_last_name(defense.get("pitcher")),
     )
 
 
@@ -196,7 +504,7 @@ def get_today_games():
         "probablePitcher,linescore,team"
     )
 
-    return _parse_schedule(data)
+    return _enrich_live_at_bats(_parse_schedule(data))
 
 
 def get_alert_games():

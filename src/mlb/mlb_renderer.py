@@ -7,9 +7,14 @@ CARD_WIDTH = 64
 GAME_GAP = 5
 GAME_WIDTH = LOGO_SIZE + CARD_WIDTH + LOGO_SIZE
 
-def draw_base_diamond(draw, cx, cy, occupied):
+def draw_base_diamond(draw, cx, cy, occupied, size=5):
     color = WHITE if occupied else GREY
-    points = [(cx, cy - 5), (cx + 5, cy), (cx, cy + 5), (cx - 5, cy)]
+    points = [
+        (cx, cy - size),
+        (cx + size, cy),
+        (cx, cy + size),
+        (cx - size, cy),
+    ]
 
     if occupied:
         draw.polygon(points, fill=color)

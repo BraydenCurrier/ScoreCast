@@ -127,7 +127,13 @@ DEFAULT_SETTINGS = {
         "enabled": False,
         "nfl_game_ids": [],
         "cfb_game_ids": [],
+        "mlb_game_ids": [],
         "rotation_seconds": 30,
+    },
+
+    "bets": {
+        "ticker_enabled": True,
+        "notifications_enabled": True,
     },
 
 }

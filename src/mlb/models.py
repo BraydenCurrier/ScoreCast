@@ -24,6 +24,18 @@ class MlbScoringPlay:
         )
 
 
+@dataclass(frozen=True)
+class MlbPitch:
+    px: float
+    pz: float
+    result: str
+    strike_zone_top: float = 3.5
+    strike_zone_bottom: float = 1.5
+    speed: float = 0.0
+    pitch_type: str = ""
+    pitch_name: str = ""
+
+
 @dataclass
 class BaseballGame:
     away: str
@@ -49,3 +61,12 @@ class BaseballGame:
     outs: int
     game_pk: str = ""
     scoring_plays: tuple = field(default_factory=tuple)
+    balls: int = 0
+    strikes: int = 0
+    batter: str = ""
+    pitcher: str = ""
+    pitches: tuple = field(default_factory=tuple)
+    strike_zone_top: float = 3.5
+    strike_zone_bottom: float = 1.5
+    pitcher_pitches: int = 0
+    batter_stat: str = ""
