@@ -1,8 +1,17 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import json
 
 import requests
 
+from common.espn_scoreboard import (
+    competitor_stat_int,
+    possession_abbr,
+    power_play_abbr,
+    safe_int,
+    strength_label,
+    team_abbr,
+)
 from common.http import failure_text, get_body
 from common.timezone import get_local_timezone
 
@@ -12,6 +21,10 @@ from nhl.models import HockeyGame
 NHL_SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/"
     "sports/hockey/nhl/scoreboard"
+)
+NHL_SUMMARY_URL = (
+    "https://site.api.espn.com/apis/site/v2/"
+    "sports/hockey/nhl/summary"
 )
 
 
@@ -158,9 +171,139 @@ def get_period_status(status):
 
 from common.broadcast import format_broadcast as _get_broadcast
 
+
+def _toi_seconds(text):
+    parts = str(text or "").strip().split(":")
+    try:
+        numbers = [int(part) for part in parts]
+    except ValueError:
+        return 0
+    if len(numbers) == 2:
+        return numbers[0] * 60 + numbers[1]
+    if len(numbers) == 3:
+        return numbers[0] * 3600 + numbers[1] * 60 + numbers[2]
+    return 0
+
+
+def _goalie_name(athlete):
+    last = str((athlete or {}).get("lastName") or "").strip()
+    if last:
+        return last.upper()
+
+    short = str((athlete or {}).get("shortName") or "").strip()
+    parts = short.replace(".", " ").split()
+    if len(parts) >= 2 and len(parts[0]) == 1:
+        return " ".join(parts[1:]).upper()
+    return short.upper()
+
+
+def _save_pct(raw, shots_against):
+    if shots_against <= 0:
+        return ""
+    text = str(raw or "").strip()
+    if not text or text in {"-", "—"}:
+        return ""
+    if text.startswith("."):
+        return text
+    try:
+        value = float(text)
+    except ValueError:
+        return ""
+    if value > 1.5:
+        value = value / 100.0
+    rendered = f"{value:.3f}"
+    if rendered.startswith("0"):
+        return rendered[1:]
+    return rendered
+
+
+def _parse_goalies(payload):
+    found = {"away": ("", ""), "home": ("", "")}
+    if not isinstance(payload, dict):
+        return found
+
+    sides = {}
+    competitions = ((payload.get("header") or {}).get("competitions") or [])
+    if competitions:
+        for competitor in competitions[0].get("competitors") or []:
+            team = competitor.get("team") or {}
+            side = str(competitor.get("homeAway") or "").strip().lower()
+            team_id = str(team.get("id") or "")
+            if side in found and team_id:
+                sides[team_id] = side
+
+    for entry in ((payload.get("boxscore") or {}).get("players") or []):
+        if not isinstance(entry, dict):
+            continue
+        team_id = str((entry.get("team") or {}).get("id") or "")
+        side = sides.get(team_id)
+        if side not in found:
+            continue
+        for group in entry.get("statistics") or []:
+            if not isinstance(group, dict) or group.get("name") != "goalies":
+                continue
+            keys = group.get("keys") or []
+            chosen = None
+            for athlete in group.get("athletes") or []:
+                if not isinstance(athlete, dict):
+                    continue
+                stats = athlete.get("stats") or []
+                values = {
+                    keys[index]: stats[index]
+                    for index in range(min(len(keys), len(stats)))
+                }
+                if chosen is None or _toi_seconds(values.get("timeOnIce")) > 0:
+                    chosen = values | {"athlete": athlete.get("athlete") or {}}
+            if not chosen:
+                continue
+            shots = safe_int(chosen.get("shotsAgainst"), 0) or 0
+            found[side] = (
+                _goalie_name(chosen.get("athlete")),
+                _save_pct(chosen.get("savePct"), shots),
+            )
+    return found
+
+
+def _load_goalies(event_id):
+    event_id = str(event_id or "").strip()
+    if not event_id:
+        return "", "", "", ""
+    try:
+        body = get_body(
+            f"{NHL_SUMMARY_URL}?event={event_id}",
+            HTTP_TIMEOUT,
+        )
+        payload = json.loads(body)
+    except (requests.RequestException, ValueError, TypeError):
+        return "", "", "", ""
+    parsed = _parse_goalies(payload)
+    away_name, away_pct = parsed["away"]
+    home_name, home_pct = parsed["home"]
+    return away_name, away_pct, home_name, home_pct
+
+
+def _attach_goalies(pending):
+    if not pending:
+        return
+    workers = min(4, len(pending))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        loaded = pool.map(
+            lambda item: (item[0], _load_goalies(item[1])),
+            pending,
+        )
+        for game, goalies in loaded:
+            (
+                game.away_goalie,
+                game.away_save_pct,
+                game.home_goalie,
+                game.home_save_pct,
+            ) = goalies
+
+
 def get_today_games():
     data = fetch_nhl_scoreboard()
     games = []
+    pending_goalies = []
 
     for event in data.get("events", []):
         competition = event["competitions"][0]
@@ -178,8 +321,9 @@ def get_today_games():
             if competitor["homeAway"] == "home"
         )
 
-        away_team = away["team"]["abbreviation"]
-        home_team = home["team"]["abbreviation"]
+        away_team = team_abbr(away)
+        home_team = team_abbr(home)
+        situation = competition.get("situation") or {}
 
         (
             away_wins,
@@ -243,7 +387,40 @@ def get_today_games():
                 intermission=intermission,
                 overtime=overtime,
                 shootout=shootout,
+
+                away_sog=competitor_stat_int(
+                    away,
+                    "shotsOnGoal",
+                    "sog",
+                    "shots",
+                ),
+                home_sog=competitor_stat_int(
+                    home,
+                    "shotsOnGoal",
+                    "sog",
+                    "shots",
+                ),
+                possession=possession_abbr(
+                    situation,
+                    home,
+                    away,
+                ),
+                power_play=power_play_abbr(
+                    situation,
+                    home,
+                    away,
+                ),
+                strength=strength_label(situation),
+                away_so_goals=safe_int(
+                    away.get("shootoutScore"),
+                ),
+                home_so_goals=safe_int(
+                    home.get("shootoutScore"),
+                ),
             )
         )
+        if game_status != "Scheduled":
+            pending_goalies.append((games[-1], event.get("id")))
 
+    _attach_goalies(pending_goalies)
     return games

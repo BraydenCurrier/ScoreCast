@@ -5,6 +5,12 @@ import json
 import requests
 
 from cfb.models import CollegeFootballGame
+from common.football_play import (
+    box_totals_for,
+    parse_last_play,
+    play_under_review,
+    short_down_text,
+)
 from common.http import failure_text, get_body
 from common.settings import get_settings
 from common.timezone import get_local_timezone
@@ -274,6 +280,23 @@ def safe_int(value, default=0):
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _timeouts_remaining(situation, side):
+    if not isinstance(situation, dict):
+        return None
+    key = "homeTimeouts" if side == "home" else "awayTimeouts"
+    raw = situation.get(key)
+    if raw in (None, ""):
+        blob = situation.get("timeouts")
+        if isinstance(blob, dict):
+            raw = blob.get(side)
+    if raw in (None, ""):
+        return None
+    try:
+        return max(0, min(3, int(raw)))
+    except (TypeError, ValueError):
+        return None
 
 
 def _get_home_away_competitors(competition):
@@ -666,6 +689,30 @@ def get_today_games(conference_groups=None):
                     last_play.get("text", "")
                     or ""
                 ).strip(),
+
+                **parse_last_play(last_play),
+                short_down_text=short_down_text(
+                    situation
+                ),
+                play_under_review=play_under_review(
+                    situation,
+                    last_play,
+                    status_type,
+                ),
+
+                away_timeouts=_timeouts_remaining(
+                    situation,
+                    "away",
+                ),
+                home_timeouts=_timeouts_remaining(
+                    situation,
+                    "home",
+                ),
+                **box_totals_for(
+                    "cfb",
+                    event.get("id", ""),
+                    status_type.get("name", ""),
+                ),
             )
         )
 

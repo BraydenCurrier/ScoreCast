@@ -17,6 +17,7 @@ from common.logo_store import (
 WHITE = (255, 255, 255)
 YELLOW = (255, 235, 0)
 GREY = (80, 80, 80)
+RED = (220, 50, 50)
 
 LOGO_SIZE = 30
 CARD_WIDTH = 64
@@ -63,6 +64,10 @@ def period_label(game):
     if status == "PENALTIES":
         return "PK"
     if status == "FINAL":
+        if getattr(game, "penalties", False):
+            return "PK"
+        if getattr(game, "extra_time", False):
+            return "AET"
         return "FT"
     if status == "LIVE":
         if game.period <= 1:
@@ -163,6 +168,23 @@ def _draw_pregame_center_badge(image, draw, game, offset_x, settings):
             LEAGUE_Y,
             GREY,
         )
+
+
+def _draw_red_pips(draw, count, x, y, *, align="left"):
+    try:
+        count = int(count or 0)
+    except (TypeError, ValueError):
+        return
+    count = max(0, min(3, count))
+    if count <= 0:
+        return
+    size = 3
+    gap = 2
+    width = count * size + (count - 1) * gap
+    start = x - width if align == "right" else x
+    for index in range(count):
+        bx = start + index * (size + gap)
+        draw.rectangle([bx, y, bx + size - 1, y + size - 1], fill=RED)
 
 
 def _draw_scores(draw, game, offset_x):
@@ -273,8 +295,43 @@ def render_soccer_game_onto(image, draw, game, offset_x, settings):
         )
 
     _draw_scores(draw, game, offset_x)
+    _draw_red_pips(
+        draw,
+        game.away_reds,
+        NAME_LEFT_X + offset_x,
+        10,
+        align="left",
+    )
+    _draw_red_pips(
+        draw,
+        game.home_reds,
+        NAME_RIGHT_X + offset_x,
+        10,
+        align="right",
+    )
+
+    pk_away = getattr(game, "away_pk", None)
+    pk_home = getattr(game, "home_pk", None)
+    if pk_away is not None and pk_home is not None:
+        print_4x5_centered(
+            draw,
+            f"PK {pk_away}-{pk_home}",
+            PAD_CENTER_X + offset_x,
+            CLOCK_Y,
+            YELLOW,
+        )
 
     if is_final(game):
+        away_agg = getattr(game, "away_agg", None)
+        home_agg = getattr(game, "home_agg", None)
+        if away_agg is not None and home_agg is not None:
+            print_4x5_centered(
+                draw,
+                f"AGG {away_agg}-{home_agg}",
+                PAD_CENTER_X + offset_x,
+                RECORD_Y,
+                GREY,
+            )
         return
 
     if game.status.upper() == "HALFTIME":
@@ -285,6 +342,9 @@ def render_soccer_game_onto(image, draw, game, offset_x, settings):
             CLOCK_Y,
             YELLOW,
         )
+        return
+
+    if pk_away is not None and pk_home is not None:
         return
 
     if game.clock:

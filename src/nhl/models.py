@@ -29,3 +29,15 @@ class HockeyGame:
     intermission: bool = False
     shootout: bool = False
     overtime: bool = False
+
+    away_sog: int | None = None
+    home_sog: int | None = None
+    possession: str = ""
+    power_play: str = ""
+    strength: str = ""
+    away_so_goals: int | None = None
+    home_so_goals: int | None = None
+    away_goalie: str = ""
+    home_goalie: str = ""
+    away_save_pct: str = ""
+    home_save_pct: str = ""

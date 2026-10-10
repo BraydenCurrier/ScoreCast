@@ -1,8 +1,11 @@
+from PIL import Image, ImageOps
+
 from common.fonts import (
     gfx_5x7_width,
     print_4x5_centered,
     print_gfx_5x7,
 )
+from common.logo_store import load_logo
 
 WHITE = (255, 255, 255)
 YELLOW = (255, 235, 0)
@@ -17,6 +20,8 @@ GRAPH_X = 2
 GRAPH_Y = 11
 GRAPH_HEIGHT = 13
 GRAPH_RIGHT_PAD = 2
+LOGO_SIZE = 24
+LOGO_PAD = 1
 
 
 def change_color(game):
@@ -108,8 +113,8 @@ def _price_to_y(price, low, high, top, height):
     )
 
 
-def draw_day_graph(draw, game, offset_x):
-    width = CARD_WIDTH - GRAPH_X - GRAPH_RIGHT_PAD
+def draw_day_graph(draw, game, offset_x, left=GRAPH_X):
+    width = CARD_WIDTH - left - GRAPH_RIGHT_PAD
     columns = _graph_columns(game, width)
     values = [price for price in columns if price is not None]
 
@@ -136,7 +141,7 @@ def draw_day_graph(draw, game, offset_x):
             last_y = None
             continue
 
-        x = offset_x + GRAPH_X + index
+        x = offset_x + left + index
         y = _price_to_y(
             price,
             low,
@@ -171,11 +176,52 @@ def draw_day_graph(draw, game, offset_x):
                 if x % 2 == 0:
                     draw.point(
                         (
-                            offset_x + GRAPH_X + x,
+                            offset_x + left + x,
                             previous_y,
                         ),
                         fill=GREY,
                     )
+
+
+def invert_if_black_logo(logo):
+    max_channel = 0
+
+    for red, green, blue, alpha in logo.getdata():
+        if alpha < 16:
+            continue
+        if max(red, green, blue) - min(red, green, blue) > 24:
+            return logo
+        max_channel = max(max_channel, red, green, blue)
+
+    if max_channel > 40:
+        return logo
+
+    red, green, blue, alpha = logo.split()
+    inverted = ImageOps.invert(Image.merge("RGB", (red, green, blue)))
+    result = inverted.convert("RGBA")
+    result.putalpha(alpha)
+    return result
+
+
+def draw_stock_logo(image, symbol, offset_x):
+    try:
+        logo = load_logo("stocks", symbol)
+    except (FileNotFoundError, ValueError, OSError):
+        return 0
+
+    logo = invert_if_black_logo(logo)
+    width, height = logo.size
+    if width < 1 or height < 1:
+        return 0
+
+    scale = min(LOGO_SIZE / width, LOGO_SIZE / height)
+    new_w = max(1, int(round(width * scale)))
+    new_h = max(1, int(round(height * scale)))
+    resized = logo.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    x = offset_x + LOGO_PAD
+    y = (32 - new_h) // 2
+    image.paste(resized, (x, y), resized)
+    return LOGO_SIZE + LOGO_PAD + 1
 
 
 def render_game_strip_onto(image, draw, game, offset_x, settings):
@@ -184,11 +230,13 @@ def render_game_strip_onto(image, draw, game, offset_x, settings):
     price = format_price(game.price)
     change = format_change(game.change)
     percent = format_percent(game.change_percent)
+    logo_shift = draw_stock_logo(image, symbol, offset_x)
+    content_left = GRAPH_X + logo_shift
 
     print_gfx_5x7(
         draw,
         symbol,
-        2 + offset_x,
+        content_left + offset_x,
         2,
         WHITE,
     )
@@ -202,12 +250,12 @@ def render_game_strip_onto(image, draw, game, offset_x, settings):
         YELLOW,
     )
 
-    draw_day_graph(draw, game, offset_x)
+    draw_day_graph(draw, game, offset_x, left=content_left)
 
     print_4x5_centered(
         draw,
         f"{change}  {percent}",
-        offset_x + CARD_WIDTH // 2,
+        offset_x + content_left + (CARD_WIDTH - content_left) // 2,
         26,
         color,
     )

@@ -8,7 +8,7 @@ class BasketballGame:
 
     status: str
     start_time: str
-    date: str 
+    date: str
 
     away_score: int
     home_score: int
@@ -22,3 +22,8 @@ class BasketballGame:
 
     quarter: int = 0
     clock: str = ""
+
+    possession: str = ""
+    away_timeouts: int | None = None
+    home_timeouts: int | None = None
+    bonus: str = ""

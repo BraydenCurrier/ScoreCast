@@ -7,7 +7,8 @@ from html import escape
 
 from flask import Flask, abort, request, redirect, send_file, session, jsonify, url_for
 
-from common.settings import get_settings, update_settings
+from common.settings import get_developer_settings, get_settings, update_settings
+from common.system_stats import collect_system_stats
 from common.users import (
     BOOTSTRAP_PASSWORD,
     UserError,
@@ -483,7 +484,7 @@ def page_head(title: str) -> str:
 
 def page_styles():
     return """
-    <link rel="stylesheet" href="/static/app.css?v=16">
+    <link rel="stylesheet" href="/static/app.css?v=17">
     <script>
     (function () {
       if (navigator.serviceWorker) {
@@ -1267,6 +1268,48 @@ def toggle_display_power():
         next_path = "/games"
 
     return redirect(next_path)
+
+@app.route("/api/system/stats", methods=["GET"])
+@login_required
+def api_system_stats():
+    user = current_user()
+    if not user or user["role"] != "root":
+        return jsonify({"error": "Root only."}), 403
+
+    return jsonify(collect_system_stats())
+
+
+@app.route("/system/reboot", methods=["POST"])
+@login_required
+def reboot_raspberry_pi():
+    import threading
+    import time
+
+    user = current_user()
+    if not user or user["role"] != "root":
+        return jsonify({"ok": False, "message": "Root only."}), 403
+
+    def reboot_board():
+        time.sleep(1.0)
+        reboot = Path("/sbin/reboot")
+        command = (
+            [str(reboot)]
+            if reboot.is_file()
+            else ["/usr/sbin/reboot"]
+        )
+        subprocess.run(
+            command,
+            check=False,
+            timeout=30,
+        )
+
+    threading.Thread(
+        target=reboot_board,
+        daemon=True,
+    ).start()
+
+    return jsonify({"ok": True})
+
 
 @app.route("/system/restart", methods=["POST"])
 @login_required
@@ -5215,6 +5258,101 @@ def settings_page():
 
     user = current_user()
     is_root = bool(user and user["role"] == "root")
+    developer = get_developer_settings(settings)
+    test_games_checked = "checked" if developer.get("test_games") else ""
+    score_slide_checked = "checked" if developer.get("score_slide") else ""
+    developer_html = ""
+    if is_root:
+        developer_html = f"""
+            <div class="card" id="developer">
+                <div class="card-title">Developer</div>
+                <div class="hint" style="margin-bottom:12px;">
+                    Visible only to the root profile. Changes apply
+                    to the live board.
+                </div>
+
+                <div class="dev-stat-grid" id="developer_stats">
+                    <div class="dev-stat" id="stat_cpu">
+                        <div class="dev-stat-value" id="stat_cpu_value">—</div>
+                        <div class="dev-stat-label">CPU</div>
+                    </div>
+                    <div class="dev-stat" id="stat_temp">
+                        <div class="dev-stat-value" id="stat_temp_value">—</div>
+                        <div class="dev-stat-label">CPU temp</div>
+                    </div>
+                    <div class="dev-stat" id="stat_ram">
+                        <div class="dev-stat-value" id="stat_ram_value">—</div>
+                        <div class="dev-stat-label">RAM</div>
+                    </div>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-row-copy">
+                        <div class="settings-row-title">Uptime</div>
+                        <div class="hint" id="stat_uptime">Loading…</div>
+                    </div>
+                    <div class="settings-row-value" id="stat_load"></div>
+                </div>
+                <div
+                    id="stat_throttle"
+                    class="dev-throttle"
+                    style="display:none;"
+                ></div>
+
+                <label class="dev-option">
+                    <input
+                        type="checkbox"
+                        name="developer_test_games"
+                        value="1"
+                        {test_games_checked}
+                    >
+                    <div>
+                        <div class="settings-row-title">Sample games</div>
+                        <div class="hint">
+                            Scroll canned scorecards instead of live APIs.
+                            Use this to layout the board when nothing is on.
+                        </div>
+                    </div>
+                </label>
+
+                <label class="dev-option">
+                    <input
+                        type="checkbox"
+                        name="developer_score_slide"
+                        value="1"
+                        {score_slide_checked}
+                    >
+                    <div>
+                        <div class="settings-row-title">Score slide</div>
+                        <div class="hint">
+                            Animate football focus scores when they change.
+                            Turn off to snap to the new number.
+                        </div>
+                    </div>
+                </label>
+
+                <div class="settings-row">
+                    <div class="settings-row-copy">
+                        <div class="settings-row-title">Reboot Pi</div>
+                        <div class="hint">
+                            Full Raspberry Pi reboot. The board and
+                            dashboard will be down for about a minute.
+                        </div>
+                        <div
+                            id="system_reboot_status"
+                            class="hint"
+                        ></div>
+                    </div>
+                    <button
+                        type="button"
+                        id="system_reboot_button"
+                        class="quiet-button"
+                        onclick="rebootRaspberryPi()"
+                    >
+                        Reboot
+                    </button>
+                </div>
+            </div>
+        """
     saved_message = ""
     if request.args.get("saved") == "1":
         saved_message = '<div class="hint" style="margin-bottom:12px;">Profile created.</div>'
@@ -5430,6 +5568,8 @@ def settings_page():
                     </button>
                 </div>
             </div>
+
+            {developer_html}
 
             <button class="save-button" type="submit">
                 Save Settings
@@ -5967,15 +6107,172 @@ def settings_page():
         bindNumberToSlider("refresh_interval_number", "refresh_interval");
         bindNumberToSlider("fps_number", "fps");
 
+        function setStatTone(id, value, warnAt, hotAt) {{
+            const card = document.getElementById(id);
+            if (!card) {{
+                return;
+            }}
+            card.classList.remove("warn", "hot");
+            if (value === null || value === undefined) {{
+                return;
+            }}
+            if (value >= hotAt) {{
+                card.classList.add("hot");
+            }} else if (value >= warnAt) {{
+                card.classList.add("warn");
+            }}
+        }}
+
+        async function loadSystemStats() {{
+            const grid = document.getElementById("developer_stats");
+            if (!grid) {{
+                return;
+            }}
+
+            try {{
+                const response = await fetch(
+                    "/api/system/stats",
+                    {{ cache: "no-store" }}
+                );
+                if (!response.ok) {{
+                    return;
+                }}
+                const stats = await response.json();
+
+                const cpu = document.getElementById("stat_cpu_value");
+                const temp = document.getElementById("stat_temp_value");
+                const ram = document.getElementById("stat_ram_value");
+                const uptime = document.getElementById("stat_uptime");
+                const load = document.getElementById("stat_load");
+                const throttle = document.getElementById("stat_throttle");
+
+                if (cpu) {{
+                    cpu.textContent = (
+                        stats.cpu_percent === null
+                        ? "—"
+                        : stats.cpu_percent.toFixed(0) + "%"
+                    );
+                }}
+                if (temp) {{
+                    temp.textContent = (
+                        stats.cpu_temp_c === null
+                        ? "—"
+                        : stats.cpu_temp_c.toFixed(1) + "°"
+                    );
+                }}
+                if (ram) {{
+                    ram.textContent = (
+                        stats.ram_percent === null
+                        ? "—"
+                        : stats.ram_percent.toFixed(0) + "%"
+                    );
+                }}
+                if (uptime) {{
+                    const ramLabel = (
+                        stats.ram_used_label
+                        && stats.ram_total_label
+                    )
+                        ? stats.ram_used_label
+                            + " of "
+                            + stats.ram_total_label
+                        : "";
+                    uptime.textContent = (
+                        "Running "
+                        + (stats.uptime_label || "—")
+                        + (ramLabel ? " · " + ramLabel : "")
+                    );
+                }}
+                if (load && stats.load_avg) {{
+                    load.textContent = (
+                        "load "
+                        + stats.load_avg.join("  ")
+                    );
+                }}
+                if (throttle) {{
+                    if (stats.throttled && stats.throttled.length) {{
+                        throttle.style.display = "block";
+                        throttle.textContent = stats.throttled.join(" · ");
+                    }} else {{
+                        throttle.style.display = "none";
+                        throttle.textContent = "";
+                    }}
+                }}
+
+                setStatTone("stat_cpu", stats.cpu_percent, 80, 95);
+                setStatTone("stat_temp", stats.cpu_temp_c, 70, 80);
+                setStatTone("stat_ram", stats.ram_percent, 80, 90);
+            }} catch (error) {{
+                // Keep the last reading on the page.
+            }}
+        }}
+
+        async function rebootRaspberryPi() {{
+            const confirmed = window.confirm(
+                "Reboot the Raspberry Pi? "
+                + "ScoreCast and the dashboard will go offline "
+                + "until the board comes back."
+            );
+
+            if (!confirmed) {{
+                return;
+            }}
+
+            const button = document.getElementById(
+                "system_reboot_button"
+            );
+            const status = document.getElementById(
+                "system_reboot_status"
+            );
+
+            if (button) {{
+                button.disabled = true;
+                button.textContent = "Rebooting…";
+            }}
+            if (status) {{
+                status.textContent = (
+                    "Reboot requested. This page will drop until the Pi is back."
+                );
+            }}
+
+            try {{
+                const response = await fetch(
+                    "/system/reboot",
+                    {{
+                        method: "POST",
+                        cache: "no-store"
+                    }}
+                );
+                if (!response.ok) {{
+                    throw new Error("Reboot request failed");
+                }}
+            }} catch (error) {{
+                if (status) {{
+                    status.textContent = "Unable to request the reboot.";
+                }}
+                if (button) {{
+                    button.disabled = false;
+                    button.textContent = "Reboot";
+                }}
+            }}
+        }}
+
         if (location.hash === "#profiles") {{
             const profiles = document.getElementById("profiles");
             if (profiles) {{
                 profiles.scrollIntoView();
             }}
         }}
+        if (location.hash === "#developer") {{
+            const developer = document.getElementById("developer");
+            if (developer) {{
+                developer.scrollIntoView();
+            }}
+        }}
 
         loadUpdateStatus();
         updateStatusTimer = setInterval(loadUpdateStatus, 2000);
+        loadSystemStats();
+        setInterval(loadSystemStats, 2000);
     </script>
 </body>
 </html>
@@ -6452,7 +6749,7 @@ def save_stocks():
 @app.route("/save_settings", methods=["POST"])
 @login_required
 def save_settings():
-    update_settings({
+    payload = {
         "scroll_speed": float(
             request.form["scroll_speed"]
         ),
@@ -6465,7 +6762,20 @@ def save_settings():
         "fps": int(
             request.form["fps"]
         ),
-    })
+    }
+
+    user = current_user()
+    if user and user["role"] == "root":
+        payload["developer"] = {
+            "test_games": (
+                request.form.get("developer_test_games") == "1"
+            ),
+            "score_slide": (
+                request.form.get("developer_score_slide") == "1"
+            ),
+        }
+
+    update_settings(payload)
 
     return redirect("/settings")
 

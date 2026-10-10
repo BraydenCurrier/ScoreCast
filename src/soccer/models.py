@@ -29,3 +29,12 @@ class SoccerGame:
     league_name: str = ""
     league_short: str = ""
     event_id: str = ""
+
+    extra_time: bool = False
+    penalties: bool = False
+    away_reds: int = 0
+    home_reds: int = 0
+    away_pk: int | None = None
+    home_pk: int | None = None
+    away_agg: int | None = None
+    home_agg: int | None = None

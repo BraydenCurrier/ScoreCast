@@ -1105,6 +1105,76 @@ input[type=password],
     line-height: 1.5;
 }
 
+.dev-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.dev-stat {
+    background: var(--bg-inset);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px 8px 10px;
+    text-align: center;
+}
+
+.dev-stat-value {
+    font-size: 20px;
+    font-weight: 750;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.03em;
+}
+
+.dev-stat-label {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 650;
+}
+
+.dev-stat.warn .dev-stat-value {
+    color: #ffb020;
+}
+
+.dev-stat.hot .dev-stat-value {
+    color: var(--danger);
+}
+
+.dev-throttle {
+    margin: 4px 0 12px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 176, 32, 0.35);
+    background: rgba(255, 176, 32, 0.08);
+    color: #ffb020;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.4;
+}
+
+.dev-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+}
+
+.dev-option input {
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+    flex: 0 0 auto;
+    accent-color: var(--accent);
+}
+
+.dev-option .hint {
+    margin-top: 4px;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .update-progress-fill {
         transition: none;

@@ -41,3 +41,13 @@ class FootballGame:
     last_play_team: str = ""
     last_play_athlete_ids: tuple = ()
     last_play_athlete_names: tuple = ()
+    away_timeouts: int | None = None
+    home_timeouts: int | None = None
+    short_down_text: str = ""
+    play_under_review: bool = False
+    away_rush_yards: int | None = None
+    away_pass_yards: int | None = None
+    away_turnovers: int | None = None
+    home_rush_yards: int | None = None
+    home_pass_yards: int | None = None
+    home_turnovers: int | None = None
