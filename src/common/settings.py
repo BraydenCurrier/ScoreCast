@@ -136,6 +136,11 @@ DEFAULT_SETTINGS = {
         "notifications_enabled": True,
     },
 
+    "developer": {
+        "test_games": False,
+        "score_slide": True,
+    },
+
 }
 
 
@@ -372,3 +377,23 @@ def update_settings(
         )
 
         return save_settings(updated_settings)
+
+
+def get_developer_settings(
+    settings: dict[str, Any] | None = None,
+) -> dict[str, bool]:
+    source = DEFAULT_SETTINGS["developer"]
+    current = settings if settings is not None else load_settings()
+    override = current.get("developer")
+
+    if not isinstance(override, dict):
+        override = {}
+
+    return {
+        "test_games": bool(
+            override.get("test_games", source["test_games"])
+        ),
+        "score_slide": bool(
+            override.get("score_slide", source["score_slide"])
+        ),
+    }

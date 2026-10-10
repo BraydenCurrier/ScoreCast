@@ -3,6 +3,12 @@ import json
 
 import requests
 
+from common.espn_scoreboard import (
+    bonus_side,
+    possession_abbr,
+    team_abbr,
+    timeouts_remaining,
+)
 from common.http import failure_text, get_body
 from common.timezone import get_local_timezone
 
@@ -112,32 +118,44 @@ def get_today_games():
             if competitor["homeAway"] == "home"
         )
 
-        away_team = away["team"]["abbreviation"]
-        home_team = home["team"]["abbreviation"]
+        away_team = team_abbr(away)
+        home_team = team_abbr(home)
+        situation = competition.get("situation") or {}
 
         away_wins, away_losses = get_record(away)
         home_wins, home_losses = get_record(home)
 
         status = competition["status"]
-        state = status["type"]["state"]
+        status_type = status.get("type") or {}
+        state = str(status_type.get("state") or "").lower()
+        detail = " ".join(
+            [
+                str(status_type.get("name") or ""),
+                str(status_type.get("description") or ""),
+                str(status_type.get("detail") or ""),
+                str(status_type.get("shortDetail") or ""),
+            ]
+        ).lower()
+
+        quarter = int(status.get("period") or 0)
+        clock = str(status.get("displayClock") or "").strip()
+        if clock in {"0.0", "0:00", "0"}:
+            clock = ""
 
         if state == "pre":
             game_status = "Scheduled"
             quarter = 0
             clock = ""
-
+        elif "halftime" in detail or "half-time" in detail:
+            game_status = "Halftime"
+            clock = ""
         elif state == "in":
             game_status = "Live"
-            quarter = status.get("period", 0)
-            clock = status.get(
-                "displayClock",
-                "",
-            )
-
         else:
             game_status = "Final"
-            quarter = status.get("period", 4)
             clock = ""
+            if quarter < 4:
+                quarter = 4
 
         games.append(
             BasketballGame(
@@ -173,6 +191,26 @@ def get_today_games():
 
                 quarter=quarter,
                 clock=clock,
+                possession=possession_abbr(
+                    situation,
+                    home,
+                    away,
+                ),
+                away_timeouts=timeouts_remaining(
+                    situation,
+                    "away",
+                    cap=7,
+                ),
+                home_timeouts=timeouts_remaining(
+                    situation,
+                    "home",
+                    cap=7,
+                ),
+                bonus=bonus_side(
+                    situation,
+                    home_team,
+                    away_team,
+                ),
             )
         )
 

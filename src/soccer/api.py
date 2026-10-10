@@ -3,6 +3,11 @@ import json
 
 import requests
 
+from common.espn_scoreboard import (
+    competitor_stat_int,
+    safe_int,
+    team_abbr,
+)
 from common.http import failure_text, get_body
 from common.settings import get_settings
 from common.timezone import get_local_timezone
@@ -150,15 +155,133 @@ def get_record(team):
     return wins, draws, losses
 
 
-def format_soccer_clock(display_clock):
+def format_soccer_clock(display_clock, added_time=None):
     clock = str(display_clock or "").strip()
     clock = clock.replace("'", "")
     clock = clock.replace(" ", "")
 
     if not clock or clock in {"0", "0:00"}:
-        return ""
+        clock = ""
+
+    extra = safe_int(added_time)
+    if extra and extra > 0:
+        if "+" in clock:
+            return clock
+        base = clock or "45"
+        return f"{base}+{extra}"
 
     return clock
+
+
+def _status_text(status):
+    status_type = status.get("type") or {}
+    return " ".join(
+        [
+            str(status_type.get("name") or ""),
+            str(status_type.get("description") or ""),
+            str(status_type.get("detail") or ""),
+            str(status_type.get("shortDetail") or ""),
+        ]
+    ).lower()
+
+
+def _red_card_count(competitor, details):
+    counted = competitor_stat_int(
+        competitor,
+        "redCards",
+        "redcards",
+        "red_cards",
+    )
+    if counted is not None:
+        return max(0, counted)
+
+    team_ids = {
+        str(competitor.get("id") or ""),
+        str((competitor.get("team") or {}).get("id") or ""),
+    }
+    total = 0
+    for detail in details or []:
+        if not isinstance(detail, dict):
+            continue
+        type_blob = detail.get("type") or {}
+        type_id = str(type_blob.get("id") or "")
+        type_text = str(type_blob.get("text") or type_blob.get("name") or "").lower()
+        is_red = (
+            type_id in {"71", "72", "138", "139"}
+            or "red card" in type_text
+            or "second yellow" in type_text
+        )
+        if not is_red:
+            continue
+        detail_team = str((detail.get("team") or {}).get("id") or "")
+        if detail_team and detail_team not in team_ids:
+            continue
+        if not detail_team:
+            continue
+        total += 1
+    return total
+
+
+def _aggregate_scores(competition, home, away):
+    series = competition.get("series") or {}
+    if not isinstance(series, dict):
+        series = {}
+
+    for blob in (
+        series,
+        competition.get("aggregate") or {},
+    ):
+        if not isinstance(blob, dict):
+            continue
+        competitors = blob.get("competitors") or []
+        away_val = None
+        home_val = None
+        for entry in competitors:
+            if not isinstance(entry, dict):
+                continue
+            entry_id = str(
+                entry.get("id")
+                or (entry.get("team") or {}).get("id")
+                or ""
+            )
+            score = safe_int(
+                entry.get("score", entry.get("value")),
+            )
+            if score is None:
+                continue
+            if entry_id in {
+                str(away.get("id") or ""),
+                str((away.get("team") or {}).get("id") or ""),
+            }:
+                away_val = score
+            elif entry_id in {
+                str(home.get("id") or ""),
+                str((home.get("team") or {}).get("id") or ""),
+            }:
+                home_val = score
+        if away_val is not None and home_val is not None:
+            return away_val, home_val
+
+        summary = str(
+            blob.get("summary")
+            or blob.get("title")
+            or blob.get("shortDetail")
+            or ""
+        )
+        digits = []
+        token = ""
+        for char in summary:
+            if char.isdigit():
+                token += char
+            elif token:
+                digits.append(int(token))
+                token = ""
+        if token:
+            digits.append(int(token))
+        if len(digits) >= 2:
+            return digits[0], digits[1]
+
+    return None, None
 
 
 def get_match_status(status):
@@ -175,7 +298,8 @@ def get_match_status(status):
 
     period = int(status.get("period") or 0)
     clock = format_soccer_clock(
-        status.get("displayClock", "")
+        status.get("displayClock", ""),
+        status.get("addedTime", status.get("injuryTime")),
     )
 
     text = (
@@ -191,13 +315,11 @@ def get_match_status(status):
     if "halftime" in text or "half-time" in text:
         return "Halftime", max(period, 1), ""
 
-    if "penalty" in text or "shootout" in text:
-        return "Penalties", period, clock
-
-    if "extra" in text or "aet" in text:
-        return "Extra Time", max(period, 3), clock
-
     if state == "in":
+        if "penalt" in text or "shootout" in text:
+            return "Penalties", period, clock
+        if "extra" in text or "aet" in text:
+            return "Extra Time", max(period, 3), clock
         return "Live", period, clock
 
     return "Final", period, clock
@@ -258,6 +380,28 @@ def _parse_events(data, league_id):
             continue
 
         game_status, period, clock = parsed_status
+        status_blob = competition.get("status", {})
+        text = _status_text(status_blob)
+        extra_time = (
+            game_status == "Extra Time"
+            or "extra" in text
+            or "aet" in text
+        )
+        penalties = (
+            game_status == "Penalties"
+            or "penalt" in text
+            or "shootout" in text
+        )
+        details = (
+            competition.get("details")
+            or event.get("details")
+            or []
+        )
+        away_agg, home_agg = _aggregate_scores(
+            competition,
+            home,
+            away,
+        )
 
         away_wins, away_draws, away_losses = get_record(
             away
@@ -268,8 +412,8 @@ def _parse_events(data, league_id):
 
         games.append(
             SoccerGame(
-                away=away["team"]["abbreviation"],
-                home=home["team"]["abbreviation"],
+                away=team_abbr(away),
+                home=team_abbr(home),
                 status=game_status,
                 start_time=format_local_time(
                     event["date"]
@@ -295,6 +439,14 @@ def _parse_events(data, league_id):
                 league_name=league_name,
                 league_short=league_short,
                 event_id=str(event.get("id", "")),
+                extra_time=extra_time,
+                penalties=penalties,
+                away_reds=_red_card_count(away, details),
+                home_reds=_red_card_count(home, details),
+                away_pk=safe_int(away.get("shootoutScore")),
+                home_pk=safe_int(home.get("shootoutScore")),
+                away_agg=away_agg,
+                home_agg=home_agg,
             )
         )
 

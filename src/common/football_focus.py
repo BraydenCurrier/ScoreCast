@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 from typing import Callable
+import re
+import time
 
 from PIL import Image, ImageDraw
 
@@ -11,7 +13,10 @@ from common.fonts import (
     print_gfx_5x7,
     gfx_5x7_width,
     print_gfx_5x7_centered,
+    print_gfx_7x11,
+    gfx_7x11_width,
 )
+from common.settings import get_developer_settings
 
 
 BALL_BROWN = (139, 69, 19)
@@ -59,6 +64,18 @@ LEFT_PANEL_RIGHT = 127
 RIGHT_PANEL_LEFT = 256
 FIELD_X = 132
 FIELD_Y = 28
+RECORD_GAP = 4
+STAT_INSET = 6
+FOUL_ORANGE = (255, 130, 40)
+SCORE_Y = 14
+SCORE_H = 11
+SCORE_SLIDE = True
+SCORE_SLIDE_SECONDS = 0.5
+TIMEOUT_Y = 29
+CLOCK_Y = 1
+DOWN_Y = 9
+LAST_PLAY_Y = 18
+SCORING_Y = 14
 
 
 # =========================================================
@@ -116,82 +133,62 @@ def _panel_fill(color):
     return _mix(BLACK, color, 0.14)
 
 
-def _well_fill(color):
-    return _mix(BLACK, color, 0.08)
-
-
 # =========================================================
 # Text / score helpers
 # =========================================================
 
-def draw_focus_possession_football(draw, x, y):
-    draw.line([(x + 4, y), (x + 6, y)], fill=BALL_BROWN)
-    draw.line([(x + 2, y + 1), (x + 8, y + 1)], fill=BALL_BROWN)
-    draw.line([(x + 1, y + 2), (x + 9, y + 2)], fill=BALL_BROWN)
-    draw.line([(x, y + 3), (x + 10, y + 3)], fill=BALL_BROWN)
-    draw.line([(x + 1, y + 4), (x + 9, y + 4)], fill=BALL_BROWN)
-    draw.line([(x + 2, y + 5), (x + 8, y + 5)], fill=BALL_BROWN)
-    draw.line([(x + 4, y + 6), (x + 6, y + 6)], fill=BALL_BROWN)
-
-    draw.line([(x + 3, y + 3), (x + 7, y + 3)], fill=WHITE)
-    draw.point((x + 4, y + 2), fill=WHITE)
-    draw.point((x + 5, y + 2), fill=WHITE)
-    draw.point((x + 6, y + 2), fill=WHITE)
-    draw.point((x + 4, y + 4), fill=WHITE)
-    draw.point((x + 5, y + 4), fill=WHITE)
-    draw.point((x + 6, y + 4), fill=WHITE)
+TIMEOUT_PIP_W = 5
+TIMEOUT_PIP_H = 2
+TIMEOUT_PIP_GAP = 2
+TIMEOUT_COUNT = 3
 
 
-def _draw_scaled_gfx_text(
-    image,
-    *,
-    text,
-    x,
-    y,
-    color,
-    scale=2,
-    align="left",
-):
-    """
-    Render the existing 5x7 font and enlarge it
-    using nearest-neighbor scaling.
-
-    Uses a transparent source so panel tints
-    are not punched out by a black box.
-    """
-
-    text = str(text)
-
-    if not text:
-        return 0
-
-    text_width = max(1, gfx_5x7_width(text))
-    r, g, b = color
-
-    source = Image.new(
-        "RGBA",
-        (text_width, 7),
-        (0, 0, 0, 0),
-    )
-    source_draw = ImageDraw.Draw(source)
-    print_gfx_5x7(source_draw, text, 0, 0, (r, g, b, 255))
-
-    scaled_width = source.width * scale
-    scaled_height = source.height * scale
-    enlarged = source.resize(
-        (scaled_width, scaled_height),
-        resample=Image.Resampling.NEAREST,
+def _timeouts_cluster_width():
+    return (
+        TIMEOUT_COUNT * TIMEOUT_PIP_W
+        + (TIMEOUT_COUNT - 1) * TIMEOUT_PIP_GAP
     )
 
-    if align == "center":
-        paste_x = x - scaled_width // 2
-    elif align == "right":
-        paste_x = x - scaled_width
+
+def _draw_timeouts(draw, x, y, remaining, *, align="left"):
+    if remaining is None:
+        return
+    try:
+        remaining = int(remaining)
+    except (TypeError, ValueError):
+        return
+    remaining = max(0, min(TIMEOUT_COUNT, remaining))
+    width = _timeouts_cluster_width()
+    start_x = x - width if align == "right" else x
+    used_outline = (70, 70, 70)
+    step = TIMEOUT_PIP_W + TIMEOUT_PIP_GAP
+    for i in range(TIMEOUT_COUNT):
+        bx = start_x + i * step
+        box = [
+            bx,
+            y,
+            bx + TIMEOUT_PIP_W - 1,
+            y + TIMEOUT_PIP_H - 1,
+        ]
+        if i < remaining:
+            draw.rectangle(box, fill=WHITE)
+        else:
+            draw.rectangle(box, outline=used_outline)
+
+
+def _draw_possession_arrow(draw, *, x, y, color, point_inward):
+    width = 6
+    height = 7
+    top = y
+    bottom = y + height - 1
+    mid_y = y + height // 2
+    if point_inward == "right":
+        tip = (x + width - 1, mid_y)
+        base = [(x, top), (x, bottom)]
     else:
-        paste_x = x
-
-    image.paste(enlarged, (paste_x, y), enlarged)
-    return scaled_width
+        tip = (x, mid_y)
+        base = [(x + width - 1, top), (x + width - 1, bottom)]
+    draw.polygon([tip, *base], fill=color)
 
 
 def _rank_text(rank):
@@ -256,54 +253,183 @@ def _draw_side_chrome(draw, *, style, team, is_home):
     )
 
 
-def _team_text_anchor(is_home):
+def _team_text_anchor(is_home, inner_pad=2):
     if is_home:
-        logo_x = FOCUS_WIDTH - RAIL_WIDTH - 1 - LOGO_SIZE
-        text_x = logo_x - 4
-        return logo_x, text_x, "right"
+        logo_x = FOCUS_WIDTH - RAIL_WIDTH - inner_pad - LOGO_SIZE
+        text_x = RIGHT_PANEL_LEFT + inner_pad
+        return logo_x, text_x, "left"
 
-    logo_x = RAIL_WIDTH + 1
-    text_x = logo_x + LOGO_SIZE + 3
-    return logo_x, text_x, "left"
+    logo_x = RAIL_WIDTH + inner_pad
+    text_x = LEFT_PANEL_RIGHT - inner_pad
+    return logo_x, text_x, "right"
 
 
-def _draw_score_value(
-    image,
+_score_slides = {}
+_SCORE_SLIDE_GAP = 0.12
+
+
+def _slide_ease(progress):
+    progress = max(0.0, min(1.0, progress))
+    return 1.0 - (1.0 - progress) ** 3
+
+
+def _score_slide_state(game_id, is_home, score):
+    key = (str(game_id or ""), "home" if is_home else "away")
+    now = time.monotonic()
+    try:
+        score = int(score)
+    except (TypeError, ValueError):
+        score = 0
+
+    state = _score_slides.get(key)
+    if state is None:
+        _score_slides[key] = {
+            "shown": score,
+            "target": score,
+            "from": score,
+            "to": score,
+            "start": now,
+            "playing": False,
+            "primed": False,
+            "last_seen": now,
+        }
+        return score, None, 1.0
+
+    gap = now - state["last_seen"]
+    state["last_seen"] = now
+
+    if not state["primed"]:
+        state["shown"] = score
+        state["target"] = score
+        state["from"] = score
+        state["to"] = score
+        state["playing"] = False
+        state["primed"] = True
+        return score, None, 1.0
+
+    if score != state["target"]:
+        state["target"] = score
+
+    became_visible = gap > _SCORE_SLIDE_GAP
+    needs_slide = state["target"] != state["shown"]
+
+    if became_visible:
+        if needs_slide:
+            state["playing"] = True
+            state["from"] = state["shown"]
+            state["to"] = state["target"]
+            state["start"] = now
+        else:
+            state["playing"] = False
+    elif needs_slide and not state["playing"]:
+        state["playing"] = True
+        state["from"] = state["shown"]
+        state["to"] = state["target"]
+        state["start"] = now
+
+    if not state["playing"]:
+        return state["shown"], None, 1.0
+
+    elapsed = now - state["start"]
+    if elapsed >= SCORE_SLIDE_SECONDS:
+        state["shown"] = state["to"]
+        state["playing"] = False
+        if state["target"] != state["shown"]:
+            state["playing"] = True
+            state["from"] = state["shown"]
+            state["to"] = state["target"]
+            state["start"] = now
+            return state["from"], state["to"], 0.0
+        return state["shown"], None, 1.0
+
+    progress = _slide_ease(elapsed / SCORE_SLIDE_SECONDS)
+    return state["from"], state["to"], progress
+
+
+def _draw_score_glyphs(draw, text, x, y, color, align):
+    text = str(text)
+    width = gfx_7x11_width(text)
+    glyph_x = x - width if align == "right" else x
+    print_gfx_7x11(draw, text, glyph_x, y, color)
+    return width
+
+
+def _draw_score_slide(image, *, old, new, progress, text_x, y, color, align):
+    old_text = str(old)
+    new_text = str(new)
+    old_w = gfx_7x11_width(old_text)
+    new_w = gfx_7x11_width(new_text)
+    clip_w = max(old_w, new_w, 1)
+    clip_h = SCORE_H
+    if align == "right":
+        clip_x = text_x - clip_w
+    else:
+        clip_x = text_x
+    clip_x = max(0, clip_x)
+    clip_y = y
+    box = (
+        clip_x,
+        clip_y,
+        min(FOCUS_WIDTH, clip_x + clip_w),
+        min(FOCUS_HEIGHT, clip_y + clip_h),
+    )
+    if box[2] <= box[0] or box[3] <= box[1]:
+        return
+    clip = image.crop(box)
+    clip_draw = ImageDraw.Draw(clip)
+    offset = int(round(progress * clip_h))
+    old_x = clip_w - old_w if align == "right" else 0
+    new_x = clip_w - new_w if align == "right" else 0
+    print_gfx_7x11(clip_draw, old_text, old_x, -offset, color)
+    print_gfx_7x11(clip_draw, new_text, new_x, clip_h - offset, color)
+    image.paste(clip, (box[0], box[1]))
+
+
+def _draw_team_stats(
     draw,
     *,
-    score,
-    x,
-    y,
-    align,
-    color,
-    team_color_value,
+    logo_x,
+    is_home,
+    rush,
+    passing,
+    turnovers,
+    record_width=0,
 ):
-    text = str(score)
-    glyph_w = max(1, gfx_5x7_width(text)) * 2
-    well_w = glyph_w + 6
-    well_h = 16
+    lines = []
+    if rush is not None:
+        lines.append(("RUSH", str(rush)))
+    if passing is not None:
+        lines.append(("PASS", str(passing)))
+    if turnovers is not None:
+        lines.append(("TO", str(turnovers)))
+    if not lines:
+        return
 
-    if align == "right":
-        well_x = x - well_w
-        score_x = x - 2
+    line_h = 5
+    line_gap = 2
+    total_h = len(lines) * line_h + (len(lines) - 1) * line_gap
+    start_y = (FOCUS_HEIGHT - total_h) // 2
+    label_gap = 3
+
+    if is_home:
+        record_left = logo_x - RECORD_GAP - record_width
+        stats_right = record_left - STAT_INSET
     else:
-        well_x = x
-        score_x = x + 2
+        record_right = logo_x + LOGO_SIZE + RECORD_GAP + record_width
+        stats_left = record_right + STAT_INSET
 
-    draw.rectangle(
-        [well_x, y - 1, well_x + well_w - 1, y - 1 + well_h - 1],
-        fill=_well_fill(team_color_value),
-    )
-
-    _draw_scaled_gfx_text(
-        image,
-        text=text,
-        x=score_x,
-        y=y,
-        color=color,
-        scale=2,
-        align=align,
-    )
+    for index, (label, value) in enumerate(lines):
+        y = start_y + index * (line_h + line_gap)
+        label_w = get_4x5_width(label)
+        value_w = get_4x5_width(value)
+        if is_home:
+            label_x = stats_right - label_w
+            value_x = label_x - label_gap - value_w
+        else:
+            label_x = stats_left
+            value_x = label_x + label_w + label_gap
+        print_4x5(draw, label, label_x, y, MUTED)
+        print_4x5(draw, value, value_x, y, WHITE)
 
 
 def _draw_team_column(
@@ -319,6 +445,11 @@ def _draw_team_column(
     has_possession=False,
     score_color=YELLOW,
     rank=None,
+    timeouts=None,
+    rush=None,
+    passing=None,
+    turnovers=None,
+    game_id="",
 ):
     team = str(team).upper()
     color = style.team_color(team)
@@ -334,61 +465,109 @@ def _draw_team_column(
     style.draw_team_logo(image, team, logo_x, 1, settings)
 
     rank_label = _rank_text(rank) if style.show_ranks else ""
-    rank_width = get_4x5_width(rank_label) if rank_label else 0
-    name_anchor = text_x
-
     if rank_label:
+        rank_width = get_4x5_width(rank_label)
         if is_home:
             print_4x5(
                 draw,
                 rank_label,
-                text_x - rank_width,
+                logo_x - 2 - rank_width,
                 3,
                 YELLOW,
             )
-            name_anchor = text_x - rank_width - 2
         else:
-            print_4x5(draw, rank_label, text_x, 3, YELLOW)
-            name_anchor = text_x + rank_width + 2
+            print_4x5(draw, rank_label, logo_x + LOGO_SIZE + 2, 3, YELLOW)
+
+    record_width = 0
+    if record:
+        record_width = get_4x5_width(record)
+        if is_home:
+            record_x = logo_x - RECORD_GAP - record_width
+        else:
+            record_x = logo_x + LOGO_SIZE + RECORD_GAP
+        print_4x5(draw, record, record_x, 13, DIM_WHITE)
+
+    _draw_team_stats(
+        draw,
+        logo_x=logo_x,
+        is_home=is_home,
+        rush=rush,
+        passing=passing,
+        turnovers=turnovers,
+        record_width=record_width,
+    )
 
     name_x, name_w = _draw_team_name(
         draw,
         style=style,
         team=team,
-        x=name_anchor,
+        x=text_x,
         y=2,
         align=align,
     )
 
     if has_possession:
         if is_home:
-            football_x = name_x - 14
-        else:
-            football_x = name_x + name_w + 3
-        draw_focus_possession_football(draw, football_x, 2)
-
-    if score is not None:
-        _draw_score_value(
-            image,
-            draw,
-            score=score,
-            x=text_x,
-            y=15,
-            align=align,
-            color=score_color,
-            team_color_value=color,
-        )
-    elif record:
-        if align == "right":
-            print_4x5(
+            _draw_possession_arrow(
                 draw,
-                record,
-                text_x - get_4x5_width(record),
-                17,
-                DIM_WHITE,
+                x=name_x + name_w + 2,
+                y=2,
+                color=WHITE,
+                point_inward="left",
             )
         else:
-            print_4x5(draw, record, text_x, 17, DIM_WHITE)
+            _draw_possession_arrow(
+                draw,
+                x=name_x - 8,
+                y=2,
+                color=WHITE,
+                point_inward="right",
+            )
+
+    if score is not None:
+        if get_developer_settings().get("score_slide", SCORE_SLIDE):
+            old_score, new_score, progress = _score_slide_state(
+                game_id,
+                is_home,
+                score,
+            )
+            if new_score is None or progress >= 1:
+                _draw_score_glyphs(
+                    draw,
+                    old_score,
+                    text_x,
+                    SCORE_Y,
+                    score_color,
+                    align,
+                )
+            else:
+                _draw_score_slide(
+                    image,
+                    old=old_score,
+                    new=new_score,
+                    progress=progress,
+                    text_x=text_x,
+                    y=SCORE_Y,
+                    color=score_color,
+                    align=align,
+                )
+        else:
+            _draw_score_glyphs(
+                draw,
+                score,
+                text_x,
+                SCORE_Y,
+                score_color,
+                align,
+            )
+        if timeouts is not None:
+            _draw_timeouts(
+                draw,
+                text_x,
+                TIMEOUT_Y,
+                timeouts,
+                align=align,
+            )
 
 
 # =========================================================
@@ -660,6 +839,248 @@ def _in_red_zone(game):
     return False
 
 
+def _format_yardline(game):
+    raw_number = getattr(game, "yardline_number", None)
+    if raw_number is None:
+        return ""
+    try:
+        number = int(raw_number)
+    except (TypeError, ValueError):
+        return ""
+    if number <= 0 or number > 50:
+        return ""
+    if number == 50:
+        return "50"
+    side = str(getattr(game, "yardline_side", "") or "").upper().strip()
+    if side:
+        return f"{side} {number}"
+    return str(number)
+
+
+def _athlete_last_name(value):
+    name = str(value or "").replace(".", " ").upper().strip()
+    parts = [part for part in name.split() if part]
+    return parts[-1] if parts else ""
+
+
+def _play_blob(game):
+    return (
+        f"{getattr(game, 'last_play_type', '')} "
+        f"{getattr(game, 'last_play_text', '')}"
+    ).lower()
+
+
+def _situation_label(game):
+    short = str(getattr(game, "short_down_text", "") or "").lower()
+    if "kickoff" in short:
+        return "KICKOFF"
+    if "fair catch" in short:
+        return "FAIR CATCH"
+    if "extra point" in short:
+        return "XP"
+    if "two-point" in short or "2-pt" in short or "2pt" in short:
+        return "2PT"
+    if "field goal" in short:
+        return "FG"
+
+    if _safe_int(getattr(game, "down", 0)) > 0:
+        return ""
+
+    blob = _play_blob(game)
+    if "kickoff" in blob:
+        return "KICKOFF"
+    if "fair catch" in blob:
+        return "FAIR CATCH"
+    if "extra point" in blob:
+        return "XP"
+    if "two-point" in blob or "2-pt" in blob or "2pt" in blob:
+        return "2PT"
+    return ""
+
+
+def _down_label(game):
+    special = _situation_label(game)
+    if special:
+        return special
+
+    down = _safe_int(getattr(game, "down", 0))
+    distance = _safe_int(getattr(game, "distance", 0))
+    if down <= 0:
+        return ""
+
+    short = str(getattr(game, "short_down_text", "") or "").upper()
+    if "GOAL" in short:
+        return f"{ordinal_down(down)}&G"
+    return f"{ordinal_down(down)}&{distance}"
+
+
+def _yds(yards):
+    return f"{yards} YDS"
+
+
+_PENALTY_KINDS = (
+    ("defensive pass interference", "DPI"),
+    ("offensive pass interference", "OPI"),
+    ("pass interference", "PI"),
+    ("roughing the passer", "RTP"),
+    ("roughing the kicker", "RTK"),
+    ("running into the kicker", "KICKER"),
+    ("unnecessary roughness", "UNR"),
+    ("personal foul", "PF"),
+    ("false start", "FALSE START"),
+    ("defensive holding", "HOLD"),
+    ("offensive holding", "HOLD"),
+    ("holding", "HOLD"),
+    ("offsides", "OFFSIDE"),
+    ("offside", "OFFSIDE"),
+    ("encroachment", "ENCROACH"),
+    ("neutral zone infraction", "NZI"),
+    ("delay of game", "DELAY"),
+    ("too many men", "12 MEN"),
+    ("illegal formation", "FORMATION"),
+    ("illegal shift", "SHIFT"),
+    ("illegal motion", "MOTION"),
+    ("illegal contact", "CONTACT"),
+    ("illegal block", "BLOCK"),
+    ("face mask", "FACE MASK"),
+    ("unsportsmanlike", "UNS"),
+    ("taunting", "TAUNT"),
+    ("chop block", "CHOP"),
+    ("clipping", "CLIP"),
+    ("intentional grounding", "GROUNDING"),
+    ("illegal forward pass", "ILL PASS"),
+    ("kick catch interference", "KCI"),
+    ("ineligible", "INELIG"),
+)
+
+
+def _penalty_yards(blob, yards):
+    if yards:
+        return abs(yards)
+    match = re.search(r"(\d+)\s*yards?", blob)
+    if match:
+        return int(match.group(1))
+    return 0
+
+
+def _penalty_label(blob, yards):
+    if "offset" in blob:
+        return "OFFSETTING"
+    infraction = "PENALTY"
+    for needle, label in _PENALTY_KINDS:
+        if needle in blob:
+            infraction = label
+            break
+    if "declined" in blob:
+        return f"{infraction} DECLINED"
+    yds = _penalty_yards(blob, yards)
+    if yds:
+        return f"{infraction} {_yds(yds)}"
+    return infraction
+
+
+def _last_play_label(game):
+    play_type = str(getattr(game, "last_play_type", "") or "")
+    play_text = str(getattr(game, "last_play_text", "") or "")
+    blob = f"{play_type} {play_text}".lower().strip()
+    if not blob:
+        return ""
+
+    yards = _safe_int(getattr(game, "last_play_yardage", 0))
+    if "penalty" in blob:
+        return _penalty_label(blob, yards)
+
+    skip = (
+        "timeout",
+        "two-minute",
+        "two minute",
+        "kneel",
+        "spike",
+        "no play",
+    )
+    if any(marker in blob for marker in skip):
+        return ""
+
+    scoring = bool(getattr(game, "scoring_play", False))
+
+    if "safety" in blob:
+        return "SAFETY"
+    if "touchdown" in blob or (
+        scoring
+        and "field goal" not in blob
+        and "extra point" not in blob
+        and "two-point" not in blob
+        and "2-pt" not in blob
+    ):
+        if "intercept" in blob:
+            return "INT TD"
+        if "fumble" in blob:
+            return "FUM TD"
+        if "punt" in blob or "kickoff" in blob or "return" in blob:
+            return "RET TD"
+        if "pass" in blob:
+            return "PASS TD"
+        if "rush" in blob:
+            return "RUSH TD"
+        return "TD"
+    if "intercept" in blob:
+        return "INT"
+    if "sack" in blob:
+        return "SACK"
+    if "fumble" in blob:
+        return "FUMBLE"
+    if "field goal" in blob:
+        if "block" in blob:
+            return "FG BLK"
+        if any(token in blob for token in ("no good", "miss", "wide", "short")):
+            return "FG MISS"
+        if scoring or " is good" in blob or blob.endswith("good"):
+            return "FG GOOD"
+        return "FG"
+    if "extra point" in blob:
+        if any(token in blob for token in ("no good", "miss", "block")):
+            return "XP MISS"
+        if scoring or "good" in blob:
+            return "XP GOOD"
+        return "XP"
+    if "two-point" in blob or "2-pt" in blob or "2pt" in blob:
+        if "fail" in blob or "no good" in blob:
+            return "2PT FAIL"
+        if scoring or "good" in blob or "succeed" in blob:
+            return "2PT GOOD"
+        return "2PT"
+    if "punt" in blob:
+        return f"PUNT {_yds(yards)}" if yards else "PUNT"
+    if "kickoff" in blob:
+        return "KICKOFF"
+    if "incomplete" in blob:
+        return "INC"
+
+    kind = play_type.upper()
+    if "PASS" in kind or "pass" in blob:
+        return f"PASS {_yds(yards)}" if yards else "PASS"
+    if "RUSH" in kind or "rush" in blob:
+        return f"RUSH {_yds(yards)}"
+    return ""
+
+
+def _last_play_detail(game):
+    label = _last_play_label(game)
+    if not label:
+        return ""
+
+    names = getattr(game, "last_play_athlete_names", ()) or ()
+    last = _athlete_last_name(names[0]) if names else ""
+    if not last:
+        return label
+
+    while last and get_4x5_width(f"{label} {last}") > 118:
+        last = last[:-1]
+    if not last:
+        return label
+    return f"{label} {last}"
+
+
 def _draw_live_center(draw, game):
     cx = FOCUS_WIDTH // 2
     is_halftime = _is_halftime(game)
@@ -670,21 +1091,58 @@ def _draw_live_center(draw, game):
         print_4x5_centered(draw, "HALFTIME", cx, 13, CLOCK_AMBER)
         return
 
+    reviewing = bool(getattr(game, "play_under_review", False))
     top_text = label
     if label and clock:
         top_text = f"{label} {clock}"
     elif clock:
         top_text = clock
 
-    if top_text:
-        print_gfx_5x7_centered(draw, top_text, cx, 4, CLOCK_AMBER)
+    scoring = bool(getattr(game, "scoring_play", False))
+    play_label = _last_play_label(game)
+    down_text = _down_label(game)
+    yard_text = _format_yardline(game)
+    detail = ""
+    if not scoring:
+        detail = _last_play_detail(game)
+        if detail == down_text:
+            detail = ""
 
-    down = _safe_int(getattr(game, "down", 0))
-    distance = _safe_int(getattr(game, "distance", 0))
-    if down > 0:
-        down_text = f"{ordinal_down(down)}&{distance}"
-        color = YELLOW if _in_red_zone(game) else WHITE
-        print_gfx_5x7_centered(draw, down_text, cx, 14, color)
+    if reviewing:
+        print_gfx_5x7_centered(draw, "REVIEW", cx, CLOCK_Y, FOUL_ORANGE)
+    elif top_text:
+        print_gfx_5x7_centered(draw, top_text, cx, CLOCK_Y, CLOCK_AMBER)
+
+    color = YELLOW if scoring or _in_red_zone(game) else WHITE
+    flash_on = True
+    if scoring:
+        flash_on = (time.monotonic() % 1.0) < 0.65
+
+    down_y = SCORING_Y if scoring else DOWN_Y
+
+    if scoring and play_label:
+        if flash_on:
+            print_gfx_5x7_centered(draw, play_label, cx, SCORING_Y, YELLOW)
+    elif down_text and yard_text:
+        gap = 6
+        down_width = gfx_5x7_width(down_text)
+        yard_width = gfx_5x7_width(yard_text)
+        start_x = cx - (down_width + gap + yard_width) // 2
+        print_gfx_5x7(draw, down_text, start_x, down_y, color)
+        print_gfx_5x7(
+            draw,
+            yard_text,
+            start_x + down_width + gap,
+            down_y,
+            color,
+        )
+    elif down_text:
+        print_gfx_5x7_centered(draw, down_text, cx, down_y, color)
+    elif yard_text:
+        print_gfx_5x7_centered(draw, yard_text, cx, down_y, color)
+
+    if detail:
+        print_4x5_centered(draw, detail, cx, LAST_PLAY_Y, DIM_WHITE)
 
 
 def _draw_live(image, draw, game, settings, style):
@@ -694,6 +1152,9 @@ def _draw_live(image, draw, game, settings, style):
     home_score = _safe_int(getattr(game, "home_score", 0))
     possession = str(getattr(game, "possession", "")).upper()
     is_halftime = _is_halftime(game)
+    event_id = str(getattr(game, "event_id", "") or "") or (
+        f"{away}@{home}"
+    )
 
     _draw_team_column(
         image,
@@ -705,6 +1166,12 @@ def _draw_live(image, draw, game, settings, style):
         score=away_score,
         has_possession=(possession == away and not is_halftime),
         rank=getattr(game, "away_rank", None),
+        timeouts=getattr(game, "away_timeouts", None),
+        record=_record_text(game.away_wins, game.away_losses),
+        rush=getattr(game, "away_rush_yards", None),
+        passing=getattr(game, "away_pass_yards", None),
+        turnovers=getattr(game, "away_turnovers", None),
+        game_id=event_id,
     )
     _draw_team_column(
         image,
@@ -716,6 +1183,12 @@ def _draw_live(image, draw, game, settings, style):
         score=home_score,
         has_possession=(possession == home and not is_halftime),
         rank=getattr(game, "home_rank", None),
+        timeouts=getattr(game, "home_timeouts", None),
+        record=_record_text(game.home_wins, game.home_losses),
+        rush=getattr(game, "home_rush_yards", None),
+        passing=getattr(game, "home_pass_yards", None),
+        turnovers=getattr(game, "home_turnovers", None),
+        game_id=event_id,
     )
 
     yardline = getattr(game, "yardline_number", None)
@@ -760,6 +1233,10 @@ def _draw_final(image, draw, game, settings, style):
     elif home_score > away_score:
         away_color = LOSING_SCORE
 
+    event_id = str(getattr(game, "event_id", "") or "") or (
+        f"{away}@{home}"
+    )
+
     _draw_team_column(
         image,
         draw,
@@ -770,6 +1247,11 @@ def _draw_final(image, draw, game, settings, style):
         score=away_score,
         score_color=away_color,
         rank=getattr(game, "away_rank", None),
+        record=_record_text(game.away_wins, game.away_losses),
+        rush=getattr(game, "away_rush_yards", None),
+        passing=getattr(game, "away_pass_yards", None),
+        turnovers=getattr(game, "away_turnovers", None),
+        game_id=event_id,
     )
     _draw_team_column(
         image,
@@ -781,6 +1263,11 @@ def _draw_final(image, draw, game, settings, style):
         score=home_score,
         score_color=home_color,
         rank=getattr(game, "home_rank", None),
+        record=_record_text(game.home_wins, game.home_losses),
+        rush=getattr(game, "home_rush_yards", None),
+        passing=getattr(game, "home_pass_yards", None),
+        turnovers=getattr(game, "home_turnovers", None),
+        game_id=event_id,
     )
 
     cx = FOCUS_WIDTH // 2

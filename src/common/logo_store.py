@@ -20,6 +20,7 @@ SUPPORTED_LEAGUES = frozenset(
         "soccer",
         "broadcast",
         "pitchers",
+        "stocks",
     }
 )
 

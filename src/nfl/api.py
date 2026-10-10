@@ -11,6 +11,12 @@ from common.http import failure_text, get_body
 from common.timezone import get_local_timezone
 
 from nfl.models import FootballGame
+from common.football_play import (
+    box_totals_for,
+    parse_last_play,
+    play_under_review,
+    short_down_text,
+)
 
 
 NFL_SCHEDULE_URL = (
@@ -46,6 +52,23 @@ def safe_int(value, default=0):
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _timeouts_remaining(situation, side):
+    if not isinstance(situation, dict):
+        return None
+    key = "homeTimeouts" if side == "home" else "awayTimeouts"
+    raw = situation.get(key)
+    if raw in (None, ""):
+        blob = situation.get("timeouts")
+        if isinstance(blob, dict):
+            raw = blob.get(side)
+    if raw in (None, ""):
+        return None
+    try:
+        return max(0, min(3, int(raw)))
+    except (TypeError, ValueError):
+        return None
 
 
 def get_team_abbr(team):
@@ -164,97 +187,6 @@ def _get_possession_abbr(
         return get_team_abbr(team)
 
     return ""
-
-
-def _last_play_fields(last_play):
-    last_play = last_play or {}
-    play_type = last_play.get("type") or {}
-
-    if isinstance(play_type, dict):
-        type_text = str(
-            play_type.get("text")
-            or play_type.get("abbreviation")
-            or ""
-        )
-    else:
-        type_text = str(play_type or "")
-
-    team = last_play.get("team") or {}
-    play_team = str(
-        (team.get("abbreviation") if isinstance(team, dict) else "")
-        or ""
-    ).upper()
-
-    if play_team == "WAS":
-        play_team = "WSH"
-    elif play_team == "LA":
-        play_team = "LAR"
-
-    yardage = last_play.get("statYardage")
-
-    try:
-        yardage = int(yardage)
-    except (TypeError, ValueError):
-        yardage = 0
-
-    athletes = []
-    involved = last_play.get("athletesInvolved")
-
-    if isinstance(involved, list):
-        athletes.extend(involved)
-
-    nested_athletes = last_play.get("athletes")
-
-    if isinstance(nested_athletes, list):
-        athletes.extend(nested_athletes)
-
-    participants = last_play.get("participants")
-
-    if isinstance(participants, list):
-        for participant in participants:
-            if not isinstance(participant, dict):
-                continue
-
-            athlete = participant.get("athlete")
-
-            if isinstance(athlete, dict):
-                athletes.append(athlete)
-
-    ids = []
-    names = []
-    seen = set()
-
-    for athlete in athletes:
-        if not isinstance(athlete, dict):
-            continue
-
-        athlete_id = str(athlete.get("id") or "").strip()
-        name = str(
-            athlete.get("displayName")
-            or athlete.get("fullName")
-            or athlete.get("shortName")
-            or ""
-        ).strip()
-        key = athlete_id or name.lower()
-
-        if not key or key in seen:
-            continue
-
-        seen.add(key)
-
-        if athlete_id:
-            ids.append(athlete_id)
-
-        if name:
-            names.append(name)
-
-    return {
-        "last_play_type": type_text,
-        "last_play_yardage": yardage,
-        "last_play_team": play_team,
-        "last_play_athlete_ids": tuple(ids),
-        "last_play_athlete_names": tuple(names),
-    }
 
 
 def _parse_field_position(
@@ -841,8 +773,20 @@ def get_today_games():
 
             last_play_id=str(last_play.get("id", "")),
             last_play_text=str(last_play.get("text", "")),
-            scoring_play=bool(last_play.get("scoringPlay", False)),
-            **_last_play_fields(last_play),
+            **parse_last_play(last_play),
+            short_down_text=short_down_text(situation),
+            play_under_review=play_under_review(
+                situation,
+                last_play,
+                status_type,
+            ),
+            away_timeouts=_timeouts_remaining(situation, "away"),
+            home_timeouts=_timeouts_remaining(situation, "home"),
+            **box_totals_for(
+                "nfl",
+                event.get("id", ""),
+                status_type.get("name", ""),
+            ),
 
             yardline_side=yardline_side,
             yardline_number=yardline_number,

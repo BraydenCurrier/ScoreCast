@@ -51,6 +51,13 @@ TEST_GAMES_NHL = [
         home_ot_losses=11,
         period=1,
         clock="12:41",
+        away_sog=8,
+        home_sog=6,
+        possession="DAL",
+        away_goalie="Oettinger",
+        home_goalie="Blackwood",
+        away_save_pct=".921",
+        home_save_pct=".908",
     ),
 
     HockeyGame(
@@ -69,6 +76,14 @@ TEST_GAMES_NHL = [
         home_ot_losses=11,
         period=2,
         clock="8:53",
+        away_sog=18,
+        home_sog=20,
+        power_play="VGK",
+        possession="VGK",
+        away_goalie="Hill",
+        home_goalie="Kuemper",
+        away_save_pct=".914",
+        home_save_pct=".899",
     ),
 
     HockeyGame(
@@ -88,6 +103,12 @@ TEST_GAMES_NHL = [
         period=2,
         clock="0:00",
         intermission=True,
+        away_sog=22,
+        home_sog=19,
+        away_goalie="Skinner",
+        home_goalie="Vladar",
+        away_save_pct=".903",
+        home_save_pct=".887",
     ),
 
     HockeyGame(
@@ -106,6 +127,13 @@ TEST_GAMES_NHL = [
         home_ot_losses=11,
         period=3,
         clock="2:15",
+        away_sog=32,
+        home_sog=29,
+        possession="FLA",
+        away_goalie="Vasilevskiy",
+        home_goalie="Bobrovsky",
+        away_save_pct=".918",
+        home_save_pct=".906",
     ),
 
     HockeyGame(
@@ -125,6 +153,13 @@ TEST_GAMES_NHL = [
         period=4,
         clock="3:08",
         overtime=True,
+        away_sog=35,
+        home_sog=34,
+        possession="MIN",
+        away_goalie="Gustavsson",
+        home_goalie="Hellebuyck",
+        away_save_pct=".901",
+        home_save_pct=".927",
     ),
 
     HockeyGame(
@@ -142,6 +177,14 @@ TEST_GAMES_NHL = [
         home_losses=34,
         home_ot_losses=11,
         shootout=True,
+        away_sog=38,
+        home_sog=36,
+        away_so_goals=2,
+        home_so_goals=1,
+        away_goalie="Demko",
+        home_goalie="Daccord",
+        away_save_pct=".910",
+        home_save_pct=".894",
     ),
 
     HockeyGame(
@@ -158,6 +201,12 @@ TEST_GAMES_NHL = [
         home_wins=35,
         home_losses=35,
         home_ot_losses=12,
+        away_sog=31,
+        home_sog=22,
+        away_goalie="Ullmark",
+        home_goalie="Luukkonen",
+        away_save_pct=".912",
+        home_save_pct=".889",
     ),
 
     HockeyGame(
@@ -174,5 +223,12 @@ TEST_GAMES_NHL = [
         home_wins=38,
         home_losses=31,
         home_ot_losses=13,
+        overtime=True,
+        away_sog=28,
+        home_sog=27,
+        away_goalie="Binnington",
+        home_goalie="Saros",
+        away_save_pct=".905",
+        home_save_pct=".917",
     ),
 ]

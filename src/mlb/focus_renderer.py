@@ -3,11 +3,13 @@ from PIL import Image, ImageDraw
 from common.fonts import (
     get_4x5_width,
     gfx_5x7_width,
+    gfx_7x11_width,
     print_4x5,
     print_4x5_centered,
     print_4x5_right,
     print_gfx_5x7,
     print_gfx_5x7_centered,
+    print_gfx_7x11,
 )
 from mlb.colors import WHITE, YELLOW, team_color
 from mlb.mlb_renderer import (
@@ -174,17 +176,25 @@ def _draw_side_chrome(draw, team, is_home):
 
 NAME_STAT_GAP = 4
 STAT_COLOR = WHITE
+SCORE_Y = 14
+PLAYER_Y = 25
 
 
-def _player_max_width(is_home, inner_pad=2, gap=3):
+def _player_max_width(is_home, score=None, inner_pad=2, gap=3):
     if is_home:
         logo_x = FOCUS_WIDTH - RAIL_WIDTH - inner_pad - LOGO_SIZE
         text_x = RIGHT_PANEL_LEFT + inner_pad
-        return max(0, logo_x - gap - text_x)
+        reserved = 0
+        if score is not None:
+            reserved = gfx_7x11_width(str(score)) + gap
+        return max(0, logo_x - NAME_STAT_GAP - (text_x + reserved))
 
     logo_x = RAIL_WIDTH + inner_pad
     text_x = LEFT_PANEL_RIGHT - inner_pad
-    return max(0, text_x - (logo_x + LOGO_SIZE + gap))
+    reserved = 0
+    if score is not None:
+        reserved = gfx_7x11_width(str(score)) + gap
+    return max(0, (text_x - reserved) - NAME_STAT_GAP - (logo_x + LOGO_SIZE + NAME_STAT_GAP))
 
 
 def _fit_name_stat(name, stat, max_width):
@@ -197,9 +207,9 @@ def _fit_name_stat(name, stat, max_width):
     return name, stat
 
 
-def _player_for_side(game, is_home):
+def _player_for_side(game, is_home, score=None):
     batting_home = not bool(game.top_inning)
-    max_width = _player_max_width(is_home)
+    max_width = _player_max_width(is_home, score)
     if is_home == batting_home:
         return _fit_name_stat(
             getattr(game, "batter", ""),
@@ -272,9 +282,9 @@ def _draw_team_column(
 
     if score is not None:
         text = str(score)
-        score_width = gfx_5x7_width(text)
+        score_width = gfx_7x11_width(text)
         score_x = text_x - score_width if align_right else text_x
-        print_gfx_5x7(draw, text, score_x, 13, YELLOW)
+        print_gfx_7x11(draw, text, score_x, SCORE_Y, YELLOW)
 
     if player:
         name, stat = player
@@ -282,15 +292,18 @@ def _draw_team_column(
         stat_width = get_4x5_width(stat) if stat else 0
         gap = NAME_STAT_GAP if name and stat else 0
         total_width = name_width + gap + stat_width
-        start_x = text_x - total_width if align_right else text_x
+        if align_right:
+            start_x = logo_x + LOGO_SIZE + NAME_STAT_GAP
+        else:
+            start_x = logo_x - NAME_STAT_GAP - total_width
         if name:
-            print_4x5(draw, name, start_x, 24, DIM_WHITE)
+            print_4x5(draw, name, start_x, PLAYER_Y, DIM_WHITE)
         if stat:
             print_4x5(
                 draw,
                 stat,
                 start_x + name_width + gap,
-                24,
+                PLAYER_Y,
                 STAT_COLOR,
             )
 
@@ -470,7 +483,11 @@ def _draw_live(image, draw, game, settings):
         settings,
         score=_safe_int(game.away_score),
         record=_team_record(game, False),
-        player=_player_for_side(game, False),
+        player=_player_for_side(
+            game,
+            False,
+            _safe_int(game.away_score),
+        ),
     )
     _draw_team_column(
         image,
@@ -481,7 +498,11 @@ def _draw_live(image, draw, game, settings):
         settings,
         score=_safe_int(game.home_score),
         record=_team_record(game, True),
-        player=_player_for_side(game, True),
+        player=_player_for_side(
+            game,
+            True,
+            _safe_int(game.home_score),
+        ),
     )
 
     center_left = LEFT_PANEL_RIGHT + 1

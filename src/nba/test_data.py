@@ -47,6 +47,9 @@ TEST_GAMES_NBA = [
         home_losses=33,
         quarter=1,
         clock="3:48",
+        possession="DEN",
+        away_timeouts=6,
+        home_timeouts=7,
     ),
 
     # Second Quarter
@@ -64,6 +67,9 @@ TEST_GAMES_NBA = [
         home_losses=43,
         quarter=2,
         clock="5:17",
+        possession="CHI",
+        away_timeouts=5,
+        home_timeouts=4,
     ),
 
     # Halftime
@@ -98,6 +104,10 @@ TEST_GAMES_NBA = [
         home_losses=35,
         quarter=3,
         clock="2:54",
+        possession="IND",
+        away_timeouts=4,
+        home_timeouts=3,
+        bonus="IND",
     ),
 
     # Fourth Quarter
@@ -115,6 +125,10 @@ TEST_GAMES_NBA = [
         home_losses=26,
         quarter=4,
         clock="1:42",
+        possession="MIN",
+        away_timeouts=2,
+        home_timeouts=1,
+        bonus="OKC",
     ),
 
     # Close Finish
@@ -132,6 +146,9 @@ TEST_GAMES_NBA = [
         home_losses=35,
         quarter=4,
         clock="0:12",
+        possession="SAC",
+        away_timeouts=1,
+        home_timeouts=0,
     ),
 
     # Overtime
@@ -149,6 +166,9 @@ TEST_GAMES_NBA = [
         home_losses=42,
         quarter=5,
         clock="2:11",
+        possession="MEM",
+        away_timeouts=1,
+        home_timeouts=1,
     ),
 
     # Double Overtime
@@ -166,6 +186,9 @@ TEST_GAMES_NBA = [
         home_losses=51,
         quarter=6,
         clock="1:09",
+        possession="UTA",
+        away_timeouts=0,
+        home_timeouts=1,
     ),
 
     # Final
@@ -195,6 +218,7 @@ TEST_GAMES_NBA = [
         away_losses=28,
         home_wins=24,
         home_losses=58,
+        quarter=5,
     ),
 
 ]
