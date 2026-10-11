@@ -5880,6 +5880,14 @@ def settings_page():
                         : "Update";
                 }}
 
+                if (version) {{
+                    details.textContent = (
+                        "ScoreCast "
+                        + version
+                        + " is ready to install."
+                    );
+                }}
+
                 if (releaseTitle) {{
                     releaseTitle.textContent = title
                         || "A new version is ready to install.";
@@ -5912,6 +5920,11 @@ def settings_page():
             )
                 ? "block"
                 : "none";
+
+            if (showNotes) {{
+                message.textContent = "Update Available";
+                container.style.display = "none";
+            }}
 
             bar.style.width = (
                 value + "%"
