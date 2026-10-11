@@ -279,9 +279,20 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
             print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 18 + offset_x, 22, GREY)
             print_3x5_right(draw, f"{game.home_wins}-{game.home_losses}", 83 + offset_x, 22, GREY)
         else:
-            # print quarter and game clock
-            print_4x5(draw, "Q" + str(game.quarter), 46 + offset_x, 2, WHITE)
-            print_clock(draw, game.clock, 52 + offset_x, 8, YELLOW)
+            # College overtime is untimed. Show the period and which
+            # possession of that overtime is in progress.
+            if int(game.quarter or 0) > 4:
+                extra = int(game.quarter) - 4
+                period = "OT" if extra == 1 else f"{extra}OT"
+                print_4x5_centered(draw, period, 51 + offset_x, 2, WHITE)
+                drive = int(getattr(game, "ot_drive", 0) or 0)
+                if drive == 1:
+                    print_4x5_centered(draw, "1ST", 51 + offset_x, 8, YELLOW)
+                elif drive == 2:
+                    print_4x5_centered(draw, "2ND", 51 + offset_x, 8, YELLOW)
+            else:
+                print_4x5(draw, "Q" + str(game.quarter), 46 + offset_x, 2, WHITE)
+                print_clock(draw, game.clock, 52 + offset_x, 8, YELLOW)
             
             if has_down_and_distance(game):
                 down_and_distance = (

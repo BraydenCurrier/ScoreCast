@@ -443,6 +443,24 @@ def create_release(
     return release_path
 
 
+def build_panel_shift(release_path: Path) -> None:
+    script = release_path / "scripts" / "build_panel_shift.sh"
+    if not script.is_file():
+        log("Panel scroll helper source is missing; continuing.")
+        return
+
+    log("Building the panel scroll helper.")
+    completed = subprocess.run(
+        ["bash", str(script), str(release_path)],
+        check=False,
+    )
+    if completed.returncode != 0:
+        log(
+            "Panel scroll helper did not build; "
+            "the ticker will redraw each column."
+        )
+
+
 def copy_rgbmatrix_binding(
     source_python: Path,
     target_python: Path,
@@ -790,6 +808,7 @@ def install_update(
         release_path,
         version,
     )
+    build_panel_shift(release_path)
 
     python_path = (
         venv_path / "bin" / "python"

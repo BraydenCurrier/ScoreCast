@@ -60,3 +60,5 @@ class CollegeFootballGame:
     home_rush_yards: int | None = None
     home_pass_yards: int | None = None
     home_turnovers: int | None = None
+    # 1 or 2 while the game is in an overtime period.
+    ot_drive: int | None = None
