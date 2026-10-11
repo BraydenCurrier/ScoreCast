@@ -53,6 +53,7 @@ from fantasy.api import (
     get_user_leagues,
 )
 
+from updater.releases import latest_release_info
 from updater.status import read_status
 
 app = Flask(__name__)
@@ -294,6 +295,16 @@ def page_header(active_page="games"):
     )
 
     return f"""
+    <a
+        id="update-banner"
+        class="update-banner"
+        href="/settings#software-update"
+        hidden
+    >
+        <span class="update-banner-kicker">Update available</span>
+        <span id="update-banner-text" class="update-banner-text"></span>
+    </a>
+
     <header class="topbar">
         <div class="topbar-main">
             <div class="brand-lockup brand-lockup-compact">
@@ -386,6 +397,86 @@ def page_header(active_page="games"):
         <h2 class="page-title">{escape(page_title)}</h2>
         <p class="page-lede">{escape(page_lede)}</p>
     </div>
+    <script>
+    (function () {{
+      var busyStates = {{
+        checking: true,
+        downloading: true,
+        installing: true,
+        validating: true,
+        restarting: true,
+        rolling_back: true
+      }};
+
+      window.applyUpdateBanner = function (status) {{
+        var banner = document.getElementById("update-banner");
+        var text = document.getElementById("update-banner-text");
+        if (!banner || !text || !status) {{
+          return;
+        }}
+
+        var release = status.release || {{}};
+        var state = status.state || "idle";
+        var busy = !!busyStates[state] || status.service_active === true;
+        var show = release.update_available === true && !busy;
+        banner.hidden = !show;
+        if (!show) {{
+          return;
+        }}
+
+        var version = release.latest_version
+          ? ("v" + String(release.latest_version).replace(/^v/, ""))
+          : "A new version";
+        var title = String(release.title || "").trim();
+        text.textContent = title
+          ? (version + " — " + title)
+          : (version + " is ready to install");
+      }};
+
+      function revealSoftwareUpdate() {{
+        if (location.hash !== "#software-update") {{
+          return;
+        }}
+        var target = document.getElementById("software-update");
+        if (target) {{
+          target.scrollIntoView({{ block: "start" }});
+        }}
+      }}
+
+      var banner = document.getElementById("update-banner");
+      if (banner) {{
+        banner.addEventListener("click", function (event) {{
+          var target = document.getElementById("software-update");
+          if (!target) {{
+            return;
+          }}
+          event.preventDefault();
+          target.scrollIntoView({{ block: "start" }});
+          if (location.hash !== "#software-update") {{
+            history.replaceState(null, "", "#software-update");
+          }}
+        }});
+      }}
+
+      if (document.readyState === "loading") {{
+        document.addEventListener("DOMContentLoaded", revealSoftwareUpdate);
+      }} else {{
+        revealSoftwareUpdate();
+      }}
+
+      fetch("/api/update/status", {{
+        method: "GET",
+        cache: "no-store"
+      }}).then(function (response) {{
+        if (!response.ok) {{
+          throw new Error("status");
+        }}
+        return response.json();
+      }}).then(function (status) {{
+        window.applyUpdateBanner(status);
+      }}).catch(function () {{}});
+    }})();
+    </script>
     """
 
 def page_head(title: str) -> str:
@@ -484,7 +575,7 @@ def page_head(title: str) -> str:
 
 def page_styles():
     return """
-    <link rel="stylesheet" href="/static/app.css?v=17">
+    <link rel="stylesheet" href="/static/app.css?v=18">
     <script>
     (function () {
       if (navigator.serviceWorker) {
@@ -5397,7 +5488,7 @@ def settings_page():
                         oninput="scroll_speed_number.value = this.value">
 
                     <div class="hint">
-                        Scroll speed is measured in pixels per second.
+                        Pixels per second. Each step is held for the same number of panel refreshes.
                     </div>
                 </div>
 
@@ -5428,7 +5519,7 @@ def settings_page():
                     >
 
                     <div class="hint">
-                        Higher values make scrolling smoother.
+                        How fast alerts and focus mode animate. Scrolling stays locked to the panel.
                     </div>
                 </div>
 
@@ -5479,7 +5570,10 @@ def settings_page():
                     </div>
                 </div>
 
-                <div class="settings-row settings-row-stack">
+                <div
+                    id="software-update"
+                    class="settings-row settings-row-stack"
+                >
                     <div class="settings-row-copy">
                         <div class="settings-row-title">Updates</div>
                         <div class="hint">
@@ -5498,6 +5592,26 @@ def settings_page():
                             id="update_status_details"
                             class="hint"
                         ></div>
+                    </div>
+
+                    <div
+                        id="update_release_notes"
+                        class="update-release-notes"
+                        hidden
+                    >
+                        <div
+                            id="update_release_kicker"
+                            class="update-release-kicker"
+                        ></div>
+                        <div
+                            id="update_release_title"
+                            class="update-release-title"
+                        ></div>
+                        <p
+                            id="update_release_body"
+                            class="update-release-body"
+                            hidden
+                        ></p>
                     </div>
 
                     <div
@@ -5727,9 +5841,70 @@ def settings_page():
                 || updateStarting
             );
 
+            const release = status.release || {{}};
+            const notes = document.getElementById(
+                "update_release_notes"
+            );
+            const showNotes = (
+                release.update_available === true
+                && !active
+            );
+
+            if (notes) {{
+                notes.hidden = !showNotes;
+            }}
+
+            if (showNotes) {{
+                const version = String(
+                    release.latest_version || ""
+                ).replace(/^v/, "");
+                const title = String(
+                    release.title || ""
+                ).trim();
+                const body = String(
+                    release.description || ""
+                ).trim();
+                const kicker = document.getElementById(
+                    "update_release_kicker"
+                );
+                const releaseTitle = document.getElementById(
+                    "update_release_title"
+                );
+                const bodyElement = document.getElementById(
+                    "update_release_body"
+                );
+
+                if (kicker) {{
+                    kicker.textContent = version
+                        ? ("Version " + version)
+                        : "Update";
+                }}
+
+                if (releaseTitle) {{
+                    releaseTitle.textContent = title
+                        || "A new version is ready to install.";
+                }}
+
+                if (bodyElement) {{
+                    const duplicate = !body || body === title;
+                    bodyElement.hidden = duplicate;
+                    bodyElement.textContent = duplicate
+                        ? ""
+                        : body;
+                }}
+            }}
+
+            if (typeof window.applyUpdateBanner === "function") {{
+                window.applyUpdateBanner(status);
+            }}
+
             button.textContent = active
                 ? "Updating…"
-                : "Check for update";
+                : (
+                    release.update_available
+                        ? "Install update"
+                        : "Check for update"
+                );
 
             container.style.display = (
                 active
@@ -6808,6 +6983,9 @@ def api_update_status():
 
     status["service_active"] = (
         is_update_service_active()
+    )
+    status["release"] = latest_release_info(
+        get_scorecast_version()
     )
 
     return jsonify(status)

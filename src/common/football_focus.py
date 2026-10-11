@@ -42,6 +42,8 @@ class FootballFocusStyle:
     draw_team_logo: Callable
     draw_broadcast_logo: Callable
     show_ranks: bool = False
+    # College overtime has no game clock. NFL overtime does.
+    untimed_overtime: bool = False
 
 
 # =========================================================
@@ -819,6 +821,17 @@ def _quarter_label(game):
     return ""
 
 
+def _overtime_text(game):
+    """Period plus which possession of that overtime is on the field."""
+    label = _quarter_label(game)
+    drive = _safe_int(getattr(game, "ot_drive", 0))
+    if drive == 1:
+        return f"{label} 1ST"
+    if drive == 2:
+        return f"{label} 2ND"
+    return label
+
+
 def _in_red_zone(game):
     possession = str(getattr(game, "possession", "") or "").upper()
     side = str(getattr(game, "yardline_side", "") or "").upper()
@@ -1081,11 +1094,16 @@ def _last_play_detail(game):
     return f"{label} {last}"
 
 
-def _draw_live_center(draw, game):
+def _draw_live_center(draw, game, style):
     cx = FOCUS_WIDTH // 2
     is_halftime = _is_halftime(game)
-    label = _quarter_label(game)
-    clock = str(getattr(game, "clock", "") or "").strip()
+    quarter = _safe_int(getattr(game, "quarter", 0))
+    untimed = (
+        bool(getattr(style, "untimed_overtime", False))
+        and quarter > 4
+    )
+    label = _overtime_text(game) if untimed else _quarter_label(game)
+    clock = "" if untimed else str(getattr(game, "clock", "") or "").strip()
 
     if is_halftime:
         print_4x5_centered(draw, "HALFTIME", cx, 13, CLOCK_AMBER)
@@ -1213,7 +1231,7 @@ def _draw_live(image, draw, game, settings, style):
             in_red_zone=_in_red_zone(game),
         )
 
-    _draw_live_center(draw, game)
+    _draw_live_center(draw, game, style)
 
 
 # =========================================================

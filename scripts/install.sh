@@ -532,6 +532,11 @@ create_release_venv() {
     fi
 }
 
+build_panel_shift() {
+    log "Building the panel scroll helper."
+    PYTHON="${VENV_PYTHON}" bash "${RELEASE_DIR}/scripts/build_panel_shift.sh" "${RELEASE_DIR}"
+}
+
 validate_release() {
     log "Validating ScoreCast release ${RELEASE_VERSION}."
 
@@ -782,6 +787,7 @@ main() {
     checkout_release
     install_rgb_matrix_library
     create_release_venv
+    build_panel_shift
     validate_release
     activate_release
     install_systemd_services

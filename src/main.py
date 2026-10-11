@@ -13,9 +13,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from PIL import Image, ImageDraw
 
-from common.matrix import create_matrix
+from common.matrix import PANEL_REFRESH_HZ, create_matrix
 from common.settings import get_developer_settings, get_settings
 from common.splash import render_idle_splash
+from common.ticker_scroll import (
+    build_strip,
+    column_refreshes,
+    load_panel_shift,
+    paint_viewport,
+    scroll_shift_matches,
+)
 from updater.status import is_update_in_progress
 
 from fantasy.api import get_today_games as get_live_fantasy, refresh_fantasy_avatars_on_startup
@@ -1116,15 +1123,60 @@ def load_initial_games():
     )
 
 if __name__ == "__main__":
+    canvas_key, scroll_columns, capture_buffer = load_panel_shift()
     matrix = create_matrix()
     frame_canvas = matrix.CreateFrameCanvas()
+    # Which hidden frame still holds a ticker picture, and at what strip offset.
+    ticker_canvas_state = {}
+    scroll_mode = {"fast": False}
 
     def present_frame(image):
         # Draw into the hidden buffer, then swap on the panel
         # refresh so a scrolling update is not shown half-copied.
         global frame_canvas
+        if canvas_key is not None:
+            ticker_canvas_state.pop(canvas_key(frame_canvas), None)
         frame_canvas.SetImage(image)
         frame_canvas = matrix.SwapOnVSync(frame_canvas)
+
+    def present_ticker(origin, period, strip, fraction):
+        """Hold this column for an exact number of panel refreshes."""
+        global frame_canvas
+
+        token = strip["token"]
+        key = canvas_key(frame_canvas) if canvas_key is not None else None
+        shown = ticker_canvas_state.get(key) if key is not None else None
+        # The hidden frame is the previous picture. Advancing one column
+        # means that frame is two columns behind the one we are about to show.
+        shifted = False
+        if (
+            key is not None
+            and shown is not None
+            and shown[0] == token
+            and (origin - shown[1]) % period == 2
+        ):
+            try:
+                shifted = bool(scroll_columns(
+                    frame_canvas,
+                    2,
+                    strip["rgb"],
+                    period,
+                    strip["height"],
+                    origin,
+                    DISPLAY_WIDTH,
+                ))
+            except Exception:
+                traceback.print_exc()
+                shifted = False
+
+        if not shifted:
+            paint_viewport(frame_image, strip["image"], origin, period)
+            frame_canvas.SetImage(frame_image)
+
+        if key is not None:
+            ticker_canvas_state[key] = (token, origin % period)
+
+        frame_canvas = matrix.SwapOnVSync(frame_canvas, fraction)
 
     if is_update_in_progress():
         present_frame(
@@ -1164,6 +1216,9 @@ if __name__ == "__main__":
 
     current_game = 0
     scroll_x = 0.0
+    scroll_origin_px = 0
+    locked_speed = None
+    locked_fraction = 1
     next_column_due = None
     scheduled_scroll_speed = None
 
@@ -1199,8 +1254,6 @@ if __name__ == "__main__":
     last_update_poll = 0.0
     update_in_progress = False
 
-    last_frame_time = time.monotonic()
-
     settings = get_settings()
     last_test_games = get_developer_settings(settings).get("test_games")
 
@@ -1222,6 +1275,52 @@ if __name__ == "__main__":
         (0, 0, 0),
     )
 
+    ticker_strip = {
+        "token": None,
+        "image": None,
+        "rgb": None,
+        "period": 0,
+        "height": MATRIX_HEIGHT,
+    }
+
+    def ensure_ticker_strip(visible_games, settings):
+        token = (_cache_signature, _ticker_revision)
+        if token == ticker_strip["token"] and ticker_strip["rgb"] is not None:
+            return ticker_strip
+
+        cards = [
+            (render_card(game, settings), get_game_step(game))
+            for game in visible_games
+        ]
+        image, period = build_strip(cards)
+        ticker_strip["token"] = token
+        ticker_strip["image"] = image
+        ticker_strip["period"] = period
+        ticker_strip["height"] = image.height if image is not None else MATRIX_HEIGHT
+        ticker_strip["rgb"] = image.tobytes() if image is not None else None
+        return ticker_strip
+
+    if scroll_columns is not None and capture_buffer is not None:
+        try:
+            scroll_mode["fast"] = scroll_shift_matches(
+                frame_canvas,
+                scroll_columns,
+                capture_buffer,
+            )
+        except Exception:
+            traceback.print_exc()
+            scroll_mode["fast"] = False
+
+        if scroll_mode["fast"]:
+            print(
+                f"Ticker scroll is locked to the {PANEL_REFRESH_HZ}Hz panel refresh."
+            )
+        else:
+            print(
+                "Column shift check failed; "
+                "redrawing each ticker column."
+            )
+
     def sleep_ticker_frame():
         # Wake for the next panel frame, or sooner when the next
         # column is due, so each column starts on the same beat.
@@ -1235,12 +1334,6 @@ if __name__ == "__main__":
 
     while True:
         frame_started_at = time.monotonic()
-
-        delta_seconds = frame_started_at - last_frame_time
-        last_frame_time = frame_started_at
-
-        delta_seconds = min(delta_seconds, 0.1)
-
         now = frame_started_at
 
         if now - last_settings_poll >= SETTINGS_POLL_INTERVAL:
@@ -1300,9 +1393,7 @@ if __name__ == "__main__":
 
             display_sleeping = False
             last_brightness = brightness
-
-            # Avoid a large scroll-time jump after sleeping.
-            last_frame_time = time.monotonic()
+            ticker_canvas_state.clear()
 
             # Force a fresh sports update after waking.
             forget_sport_fetch_times()
@@ -1315,6 +1406,7 @@ if __name__ == "__main__":
             if brightness != last_brightness:
                 matrix.brightness = brightness
                 last_brightness = brightness
+                ticker_canvas_state.clear()
 
             present_frame(
                 render_idle_splash(
@@ -1351,6 +1443,7 @@ if __name__ == "__main__":
         if brightness != last_brightness:
             matrix.brightness = brightness
             last_brightness = brightness
+            ticker_canvas_state.clear()
 
         active_alert = possession_alert_manager.get_active(
             now
@@ -1383,17 +1476,18 @@ if __name__ == "__main__":
                     sleep_time
                 )
 
-            last_frame_time = time.monotonic()
-
             continue
 
-        with _games_lock:
-            focus_source_games = _games.copy()
-
-        focus_games = get_focus_games(
-            focus_source_games,
-            settings,
-        )
+        focus_settings = get_focus_settings(settings)
+        if focus_settings.get("enabled"):
+            with _games_lock:
+                focus_source_games = _games.copy()
+            focus_games = get_focus_games(
+                focus_source_games,
+                settings,
+            )
+        else:
+            focus_games = ()
 
         if focus_games:
             note_external_frame()
@@ -1508,7 +1602,6 @@ if __name__ == "__main__":
             sleep_time = frame_delay - frame_elapsed
             if sleep_time > 0:
                 time.sleep(sleep_time)
-            last_frame_time = time.monotonic()
             continue
 
         try:
@@ -1537,6 +1630,33 @@ if __name__ == "__main__":
                 time.sleep(sleep_time)
 
             continue
+
+        if scroll_mode["fast"]:
+            strip = ensure_ticker_strip(visible_games, settings)
+            period = strip["period"]
+            if period > 0 and strip["rgb"] is not None:
+                if locked_speed != scroll_speed:
+                    locked_speed = scroll_speed
+                    locked_fraction = column_refreshes(
+                        scroll_speed,
+                        PANEL_REFRESH_HZ,
+                    )
+                    actual_speed = PANEL_REFRESH_HZ / locked_fraction
+                    print(
+                        f"Scroll locked to {actual_speed:.1f} pixels per second "
+                        f"({locked_fraction} refreshes per column)."
+                    )
+                origin = scroll_origin_px % period
+                present_ticker(
+                    origin,
+                    period,
+                    strip,
+                    locked_fraction,
+                )
+                scroll_origin_px += 1
+                continue
+
+            scroll_mode["fast"] = False
 
         if current_game >= len(visible_games):
             current_game = 0
@@ -1591,21 +1711,12 @@ if __name__ == "__main__":
 
         while x < DISPLAY_WIDTH:
             game = visible_games[game_index]
-
-            sport = get_sport(game)
-
             frame_image.paste(
-                render_card(
-                    game,
-                    settings,
-                ),
+                render_card(game, settings),
                 (x, 0),
             )
-
             x += get_game_step(game)
-
             game_index += 1
-
             if game_index >= len(visible_games):
                 game_index = 0
 

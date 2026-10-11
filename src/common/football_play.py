@@ -162,6 +162,64 @@ def _empty_box_totals():
     }
 
 
+def _period_number(node):
+    if not isinstance(node, dict):
+        return 0
+    period = node.get("period")
+    raw = period.get("number") if isinstance(period, dict) else period
+    try:
+        return int(raw or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def ot_drive_number(payload):
+    """1 or 2 for the current possession in this overtime, or None."""
+    header = (payload or {}).get("header") or {}
+    competitions = header.get("competitions") or []
+    status = {}
+    if competitions and isinstance(competitions[0], dict):
+        status = competitions[0].get("status") or {}
+    if _period_number(status) <= 4:
+        return None
+
+    period = _period_number(status)
+    drives = (payload or {}).get("drives") or {}
+    items = list(drives.get("previous") or [])
+    current = drives.get("current")
+    if isinstance(current, dict):
+        items.append(current)
+
+    seen = set()
+    count = 0
+    skip = (
+        "KICKOFF",
+        "EXTRA POINT",
+        "TWO-POINT",
+        "TWO POINT",
+        "END OF HALF",
+        "END OF GAME",
+    )
+    for drive in items:
+        if not isinstance(drive, dict):
+            continue
+        if _period_number(drive.get("start") or {}) != period:
+            continue
+        result = str(drive.get("result") or "").upper()
+        if any(token in result for token in skip):
+            continue
+        drive_id = str(drive.get("id") or "")
+        if drive_id and drive_id in seen:
+            continue
+        if drive_id:
+            seen.add(drive_id)
+        count += 1
+
+    if count <= 0:
+        return 1
+    return 2 if count > 2 else count
+
+
 def _int_box_stat(stats, name):
     for item in stats or []:
         if not isinstance(item, dict):
@@ -231,6 +289,8 @@ def box_totals_for(league, event_id, status_name=""):
         )
         payload = json.loads(body)
         totals = _parse_box_totals(payload)
+        if league == "cfb":
+            totals["ot_drive"] = ot_drive_number(payload)
         ttl = BOX_TTL
     except Exception:
         totals = dict(cached[1]) if cached else empty
