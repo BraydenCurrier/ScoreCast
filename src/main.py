@@ -53,6 +53,11 @@ from nhl.nhl_renderer import render_game_strip_onto as draw_nhl_strip
 from soccer.api import get_today_games as get_live_soccer
 from soccer.soccer_renderer import render_game_strip_onto as draw_soccer_strip
 
+from pga.api import get_today_games as get_live_pga
+from pga.pga_renderer import card_width as pga_card_width
+from pga.pga_renderer import display_page as pga_display_page
+from pga.pga_renderer import render_game_strip_onto as draw_pga_strip
+
 from stocks.api import get_today_games as get_live_stocks
 from stocks.renderer import render_game_strip_onto as draw_stocks_strip
 
@@ -62,6 +67,7 @@ from cfb.test_data import TEST_GAMES_CFB
 from nba.test_data import TEST_GAMES_NBA
 from nhl.test_data import TEST_GAMES_NHL
 from soccer.test_data import TEST_GAMES_SOCCER
+from pga.test_data import TEST_GAMES_PGA
 from stocks.test_data import TEST_GAMES_STOCKS
 from fantasy.test_data import TEST_GAMES_FANTASY
 
@@ -72,6 +78,7 @@ TEST_GAMES_BY_SPORT = {
     "nba": TEST_GAMES_NBA,
     "nhl": TEST_GAMES_NHL,
     "soccer": TEST_GAMES_SOCCER,
+    "pga": TEST_GAMES_PGA,
     "stocks": TEST_GAMES_STOCKS,
     "fantasy": TEST_GAMES_FANTASY,
 }
@@ -83,6 +90,7 @@ SPORT_DISPLAY_ORDER = (
     "nba",
     "nhl",
     "soccer",
+    "pga",
     "stocks",
     "fantasy",
 )
@@ -153,6 +161,7 @@ SPORT_FETCHERS = {
     "nba": get_live_nba,
     "nhl": get_live_nhl,
     "soccer": get_live_soccer,
+    "pga": get_live_pga,
     "stocks": get_live_stocks,
     "fantasy": get_live_fantasy,
 }
@@ -444,6 +453,9 @@ def is_nhl_game(game):
 def is_soccer_game(game):
     return game.__class__.__name__ == "SoccerGame"
 
+def is_pga_tournament(game):
+    return game.__class__.__name__ == "GolfTournament"
+
 def is_stock_quote(game):
     return game.__class__.__name__ == "StockQuote"
 
@@ -456,6 +468,9 @@ def game_id(game):
 
     if is_soccer_game(game) and getattr(game, "event_id", ""):
         return f"soccer:{game.event_id}"
+
+    if is_pga_tournament(game):
+        return f"pga:{game.event_id}"
 
     if is_stock_quote(game):
         return f"stocks:{game.symbol}"
@@ -478,6 +493,9 @@ def get_sport(game):
     if is_soccer_game(game):
         return "soccer"
 
+    if is_pga_tournament(game):
+        return "pga"
+
     if is_stock_quote(game):
         return "stocks"
 
@@ -498,6 +516,8 @@ def get_game_width(game):
         return NHL_CARD_WIDTH
     if is_fantasy_game(game):
         return FANTASY_CARD_WIDTH
+    if is_pga_tournament(game):
+        return pga_card_width(game)
     if is_stock_quote(game):
         return STOCK_CARD_WIDTH
     if is_bet_ticket(game):
@@ -521,6 +541,8 @@ def draw_game(image, draw, game, x, settings):
         draw_nhl_strip(image, draw, game, x, settings)
     elif is_soccer_game(game):
         draw_soccer_strip(image, draw, game, x, settings)
+    elif is_pga_tournament(game):
+        draw_pga_strip(image, draw, game, x, settings)
     elif is_stock_quote(game):
         draw_stocks_strip(image, draw, game, x, settings)
     elif is_fantasy_game(game):
@@ -727,9 +749,22 @@ def card_cache_key(game, settings, logo_signature=None):
     if logo_signature is None:
         logo_signature = logo_variants_signature(settings)
 
+    page = 0
+    if is_pga_tournament(game):
+        page = pga_display_page(getattr(game, "players", ()))
+
     return (
         game_signature(game),
         logo_signature,
+        page,
+    )
+
+
+def leaderboard_page_token(games):
+    return tuple(
+        pga_display_page(getattr(game, "players", ()))
+        for game in games
+        if is_pga_tournament(game)
     )
 
 
@@ -1228,6 +1263,7 @@ if __name__ == "__main__":
     presented_game_index = None
     presented_frame_signature = None
     presented_ticker_revision = None
+    presented_leaderboard_page = None
 
 
     def note_external_frame():
@@ -1236,12 +1272,14 @@ if __name__ == "__main__":
         global presented_game_index
         global presented_frame_signature
         global presented_ticker_revision
+        global presented_leaderboard_page
         global next_column_due
 
         presented_scroll_column = None
         presented_game_index = None
         presented_frame_signature = None
         presented_ticker_revision = None
+        presented_leaderboard_page = None
         next_column_due = None
 
     focus_game_index = 0
@@ -1284,7 +1322,11 @@ if __name__ == "__main__":
     }
 
     def ensure_ticker_strip(visible_games, settings):
-        token = (_cache_signature, _ticker_revision)
+        token = (
+            _cache_signature,
+            _ticker_revision,
+            leaderboard_page_token(visible_games),
+        )
         if token == ticker_strip["token"] and ticker_strip["rgb"] is not None:
             return ticker_strip
 
@@ -1691,11 +1733,13 @@ if __name__ == "__main__":
 
         # The panel only moves when the integer column changes.
         # Identical columns already on the matrix stay there.
+        leaderboard_page = leaderboard_page_token(visible_games)
         if (
             scroll_column == presented_scroll_column
             and current_game == presented_game_index
             and _cache_signature == presented_frame_signature
             and _ticker_revision == presented_ticker_revision
+            and leaderboard_page == presented_leaderboard_page
             and presented_frame_signature is not None
         ):
             sleep_ticker_frame()
@@ -1726,5 +1770,6 @@ if __name__ == "__main__":
         presented_game_index = current_game
         presented_frame_signature = _cache_signature
         presented_ticker_revision = _ticker_revision
+        presented_leaderboard_page = leaderboard_page
 
         sleep_ticker_frame()
