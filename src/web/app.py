@@ -888,6 +888,9 @@ def get_game_league(game):
     if class_name == "HockeyGame":
         return "nhl", "NHL"
 
+    if class_name == "GolfTournament":
+        return "pga", "PGA"
+
     if class_name == "FantasyMatchup":
         return "fantasy", "FANTASY"
     
@@ -901,6 +904,13 @@ def get_game_id(game):
             getattr(game, "event_id", "") or ""
         ).strip()
 
+        if event_id:
+            return f"{league_key}:{event_id}"
+
+    if league_key == "pga":
+        event_id = str(
+            getattr(game, "event_id", "") or ""
+        ).strip()
         if event_id:
             return f"{league_key}:{event_id}"
 
@@ -1630,6 +1640,7 @@ def games():
         "soccer",
         "nba",
         "nhl",
+        "pga",
         "fantasy",
     }
     selected_league_filter = request.args.get("league", "selected")
@@ -1685,20 +1696,46 @@ def games():
             " · Favorite" if favorite_game else ""
         )
 
-        matchup = (
-            f"{escape(str(game.away))} @ "
-            f"{escape(str(game.home))}"
-        )
-        away_score = escape(
-            str(getattr(game, "away_score", 0))
-        )
-        home_score = escape(
-            str(getattr(game, "home_score", 0))
-        )
-        details = (
-            f"{away_score} - {home_score} · "
-            f"{safe_status}{favorite_suffix}"
-        )
+        if league_key == "pga":
+            matchup = escape(str(getattr(game, "name", "PGA")))
+            leaders = []
+            for player in list(getattr(game, "players", ()) or ())[:6]:
+                place = escape(getattr(player, "position", "") or "")
+                tee = ""
+                if getattr(player, "awaiting_tee", False):
+                    tee = escape(getattr(player, "marker", "") or "")
+                leaders.append(
+                    " ".join(
+                        part for part in (
+                            place,
+                            escape(player.name),
+                            escape(player.score),
+                            tee,
+                        )
+                        if part
+                    )
+                )
+            summary = ", ".join(leaders) or escape(
+                getattr(game, "when", "") or "This week"
+            )
+            details = (
+                f"{summary} · {safe_status}{favorite_suffix}"
+            )
+        else:
+            matchup = (
+                f"{escape(str(game.away))} @ "
+                f"{escape(str(game.home))}"
+            )
+            away_score = escape(
+                str(getattr(game, "away_score", 0))
+            )
+            home_score = escape(
+                str(getattr(game, "home_score", 0))
+            )
+            details = (
+                f"{away_score} - {home_score} · "
+                f"{safe_status}{favorite_suffix}"
+            )
 
         game_rows += f"""
         <div class="game-row-container" draggable="true" data-id="{safe_game_id}" data-league="{league_key}" data-top25="{"true" if is_top_25 else "false"}" data-live="{"true" if is_live else "false"}">
@@ -1760,6 +1797,7 @@ def games():
                         {league_option("soccer", "Soccer")}
                         {league_option("nba", "NBA")}
                         {league_option("nhl", "NHL")}
+                        {league_option("pga", "PGA")}
                         {league_option("fantasy", "Fantasy")}
                     </select>
 
