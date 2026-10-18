@@ -190,7 +190,7 @@ def register_bet_routes(app, *, login_required, current_user, page_header, page_
         open_bets = [bet for bet in bets if bet.get("status") in {"pending", "live", "review"}]
         cards = "".join(_bet_card(bet) for bet in open_bets) or '<div class="card"><div class="muted">No open bets. Add a single or parlay to start tracking.</div></div>'
         body = _summary_strip(stats) + cards
-        return _page(page_header, page_styles, "ScoreCast Bets", "bets", body)
+        return _page(page_header, page_styles, "GameLine Pro Bets", "bets", body)
 
     @app.route("/bets/live")
     @login_required
@@ -324,7 +324,7 @@ def register_bet_routes(app, *, login_required, current_user, page_header, page_
         body = f"""
         <div class="card">
           <div class="card-title">Add a tracked bet</div>
-          <p class="hint">Enter a bet you already placed. Use the win % DraftKings shows; ScoreCast converts it to American odds. ScoreCast does not take wagers, hold a balance, or send bets to a sportsbook.</p>
+          <p class="hint">Enter a bet you already placed. Use the win % DraftKings shows; GameLine Pro converts it to American odds. GameLine Pro does not take wagers, hold a balance, or send bets to a sportsbook.</p>
           <form id="bet-form" class="bet-form">
             <label>Bet type
               <select name="kind" id="bet-kind">

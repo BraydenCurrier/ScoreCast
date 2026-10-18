@@ -1,1 +1,1 @@
-"""ScoreCast update and rollback utilities."""
+"""GameLine Pro update and rollback utilities."""

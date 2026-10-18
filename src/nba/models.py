@@ -27,3 +27,4 @@ class BasketballGame:
     away_timeouts: int | None = None
     home_timeouts: int | None = None
     bonus: str = ""
+    event_id: str = ""

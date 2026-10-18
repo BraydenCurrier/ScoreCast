@@ -1,17 +1,11 @@
-from PIL import ImageDraw
-
-from common.fonts import print_3x5, get_3x5_width, print_3x5_right, print_4x5, print_4x5_centered, print_4x5_right, print_clock, print_gfx_5x7, draw_text_right
+from common.fonts import print_3x5, print_3x5_right, print_4x5, print_4x5_centered, print_4x5_right, print_clock, print_gfx_5x7, draw_text_right
 from cfb.colors import GREY, WHITE, YELLOW, BALL_BROWN, team_color
 from common.logo_store import draw_logo, get_selected_logo_variant
 from common.broadcast import draw_broadcast_logo
 
-LOGO_SIZE = 30     
+LOGO_SIZE = 30
 CARD_WIDTH = 102
-GAME_GAP = 5
-GAME_WIDTH = LOGO_SIZE + CARD_WIDTH + LOGO_SIZE 
 
-def game_id(game):
-    return f"{game.away}@{game.home}"
 
 def is_live(game):
     return _normalized_status(game) in {
@@ -20,15 +14,6 @@ def is_live(game):
         "END_PERIOD",
     }
 
-def is_final(game):
-    status = _normalized_status(game)
-    return status == "FINAL" or status.startswith("FINAL_")
-
-def is_preview(game):
-    return not is_live(game) and not is_final(game)
-
-def is_preview(game):
-    return not is_live(game) and not is_final(game)
 
 def _normalized_status(game):
     status = str(game.status or "").strip().upper()
@@ -67,33 +52,6 @@ def _format_yardline(game):
         )
 
     return str(game.yardline_number)
-
-def in_redzone(game):
-    if not is_live(game):
-        return False
-
-    if game.possession == "":
-        return False
-
-    # determine if a team is inside the opponents 20 (redzone)
-    if game.possession == game.away:
-        return game.yardline_side == game.home and game.yardline_number <= 20
-
-    if game.possession == game.home:
-        return game.yardline_side == game.away and game.yardline_number <= 20
-
-    return False
-
-
-def draw_5x7_right(draw, text, right_x, y, color):
-    text = str(text)
-    width = len(text) * 6 - 1
-    print_gfx_5x7(draw, text, right_x - width, y, color)
-
-
-def draw_3x5_center(draw, text, center_x, y, color):
-    width = get_3x5_width(text)
-    print_3x5(draw, text, center_x - width // 2, y, color)
 
 def ordinal_down(down):
     if down == 1:
@@ -149,9 +107,7 @@ def draw_field_tracker(draw, x,  y, yardline, possession_direction, possession, 
     GRASS = (0, 180, 30)
     LINE_COLOR = (200, 200, 200)
     BALL_COLOR = (255, 220, 0)       
-    POST_YELLOW = (255, 205, 0)      
-    BALL_BROWN = (139, 69, 19)       
-    LACE_WHITE = (255, 255, 255)
+    POST_YELLOW = (255, 205, 0)
     
     # field dimensions   
     ez_width = 3

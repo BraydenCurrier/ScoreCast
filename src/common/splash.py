@@ -7,15 +7,15 @@ from common.fonts import (
 )
 
 
-BLACK = (0, 0, 0)
-GREEN = (0, 220, 70)
-DIM_GREEN = (0, 70, 24)
+NAVY = (11, 17, 32)
+BLUE = (37, 99, 235)
+CYAN = (0, 212, 255)
 
 _splash_cache = {}
 
 
 def render_idle_splash(width, height, caption=""):
-    """Black ScoreCast screen for idle and update states."""
+    """Idle GameLine Pro screen for boot and update states."""
     caption = str(caption or "").strip().upper()
     cache_key = (width, height, caption)
     cached = _splash_cache.get(cache_key)
@@ -26,11 +26,11 @@ def render_idle_splash(width, height, caption=""):
     image = Image.new(
         "RGB",
         (width, height),
-        BLACK,
+        NAVY,
     )
     draw = ImageDraw.Draw(image)
 
-    word = "SCORECAST"
+    word = "GAMELINE"
     word_width = gfx_5x7_width(word)
     center_x = width // 2
 
@@ -54,14 +54,14 @@ def render_idle_splash(width, height, caption=""):
             (line_left, text_y - 4),
             (line_right, text_y - 4),
         ],
-        fill=DIM_GREEN,
+        fill=CYAN,
     )
     print_gfx_5x7_centered(
         draw,
         word,
         center_x,
         text_y,
-        GREEN,
+        BLUE,
     )
 
     if caption_y is None:
@@ -70,7 +70,7 @@ def render_idle_splash(width, height, caption=""):
                 (line_left, text_y + 10),
                 (line_right, text_y + 10),
             ],
-            fill=DIM_GREEN,
+            fill=CYAN,
         )
     else:
         print_4x5_centered(
@@ -78,7 +78,7 @@ def render_idle_splash(width, height, caption=""):
             caption,
             center_x,
             caption_y,
-            GREEN,
+            CYAN,
         )
 
     _splash_cache[cache_key] = image

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# ScoreCast fresh-install script for Raspberry Pi OS Lite (64-bit).
+# GameLine Pro fresh-install script for Raspberry Pi OS Lite (64-bit).
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/BraydenCurrier/ScoreCast/main/scripts/install.sh | sudo bash
@@ -72,11 +72,11 @@ APT_PACKAGES=(
     libssl-dev
 )
 log() {
-    printf '\n[ScoreCast installer] %s\n' "$*"
+    printf '\n[GameLine installer] %s\n' "$*"
 }
 
 die() {
-    printf '\n[ScoreCast installer] ERROR: %s\n' "$*" >&2
+    printf '\n[GameLine installer] ERROR: %s\n' "$*" >&2
     exit 1
 }
 
@@ -97,7 +97,7 @@ acquire_lock() {
     mkdir -p "${INSTALL_DIR}"
 
     if [[ -e "${LOCK_FILE}" ]]; then
-        die "Another ScoreCast installation appears to be running: ${LOCK_FILE}"
+        die "Another GameLine Pro installation appears to be running: ${LOCK_FILE}"
     fi
 
     printf '%s\n' "$$" > "${LOCK_FILE}"
@@ -154,14 +154,14 @@ disable_builtin_audio() {
 
         {
             printf '\n'
-            printf '# ScoreCast RGB matrix configuration\n'
+            printf '# GameLine RGB matrix configuration\n'
             printf 'dtparam=audio=off\n'
         } >> "${boot_config}"
     fi
 
     # Prevent the conflicting kernel module from loading.
     cat > "${AUDIO_BLACKLIST}" <<'EOF'
-# ScoreCast uses the Raspberry Pi hardware timing subsystem for the RGB matrix.
+# GameLine Pro uses the Raspberry Pi hardware timing subsystem for the RGB matrix.
 blacklist snd_bcm2835
 EOF
 
@@ -214,7 +214,7 @@ MAX_ATTEMPTS=30
 SLEEP_SECONDS=2
 
 log() {
-    printf '\n[ScoreCast resume] %s\n' "$*"
+    printf '\n[GameLine resume] %s\n' "$*"
 }
 
 write_status() {
@@ -280,14 +280,14 @@ if grep -q '^snd_bcm2835 ' /proc/modules 2>/dev/null; then
 fi
 
 if [[ ! -x /opt/scorecast/current-venv/bin/python ]]; then
-    fail "The active ScoreCast Python environment is missing."
+    fail "The active GameLine Pro Python environment is missing."
 fi
 
 if [[ ! -f /opt/scorecast/current/src/main.py ]]; then
-    fail "The active ScoreCast release is missing src/main.py."
+    fail "The active GameLine Pro release is missing src/main.py."
 fi
 
-log "Starting ScoreCast after reboot."
+log "Starting GameLine Pro after reboot."
 
 systemctl reset-failed "${SERVICE_NAME}" || true
 systemctl restart "${SERVICE_NAME}"
@@ -301,12 +301,12 @@ for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
         "${DASHBOARD_URL}" \
         >/dev/null 2>&1; then
 
-        log "ScoreCast is healthy."
+        log "GameLine Pro is healthy."
 
         rm -f "${MARKER}"
         write_status \
             "success" \
-            "ScoreCast installation completed successfully after reboot."
+            "GameLine Pro installation completed successfully after reboot."
 
         systemctl disable scorecast-install-resume.service \
             >/dev/null 2>&1 || true
@@ -322,7 +322,7 @@ journalctl \
     -n 50 \
     --no-pager || true
 
-fail "ScoreCast did not become healthy after reboot."
+fail "GameLine Pro did not become healthy after reboot."
 EOF
 
     chmod 0755 "${RESUME_SCRIPT}"
@@ -333,7 +333,7 @@ install_resume_service() {
 
     cat > "${RESUME_SERVICE}" <<EOF
 [Unit]
-Description=Complete ScoreCast installation after reboot
+Description=Complete GameLine Pro installation after reboot
 Wants=network-online.target
 After=network-online.target
 ConditionPathExists=${RESUME_MARKER}
@@ -353,11 +353,11 @@ EOF
 }
 
 schedule_installation_reboot() {
-    log "A reboot is required to finish the ScoreCast installation."
+    log "A reboot is required to finish the GameLine Pro installation."
 
     printf '\n'
     printf '%s\n' "============================================================"
-    printf '%s\n' " ScoreCast has been installed."
+    printf '%s\n' " GameLine Pro has been installed."
     printf '%s\n' " Built-in Raspberry Pi audio has been disabled."
     printf '%s\n' " The installation will finish automatically after reboot."
     printf '%s\n' "============================================================"
@@ -377,7 +377,7 @@ schedule_installation_reboot() {
 }
 
 prepare_directories() {
-    log "Preparing ScoreCast directories."
+    log "Preparing GameLine Pro directories."
 
     mkdir -p \
         "${INSTALL_DIR}" \
@@ -392,10 +392,10 @@ prepare_directories() {
 
 prepare_repository() {
     if [[ ! -d "${REPO_DIR}" ]]; then
-        log "Cloning ScoreCast repository."
+        log "Cloning GameLine Pro repository."
         git clone --bare "${REPO_URL}" "${REPO_DIR}"
     else
-        log "Using existing ScoreCast repository."
+        log "Using existing GameLine Pro repository."
     fi
 
     log "Fetching branches and release tags."
@@ -538,7 +538,7 @@ build_panel_shift() {
 }
 
 validate_release() {
-    log "Validating ScoreCast release ${RELEASE_VERSION}."
+    log "Validating GameLine Pro release ${RELEASE_VERSION}."
 
     SCORECAST_CONFIG_DIR="${STATE_DIR}" \
     PYTHONPATH="${RELEASE_DIR}/src" \
@@ -562,7 +562,7 @@ assert isinstance(settings, dict)
 assert callable(create_matrix)
 assert app is not None
 
-print("ScoreCast release validation succeeded.")
+print("GameLine Pro release validation succeeded.")
 PY
 }
 
@@ -616,7 +616,7 @@ install_systemd_services() {
     else
         cat > "${MAIN_SERVICE_FILE}" <<EOF
 [Unit]
-Description=ScoreCast LED Sports Ticker
+Description=GameLine Pro LED Sports Ticker
 After=network-online.target
 Wants=network-online.target
 
@@ -654,7 +654,7 @@ EOF
     else
         cat > "${UPDATE_SERVICE_FILE}" <<EOF
 [Unit]
-Description=Update ScoreCast from GitHub
+Description=Update GameLine Pro from GitHub
 After=network-online.target
 Wants=network-online.target
 
@@ -690,7 +690,7 @@ initialize_status_file() {
     cat > "${STATUS_FILE}" <<EOF
 {
   "state": "current",
-  "message": "ScoreCast ${RELEASE_VERSION} is installed.",
+  "message": "GameLine Pro ${RELEASE_VERSION} is installed.",
   "version": "${RELEASE_VERSION}",
   "updated_at": ""
 }
@@ -701,7 +701,7 @@ EOF
 }
 
 start_and_verify() {
-    log "Preparing to start ScoreCast."
+    log "Preparing to start GameLine Pro."
 
     systemctl enable "${SERVICE_NAME}.service"
 
@@ -720,7 +720,7 @@ start_and_verify() {
         return
     fi
 
-    log "Starting ScoreCast."
+    log "Starting GameLine Pro."
 
     systemctl restart "${SERVICE_NAME}.service"
 
@@ -736,7 +736,7 @@ start_and_verify() {
                 http://127.0.0.1:8080/ \
                 >/dev/null 2>&1; then
 
-                log "ScoreCast is running and the dashboard is responding."
+                log "GameLine Pro is running and the dashboard is responding."
 
                 rm -f "${RESUME_MARKER}"
 
@@ -756,7 +756,7 @@ start_and_verify() {
         -n 100 \
         --no-pager || true
 
-    die "ScoreCast did not become healthy after installation."
+    die "GameLine Pro did not become healthy after installation."
 }
 
 print_summary() {
@@ -764,7 +764,7 @@ print_summary() {
     ip_address="$(hostname -I 2>/dev/null | awk '{print $1}')"
 
     printf '\n'
-    printf 'ScoreCast %s installed successfully.\n' "${RELEASE_VERSION}"
+    printf 'GameLine Pro %s installed successfully.\n' "${RELEASE_VERSION}"
     printf '\n'
     printf 'Dashboard: http://%s:8080\n' "${ip_address:-<raspberry-pi-ip>}"
     printf 'Current release: %s\n' "$(readlink -f "${CURRENT_LINK}")"

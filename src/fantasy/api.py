@@ -24,7 +24,7 @@ PROJECTION_CACHE_SECONDS = 900
 
 _session = requests.Session()
 _session.headers.update({
-    "User-Agent": "ScoreCast/1.0",
+    "User-Agent": "GameLine/1.0",
     "Accept": "application/json",
 })
 

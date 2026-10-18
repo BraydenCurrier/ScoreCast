@@ -5,11 +5,13 @@ import threading
 import queue
 import uuid
 
+import atexit
 import argparse
 import fcntl
 import os
 import re
 import shutil
+import signal
 import subprocess
 from pathlib import Path
 
@@ -26,7 +28,11 @@ from updater.config import (
     SYSTEM_PYTHON,
     VENVS_DIR,
 )
-from updater.status import write_status
+from updater.status import (
+    mark_updater_interrupted,
+    updater_lock_is_held,
+    write_status,
+)
 from updater.validation import (
     ValidationError,
     run_command,
@@ -40,9 +46,12 @@ VERSION_PATTERN = re.compile(
     r"(?:[-+].*)?$"
 )
 
+FETCH_TIMEOUT_SECONDS = 120
+GIT_COMMAND_TIMEOUT_SECONDS = 60
+
 
 class UpdateError(RuntimeError):
-    """Raised when ScoreCast cannot be updated safely."""
+    """Raised when GameLine Pro cannot be updated safely."""
 
 
 def log(message: str) -> None:
@@ -99,7 +108,7 @@ def acquire_lock():
         lock_file.close()
 
         raise UpdateError(
-            "Another ScoreCast update is "
+            "Another GameLine Pro update is "
             "already running."
         ) from error
 
@@ -111,16 +120,82 @@ def acquire_lock():
     return lock_file
 
 
+def git_environment() -> dict[str, str]:
+    """Run Git without prompts and fail a stalled HTTP transfer."""
+    environment = os.environ.copy()
+    environment.update({
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "/bin/false",
+        "SSH_ASKPASS": "/bin/false",
+        "GCM_INTERACTIVE": "never",
+        "GIT_HTTP_LOW_SPEED_LIMIT": "1000",
+        "GIT_HTTP_LOW_SPEED_TIME": "30",
+    })
+    environment.setdefault(
+        "GIT_SSH_COMMAND",
+        "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
+    )
+    return environment
+
+
 def run_git(*arguments: str) -> str:
     result = run_command(
         [
             "/usr/bin/git",
+            "-c",
+            "credential.interactive=never",
+            "-c",
+            "credential.helper=",
             f"--git-dir={REPOSITORY_DIR}",
             *arguments,
-        ]
+        ],
+        environment=git_environment(),
+        timeout=GIT_COMMAND_TIMEOUT_SECONDS,
     )
 
     return result.stdout.strip()
+
+
+def stop_process(process: subprocess.Popen) -> None:
+    """Stop a Git child and the process group it leads."""
+    if process.poll() is not None:
+        _close_process_streams(process)
+        return
+
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            process.terminate()
+        except OSError:
+            pass
+
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                process.kill()
+            except OSError:
+                pass
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+
+    _close_process_streams(process)
+
+
+def _close_process_streams(process: subprocess.Popen) -> None:
+    for stream in (process.stdout, process.stderr, process.stdin):
+        if stream is None:
+            continue
+        try:
+            stream.close()
+        except OSError:
+            pass
 
 
 def version_key(tag: str) -> tuple[int, int, int]:
@@ -137,6 +212,38 @@ def version_key(tag: str) -> tuple[int, int, int]:
     )
 
 
+def _record_fetch_progress(
+    line: str,
+    last_write: float,
+) -> float:
+    match = re.search(
+        r"(Receiving objects|Resolving deltas):\s*(\d+)%",
+        line,
+    )
+
+    if (
+        not match
+        or time.monotonic() - last_write < 0.2
+    ):
+        return last_write
+
+    fraction = int(match.group(2)) / 100
+
+    if match.group(1) == "Receiving objects":
+        progress = 5 + int(fraction * 12)
+    else:
+        progress = 17 + int(fraction * 3)
+
+    write_status(
+        "checking",
+        line.strip(),
+        progress=progress,
+        step="Checking repository",
+        progress_kind="transfer",
+    )
+    return time.monotonic()
+
+
 def fetch_repository() -> None:
     write_status(
         "checking",
@@ -149,6 +256,10 @@ def fetch_repository() -> None:
 
     command = [
         "/usr/bin/git",
+        "-c",
+        "credential.interactive=never",
+        "-c",
+        "credential.helper=",
         f"--git-dir={REPOSITORY_DIR}",
         "fetch",
         "--progress",
@@ -159,130 +270,128 @@ def fetch_repository() -> None:
 
     process = subprocess.Popen(
         command,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
+        env=git_environment(),
+        start_new_session=True,
     )
 
-    output = []
-    progress_queue = queue.Queue()
+    output: list[str] = []
+    stdout_chunks: list[str] = []
+    progress_queue: queue.Queue = queue.Queue()
 
-    def reader():
+    def read_stderr() -> None:
         try:
             while True:
                 char = process.stderr.read(1)
-
                 if char == "":
                     break
-
                 progress_queue.put(char)
+        except Exception:
+            pass
         finally:
             progress_queue.put(None)
 
-    thread = threading.Thread(
-        target=reader,
+    def read_stdout() -> None:
+        try:
+            while True:
+                chunk = process.stdout.read(4096)
+                if not chunk:
+                    break
+                stdout_chunks.append(chunk)
+        except Exception:
+            pass
+
+    stderr_thread = threading.Thread(
+        target=read_stderr,
         daemon=True,
     )
-
-    thread.start()
+    stdout_thread = threading.Thread(
+        target=read_stdout,
+        daemon=True,
+    )
+    stderr_thread.start()
+    stdout_thread.start()
 
     line = ""
     last_write = 0.0
-    finished = False
+    timed_out = False
+    returncode = 1
+    deadline = time.monotonic() + FETCH_TIMEOUT_SECONDS
 
-    while not finished:
-        try:
-            char = progress_queue.get(
-                timeout=0.25
-            )
-        except queue.Empty:
-            char = ""
+    try:
+        while True:
+            if time.monotonic() >= deadline:
+                timed_out = True
+                stop_process(process)
+                break
 
-        if char is None:
-            finished = True
+            try:
+                char = progress_queue.get(timeout=0.25)
+            except queue.Empty:
+                if process.poll() is not None:
+                    try:
+                        char = progress_queue.get(timeout=1)
+                    except queue.Empty:
+                        break
+                else:
+                    continue
 
-        elif char in ("\r", "\n"):
-            if line:
-                output.append(line)
+            if char is None:
+                break
 
-                if len(output) > 40:
-                    output.pop(0)
-
-                match = re.search(
-                    r"(Receiving objects|Resolving deltas):\s*(\d+)%",
-                    line,
-                )
-
-                if (
-                    match
-                    and time.monotonic()
-                    - last_write
-                    >= 0.2
-                ):
-                    fraction = (
-                        int(match.group(2))
-                        / 100
+            if char in ("\r", "\n"):
+                if line:
+                    output.append(line)
+                    if len(output) > 40:
+                        output.pop(0)
+                    last_write = _record_fetch_progress(
+                        line,
+                        last_write,
                     )
+                line = ""
+            else:
+                line += char
 
-                    if (
-                        match.group(1)
-                        == "Receiving objects"
-                    ):
-                        progress = (
-                            5
-                            + int(
-                                fraction * 12
-                            )
-                        )
-                    else:
-                        progress = (
-                            17
-                            + int(
-                                fraction * 3
-                            )
-                        )
+        if line:
+            output.append(line)
 
-                    write_status(
-                        "checking",
-                        line.strip(),
-                        progress=progress,
-                        step=(
-                            "Checking repository"
-                        ),
-                        progress_kind=(
-                            "transfer"
-                        ),
-                    )
-
-                    last_write = (
-                        time.monotonic()
-                    )
-
-            line = ""
-
+        if not timed_out:
+            if process.poll() is None:
+                try:
+                    returncode = process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    stop_process(process)
+                    timed_out = True
+                    returncode = process.returncode or 1
+            else:
+                returncode = process.returncode or 0
+    finally:
+        if process.poll() is None:
+            stop_process(process)
         else:
-            line += char
+            _close_process_streams(process)
+        stderr_thread.join(timeout=2)
+        stdout_thread.join(timeout=2)
 
-    if line:
-        output.append(line)
-
-    stdout = process.stdout.read()
-
-    returncode = process.wait()
-
-    thread.join(timeout=1)
+    if timed_out:
+        raise UpdateError(
+            "GitHub fetch timed out after "
+            f"{FETCH_TIMEOUT_SECONDS} seconds."
+        )
 
     if returncode != 0:
+        stdout = "".join(stdout_chunks).strip()
+        detail = (
+            "\n".join(output[-8:])
+            or stdout
+            or str(returncode)
+        )
         raise UpdateError(
-            "Git fetch failed: "
-            + (
-                "\n".join(
-                    output[-8:]
-                )
-                or stdout
-                or str(returncode)
-            )
+            f"Git fetch failed: {detail}"
         )
 
     write_status(
@@ -414,7 +523,7 @@ def create_release(
 
     write_status(
         "downloading",
-        f"Preparing ScoreCast {version}.",
+        f"Preparing GameLine Pro {version}.",
         version,
         progress=22,
         step="Preparing release",
@@ -565,7 +674,7 @@ def create_release_venv(
         "installing",
         (
             f"Creating environment for "
-            f"ScoreCast {version}."
+            f"GameLine Pro {version}."
         ),
         version,
         progress=40,
@@ -601,7 +710,7 @@ def create_release_venv(
 
     write_status(
         "installing",
-        "Installing ScoreCast dependencies.",
+        "Installing GameLine Pro dependencies.",
         version,
         progress=58,
         step="Installing dependencies",
@@ -705,7 +814,7 @@ def replace_symlink(
 
 
 def restart_scorecast() -> None:
-    log("Restarting ScoreCast.")
+    log("Restarting GameLine Pro.")
 
     run_command([
         "/usr/bin/systemctl",
@@ -816,7 +925,7 @@ def install_update(
 
     write_status(
         "validating",
-        f"Validating ScoreCast {version}.",
+        f"Validating GameLine Pro {version}.",
         version,
         progress=80,
         step="Validating release",
@@ -861,7 +970,7 @@ def install_update(
 
     write_status(
         "restarting",
-        f"Restarting ScoreCast {version}.",
+        f"Restarting GameLine Pro {version}.",
         version,
         progress=95,
         step="Restarting display",
@@ -885,14 +994,14 @@ def install_update(
     write_status(
         "complete",
         (
-            "ScoreCast updated successfully "
+            "GameLine Pro updated successfully "
             f"to {version}."
         ),
         version,
     )
 
     log(
-        f"ScoreCast {version} installed "
+        f"GameLine Pro {version} installed "
         "successfully."
     )
 
@@ -929,7 +1038,7 @@ def check_for_update() -> tuple[str, str, str]:
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Update ScoreCast from tagged "
+            "Update GameLine Pro from tagged "
             "GitHub releases."
         )
     )
@@ -973,7 +1082,7 @@ def main() -> int:
             write_status(
                 "current",
                 (
-                    "ScoreCast is already "
+                    "GameLine Pro is already "
                     "up to date."
                 ),
                 latest_version,
@@ -986,7 +1095,7 @@ def main() -> int:
             write_status(
                 "available",
                 (
-                    f"ScoreCast {latest_version} "
+                    f"GameLine Pro {latest_version} "
                     "is available."
                 ),
                 latest_version,
@@ -1010,30 +1119,59 @@ def main() -> int:
         lock_handle.close()
 
 
+def record_updater_failure(message: str) -> None:
+    """Persist a failure without clobbering a different live update."""
+    if updater_lock_is_held():
+        log(
+            "Leaving the running update status unchanged."
+        )
+        return
+
+    try:
+        write_status(
+            "failed",
+            message,
+        )
+    except OSError:
+        pass
+
+
+def _exit_after_interruption(signum: int, _frame) -> None:
+    mark_updater_interrupted(
+        "The updater was interrupted before it finished."
+    )
+    raise SystemExit(128 + signum)
+
+
+def _exit_after_unexpected_stop() -> None:
+    mark_updater_interrupted(
+        "The updater stopped before it finished."
+    )
+
+
 if __name__ == "__main__":
+    signal.signal(
+        signal.SIGTERM,
+        _exit_after_interruption,
+    )
+    signal.signal(
+        signal.SIGINT,
+        _exit_after_interruption,
+    )
+    atexit.register(
+        _exit_after_unexpected_stop
+    )
+
     try:
         raise SystemExit(
             main()
         )
 
-    except (
-        UpdateError,
-        ValidationError,
-        subprocess.SubprocessError,
-        OSError,
-    ) as error:
+    except Exception as error:
         message = str(error)
 
         log(
             f"ERROR: {message}"
         )
-
-        try:
-            write_status(
-                "failed",
-                message,
-            )
-        except OSError:
-            pass
-
+        record_updater_failure(message)
         raise SystemExit(1)

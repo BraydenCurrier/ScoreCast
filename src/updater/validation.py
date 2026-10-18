@@ -25,15 +25,23 @@ def run_command(
     *,
     environment: dict[str, str] | None = None,
     cwd: Path | None = None,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(
-        command,
-        cwd=str(cwd) if cwd else None,
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(cwd) if cwd else None,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as error:
+        command_text = " ".join(command)
+        raise ValidationError(
+            f"{command_text} timed out after {timeout} seconds."
+        ) from error
 
     if result.returncode != 0:
         output = (
@@ -157,7 +165,7 @@ def web_dashboard_is_healthy() -> bool:
             WEB_HEALTH_URL,
             headers={
                 "User-Agent": (
-                    "ScoreCast-Updater/1.0"
+                    "GameLine-Updater/1.0"
                 ),
             },
         )
@@ -198,11 +206,11 @@ def wait_for_service_health() -> None:
 
     if not service_is_active():
         raise ValidationError(
-            "ScoreCast did not remain active "
+            "GameLine Pro did not remain active "
             "after restarting."
         )
 
     raise ValidationError(
-        "ScoreCast started, but the web dashboard "
+        "GameLine Pro started, but the web dashboard "
         f"did not respond at {WEB_HEALTH_URL}."
     )

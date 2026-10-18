@@ -267,7 +267,7 @@ TEAM_COLORS = {
     "YSU": (229,  25,  54),
 }
 
-# Abbreviations used in older ScoreCast data or ESPN overrides.
+# Abbreviations used in older GameLine data or ESPN overrides.
 TEAM_COLOR_ALIASES = {
     "AFA": "AF",    "IND": "IU",    "M-OH": "MOH",
     "MIN": "MINN",    "NCST": "NCSU",    "NW": "NU",

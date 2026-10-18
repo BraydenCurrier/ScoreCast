@@ -1,14 +1,14 @@
 {
   "id": "/",
-  "name": "ScoreCast",
-  "short_name": "ScoreCast",
-  "description": "Control your ScoreCast sports ticker.",
+  "name": "GameLine Pro",
+  "short_name": "GameLine",
+  "description": "Control GameLine Pro from GameLine Displays.",
   "start_url": "/games",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0b0c10",
-  "theme_color": "#0b0c10",
+  "background_color": "#0B1120",
+  "theme_color": "#0B1120",
   "icons": [
     {
       "src": "/static/icons/icon-192.png",

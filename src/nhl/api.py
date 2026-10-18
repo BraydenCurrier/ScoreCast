@@ -1,9 +1,9 @@
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 import json
 
 import requests
 
+from common.broadcast import format_broadcast as _get_broadcast
 from common.espn_scoreboard import (
     competitor_stat_int,
     possession_abbr,
@@ -13,7 +13,7 @@ from common.espn_scoreboard import (
     team_abbr,
 )
 from common.http import failure_text, get_body
-from common.timezone import get_local_timezone
+from common.timezone import format_local_date, format_local_time
 
 from nhl.models import HockeyGame
 
@@ -58,30 +58,6 @@ def fetch_nhl_scoreboard():
         )
 
     return data
-
-
-def format_local_time(date_string):
-    utc_dt = datetime.fromisoformat(
-        date_string.replace("Z", "+00:00")
-    )
-
-    local_dt = utc_dt.astimezone(
-        get_local_timezone()
-    )
-
-    return local_dt.strftime("%-I:%M")
-
-
-def format_local_date(date_string):
-    utc_dt = datetime.fromisoformat(
-        date_string.replace("Z", "+00:00")
-    )
-
-    local_dt = utc_dt.astimezone(
-        get_local_timezone()
-    )
-
-    return local_dt.strftime("%b %-d")
 
 
 def get_record(team):
@@ -168,8 +144,6 @@ def get_period_status(status):
         overtime,
         shootout,
     )
-
-from common.broadcast import format_broadcast as _get_broadcast
 
 
 def _toi_seconds(text):
@@ -417,6 +391,7 @@ def get_today_games():
                 home_so_goals=safe_int(
                     home.get("shootoutScore"),
                 ),
+                event_id=str(event.get("id") or ""),
             )
         )
         if game_status != "Scheduled":

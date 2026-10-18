@@ -2,10 +2,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import unicodedata
 
-from common.timezone import get_local_timezone
+from common.timezone import (
+    format_local_date,
+    format_local_time,
+    get_local_timezone,
+)
 
 import requests
 
+from common.broadcast import format_broadcast as _format_broadcast
 from mlb.models import BaseballGame, MlbPitch, MlbScoringPlay
 
 MLB_SCHEDULE_URL = "https://statsapi.mlb.com/api/v1/schedule"
@@ -46,16 +51,33 @@ def get_team_abbr(team):
     return TEAM_ABBR.get(team["id"], team["name"][:3].upper())
 
 
-def format_local_time(utc_time_str):
-    utc_dt = datetime.fromisoformat(
-        utc_time_str.replace("Z", "+00:00")
-    )
+_RADIO_TYPES = {"AM", "FM", "RADIO"}
 
-    local_dt = utc_dt.astimezone(
-        get_local_timezone()
-    )
 
-    return local_dt.strftime("%-I:%M")
+def _parse_broadcast(game):
+    english = []
+    other = []
+
+    for entry in game.get("broadcasts") or []:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("type") or "").upper() in _RADIO_TYPES:
+            continue
+
+        converted = {
+            "shortName": entry.get("name") or entry.get("callSign") or "",
+            "callLetters": entry.get("callSign"),
+            "market": {
+                "type": "national" if entry.get("isNational") else "home"
+            },
+        }
+        language = str(entry.get("language") or "en").lower()
+        if language in {"", "en", "english"}:
+            english.append(converted)
+        else:
+            other.append(converted)
+
+    return _format_broadcast(event={"broadcasts": english or other})
 
 
 def get_record(team_data):
@@ -435,6 +457,8 @@ def _parse_game(game, include_scoring_plays=False):
         home=home,
         status=game["status"]["abstractGameState"],
         start_time=format_local_time(game["gameDate"]),
+        date=format_local_date(game["gameDate"]),
+        broadcast=_parse_broadcast(game),
         away_score=away_data.get("score", 0) or 0,
         home_score=home_data.get("score", 0) or 0,
         away_wins=away_record["wins"],
@@ -501,7 +525,7 @@ def _parse_schedule(data, include_scoring_plays=False):
 
 def get_today_games():
     data = _fetch_schedule(
-        "probablePitcher,linescore,team"
+        "probablePitcher,linescore,team,broadcasts"
     )
 
     return _enrich_live_at_bats(_parse_schedule(data))
@@ -509,7 +533,7 @@ def get_today_games():
 
 def get_alert_games():
     data = _fetch_schedule(
-        "linescore,team,scoringplays"
+        "linescore,team,scoringplays,broadcasts"
     )
 
     return _parse_schedule(

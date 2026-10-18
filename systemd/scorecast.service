@@ -1,5 +1,5 @@
 [Unit]
-Description=ScoreCast LED Sports Ticker
+Description=GameLine Pro LED Sports Ticker
 After=network-online.target
 Wants=network-online.target
 

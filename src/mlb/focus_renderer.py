@@ -1,9 +1,12 @@
 from PIL import Image, ImageDraw
 
+from common.broadcast import draw_broadcast_logo
 from common.fonts import (
+    get_3x5_width,
     get_4x5_width,
     gfx_5x7_width,
     gfx_7x11_width,
+    print_3x5,
     print_4x5,
     print_4x5_centered,
     print_4x5_right,
@@ -17,6 +20,9 @@ from mlb.mlb_renderer import (
     draw_inning,
     draw_outs,
     draw_team_logo,
+    final_label,
+    is_final,
+    is_scheduled,
 )
 
 
@@ -74,16 +80,6 @@ def _mix(a, b, t):
         max(0, min(255, int(a[i] + (b[i] - a[i]) * t)))
         for i in range(3)
     )
-
-
-def _is_scheduled(game):
-    status = str(getattr(game, "status", "")).strip().lower()
-    return status in {"preview", "scheduled", "pre-game", "pregame"}
-
-
-def _is_final(game):
-    status = str(getattr(game, "status", "")).strip().lower()
-    return "final" in status
 
 
 def _last_name(value, max_width):
@@ -444,9 +440,25 @@ def _draw_scheduled(image, draw, game, settings):
         record=_team_record(game, True),
     )
 
+    cx = FOCUS_WIDTH // 2
+    date = str(getattr(game, "date", "") or "").strip()
     start_time = str(getattr(game, "start_time", "") or "").strip()
+    broadcast = str(getattr(game, "broadcast", "") or "").strip()
+
+    if date:
+        print_4x5_centered(draw, date, cx, 2, DIM_WHITE)
     if start_time:
-        print_gfx_5x7_centered(draw, start_time, FOCUS_WIDTH // 2, 12, YELLOW)
+        print_gfx_5x7_centered(draw, start_time, cx, 11, YELLOW)
+    if broadcast:
+        drawn = draw_broadcast_logo(image, broadcast, cx, 25, settings)
+        if not drawn:
+            print_3x5(
+                draw,
+                broadcast.upper(),
+                cx - get_3x5_width(broadcast.upper()) // 2,
+                25,
+                DIM_WHITE,
+            )
 
 
 def _draw_final(image, draw, game, settings):
@@ -470,7 +482,13 @@ def _draw_final(image, draw, game, settings):
         score=_safe_int(game.home_score),
         record=_team_record(game, True),
     )
-    print_gfx_5x7_centered(draw, "FINAL", FOCUS_WIDTH // 2, 12, WHITE)
+    print_gfx_5x7_centered(
+        draw,
+        final_label(game),
+        FOCUS_WIDTH // 2,
+        12,
+        WHITE,
+    )
 
 
 def _draw_live(image, draw, game, settings):
@@ -545,11 +563,11 @@ def render_mlb_focus(game, settings):
     image = Image.new("RGB", (FOCUS_WIDTH, FOCUS_HEIGHT), BLACK)
     draw = ImageDraw.Draw(image)
 
-    if _is_scheduled(game):
+    if is_scheduled(game):
         _draw_scheduled(image, draw, game, settings)
         return image
 
-    if _is_final(game):
+    if is_final(game):
         _draw_final(image, draw, game, settings)
         return image
 
