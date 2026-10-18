@@ -36,7 +36,7 @@ body {
     flex-direction: column;
     padding-top: max(12px, env(safe-area-inset-top));
     padding-right: max(12px, env(safe-area-inset-right));
-    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    padding-bottom: 0;
     padding-left: max(12px, env(safe-area-inset-left));
     font-family: var(--font-body);
     background: var(--bg);
@@ -58,7 +58,7 @@ body {
     max-width: 430px;
     width: 100%;
     margin: 0 auto;
-    padding: 0 0 12px;
+    padding: 0 0 calc(88px + env(safe-area-inset-bottom));
     min-width: 0;
     min-height: 0;
     flex: 1 1 auto;
@@ -610,6 +610,7 @@ textarea {
     min-height: 42px;
     align-items: center;
     justify-content: center;
+    gap: 6px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     background: var(--bg-inset);
@@ -620,6 +621,16 @@ textarea {
     padding: 9px 6px;
     cursor: pointer;
     user-select: none;
+}
+
+.favorite-option .score-logo {
+    width: 18px;
+    height: 18px;
+    flex-basis: 18px;
+}
+
+.favorite-option .score-abbr {
+    font-size: 13px;
 }
 
 .favorite-option input:checked + span {
@@ -719,7 +730,7 @@ input[type=range] {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 13px 0;
+    padding: 14px 4px 14px 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
@@ -730,6 +741,8 @@ input[type=range] {
 .game-row input {
     width: 20px;
     height: 20px;
+    order: 2;
+    flex: 0 0 auto;
     accent-color: var(--accent);
 }
 
@@ -784,7 +797,7 @@ input[type=range] {
     font-weight: 700;
     margin-top: 4px;
     position: sticky;
-    bottom: max(10px, env(safe-area-inset-bottom));
+    bottom: calc(76px + env(safe-area-inset-bottom));
     z-index: 8;
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
 }
@@ -1757,5 +1770,258 @@ body.logo-sheet-open {
     .bet-row {
         grid-template-columns: repeat(3, minmax(0, 1fr));
     }
+}
+
+.page-title {
+    font-size: 32px;
+    font-weight: 800;
+}
+
+.score-card {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    border-radius: 0;
+}
+
+.score-card .hint {
+    margin-bottom: 10px;
+}
+
+.game-row-container[data-live="true"] {
+    background: rgba(0, 212, 255, 0.04);
+}
+
+.league-filter-select {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+}
+
+.sport-pills {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin: 0 0 12px;
+    padding: 2px 0 10px;
+}
+
+.sport-pills::-webkit-scrollbar {
+    display: none;
+}
+
+.sport-pill {
+    flex: 0 0 auto;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font-family: var(--font-display);
+    font-size: 14px;
+    font-weight: 700;
+    padding: 8px 4px 10px;
+    border-bottom: 2px solid transparent;
+}
+
+.sport-pill.active {
+    color: var(--text);
+    border-bottom-color: var(--accent-2);
+}
+
+.scoreboard {
+    flex: 1;
+    min-width: 0;
+}
+
+.score-meta,
+.score-team {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.score-team-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.score-logo {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    flex: 0 0 24px;
+}
+
+.score-rank {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 800;
+    min-width: 1.15em;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.score-meta {
+    margin-bottom: 8px;
+}
+
+.score-league {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.score-status {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.score-status.is-live,
+.game-row-container[data-live="true"] .score-status {
+    color: var(--accent-2);
+}
+
+.score-abbr {
+    font-family: var(--font-display);
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+}
+
+.score-pts {
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.04em;
+    min-width: 1.4em;
+    text-align: right;
+}
+
+.score-pts:empty {
+    display: none;
+}
+
+.score-when {
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.game-row-container[data-live="true"] .matchup::after {
+    display: none;
+}
+
+.bottom-nav {
+    position: fixed;
+    left: 50%;
+    bottom: 0;
+    z-index: 40;
+    width: 100%;
+    max-width: 430px;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 0;
+    padding: 6px 6px calc(8px + env(safe-area-inset-bottom));
+    background: rgba(11, 17, 32, 0.96);
+    border-top: 1px solid var(--line);
+    backdrop-filter: blur(16px);
+}
+
+.bottom-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-height: 48px;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.bottom-nav-item svg {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.bottom-nav-item svg circle {
+    fill: currentColor;
+    stroke: none;
+}
+
+.bottom-nav-item.active {
+    color: var(--accent-2);
+}
+
+.more-sheet {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+}
+
+.more-sheet[hidden] {
+    display: none;
+}
+
+.more-sheet-backdrop {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.more-sheet-card {
+    position: relative;
+    width: 100%;
+    max-width: 430px;
+    padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+    border-radius: 20px 20px 0 0;
+    background: var(--bg-elevated);
+}
+
+.more-sheet-account {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.more-link {
+    display: block;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+    color: var(--text);
+    text-decoration: none;
+    font-size: 16px;
+    font-weight: 650;
+}
+
+.more-link-quiet {
+    border-bottom: 0;
+    color: var(--muted);
 }
 
