@@ -21,8 +21,6 @@ RED = (220, 50, 50)
 
 LOGO_SIZE = 30
 CARD_WIDTH = 64
-GAME_GAP = 5
-GAME_WIDTH = LOGO_SIZE + CARD_WIDTH + LOGO_SIZE
 
 NAME_LEFT_X = 2
 NAME_RIGHT_X = 62
@@ -156,7 +154,7 @@ def _draw_centered_if_fits(
     return True
 
 
-def _draw_pregame_center_badge(image, draw, game, offset_x, settings):
+def _draw_pregame_center_badge(draw, game, offset_x):
     # Soccer W-D-L records are too wide to share a row with
     # league text or a broadcast logo. Keep this middle band
     # for the league only so nothing collides with the records.
@@ -249,13 +247,7 @@ def render_soccer_game_onto(image, draw, game, offset_x, settings):
                 WHITE,
             )
 
-        _draw_pregame_center_badge(
-            image,
-            draw,
-            game,
-            offset_x,
-            settings,
-        )
+        _draw_pregame_center_badge(draw, game, offset_x)
 
         print_3x5(
             draw,

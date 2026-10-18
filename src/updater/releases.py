@@ -1,4 +1,4 @@
-"""Cached lookup of the newest ScoreCast release and its description."""
+"""Cached lookup of the newest GameLine Pro release and its description."""
 
 from __future__ import annotations
 
@@ -227,7 +227,7 @@ def _get_json_page(url: str):
         url,
         headers={
             "Accept": "application/vnd.github+json",
-            "User-Agent": "ScoreCast",
+            "User-Agent": "GameLine",
             "X-GitHub-Api-Version": "2022-11-28",
         },
         timeout=REQUEST_TIMEOUT_SECONDS,

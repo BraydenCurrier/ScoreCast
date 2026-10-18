@@ -7,6 +7,8 @@ from html import escape
 
 from flask import Flask, abort, request, redirect, send_file, session, jsonify, url_for
 
+from common.game_ids import game_id as shared_game_id
+from common.game_ids import selected_sports_ids
 from common.settings import get_developer_settings, get_settings, update_settings
 from common.system_stats import collect_system_stats
 from common.users import (
@@ -21,7 +23,18 @@ from common.users import (
     has_users,
     list_users,
 )
-from common.logo_store import get_logo_variant_path, get_selected_logo_variant, get_teams_with_logo_variants, get_teams_with_logos
+from common.logo_store import (
+    EDITABLE_LOGO_LEAGUES,
+    LogoError,
+    delete_custom_logo,
+    get_custom_variants_by_team,
+    get_logo_variant_path,
+    get_selected_logo_variant,
+    get_team_logo_catalog,
+    get_teams_with_logos,
+    save_custom_logo,
+    variant_label,
+)
 
 from soccer.api import (
     DEFAULT_SOCCER_LEAGUES,
@@ -54,7 +67,13 @@ from fantasy.api import (
 )
 
 from updater.releases import latest_release_info
-from updater.status import read_status
+from updater.status import (
+    mark_start_requested,
+    read_status,
+    reconcile_status,
+    service_state_is_running,
+    write_status,
+)
 
 app = Flask(__name__)
 app.secret_key = get_or_create_web_secret()
@@ -62,6 +81,7 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 86400
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
 
 latest_games = []
 
@@ -121,13 +141,16 @@ ACTIVE_UPDATE_STATES = {
     "rolling_back",
 }
 
-def is_update_service_active() -> bool:
+def update_service_state() -> str:
+    """Return the systemd ActiveState, or "unknown" if it cannot be read."""
     try:
         result = subprocess.run(
             [
                 "/usr/bin/systemctl",
-                "is-active",
-                "--quiet",
+                "show",
+                "-p",
+                "ActiveState",
+                "--value",
                 UPDATE_SERVICE_NAME,
             ],
             capture_output=True,
@@ -136,16 +159,25 @@ def is_update_service_active() -> bool:
             timeout=5,
         )
 
-        return result.returncode == 0
-
     except (
         OSError,
         subprocess.TimeoutExpired,
     ):
-        return False
+        return "unknown"
+
+    if result.returncode != 0:
+        return "unknown"
+
+    return result.stdout.strip().lower() or "unknown"
+
+
+def is_update_service_active() -> bool:
+    return service_state_is_running(
+        update_service_state()
+    )
 
 def get_scorecast_version() -> str:
-    """Return the version of the installed ScoreCast release."""
+    """Return the version of the installed GameLine Pro release."""
     current_link = Path("/opt/scorecast/current")
 
     try:
@@ -260,7 +292,7 @@ def page_header(active_page="games"):
         "alerts": ("Alerts", "Team takeovers and chants"),
         "players": ("Players", "Big-play alerts for NFL stars"),
         "bets": ("Bets", "Track slips you already placed"),
-        "logos": ("Logos", "Artwork that hits the LEDs"),
+        "logos": ("Logos", "Pick a look or upload your own"),
         "settings": ("Settings", "Display, updates, and access"),
         "favorites": ("Favorites", "Keep your teams first"),
         "profiles": ("Settings", "Display, updates, and access"),
@@ -268,7 +300,7 @@ def page_header(active_page="games"):
     }
     page_title, page_lede = page_titles.get(
         active_page,
-        ("ScoreCast", ""),
+        ("GameLine Pro", ""),
     )
 
     user = current_user()
@@ -308,8 +340,8 @@ def page_header(active_page="games"):
     <header class="topbar">
         <div class="topbar-main">
             <div class="brand-lockup brand-lockup-compact">
-                <div class="brand-mark" aria-hidden="true">SC</div>
-                <h1 class="title">ScoreCast</h1>
+                <div class="brand-mark" aria-hidden="true">GL</div>
+                <h1 class="title">GameLine Pro</h1>
             </div>
 
             <div class="topbar-actions">
@@ -369,7 +401,7 @@ def page_header(active_page="games"):
         </div>
     </header>
 
-    <nav class="tabs" id="scorecast-tabs" aria-label="ScoreCast">
+    <nav class="tabs" id="gameline-tabs" aria-label="GameLine Pro">
         <a class="tab {games_active}" href="/games">Games</a>
         <a class="tab {stocks_active}" href="/stocks">Stocks</a>
         <a class="tab {focus_active}" href="/focus">Focus</a>
@@ -382,7 +414,7 @@ def page_header(active_page="games"):
     </nav>
     <script>
     (function () {{
-      var nav = document.getElementById("scorecast-tabs");
+      var nav = document.getElementById("gameline-tabs");
       var active = nav && nav.querySelector(".tab.active");
       if (!nav || !active) {{
         return;
@@ -491,7 +523,7 @@ def page_head(title: str) -> str:
 
         <title>{escape(title)}</title>
 
-        <meta name="theme-color" content="#07080b">
+        <meta name="theme-color" content="#0B1120">
 
         <meta
             name="apple-mobile-web-app-capable"
@@ -505,7 +537,7 @@ def page_head(title: str) -> str:
 
         <meta
             name="apple-mobile-web-app-title"
-            content="ScoreCast"
+            content="GameLine"
         >
 
         <meta
@@ -553,20 +585,20 @@ def page_head(title: str) -> str:
         <link
             rel="mask-icon"
             href="/static/safari-pinned-tab.svg"
-            color="#55f18b"
+            color="#2563EB"
         >
 
         <meta property="og:type" content="website">
-        <meta property="og:title" content="ScoreCast">
+        <meta property="og:title" content="GameLine Pro">
 
         <meta
             property="og:description"
-            content="Live sports on your LED matrix."
+            content="Live sports on GameLine Pro from GameLine Displays."
         >
 
         <meta
             property="og:image"
-            content="/static/social/scorecast-og-1200x630.png"
+            content="/static/social/gameline-og-1200x630.png"
         >
 
         {page_styles()}
@@ -575,7 +607,10 @@ def page_head(title: str) -> str:
 
 def page_styles():
     return """
-    <link rel="stylesheet" href="/static/app.css?v=18">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/app.css?v=19">
     <script>
     (function () {
       if (navigator.serviceWorker) {
@@ -897,33 +932,7 @@ def get_game_league(game):
     return "mlb", "MLB"
 
 def get_game_id(game):
-    league_key, _ = get_game_league(game)
-
-    if league_key == "soccer":
-        event_id = str(
-            getattr(game, "event_id", "") or ""
-        ).strip()
-
-        if event_id:
-            return f"{league_key}:{event_id}"
-
-    if league_key == "pga":
-        event_id = str(
-            getattr(game, "event_id", "") or ""
-        ).strip()
-        if event_id:
-            return f"{league_key}:{event_id}"
-
-    if league_key == "stocks":
-        symbol = str(
-            getattr(game, "symbol", "")
-            or getattr(game, "away", "")
-        ).strip().upper()
-
-        if symbol:
-            return f"{league_key}:{symbol}"
-
-    return f"{league_key}:{game.away}@{game.home}"
+    return shared_game_id(game)
 
 def get_favorite_teams(
     settings,
@@ -1057,6 +1066,22 @@ def get_display_status(game, league_key):
     return status
 
 
+def get_game_when_label(game):
+    date = str(getattr(game, "date", "") or "").strip()
+    start_time = str(getattr(game, "start_time", "") or "").strip()
+    when = str(getattr(game, "when", "") or "").strip()
+
+    if not date and when:
+        date = when
+
+    if date and start_time:
+        if start_time.lower() in date.lower():
+            return date
+        return f"{date} {start_time}"
+
+    return date or start_time
+
+
 def render_auth_page(title, body):
     return f"""
 <!DOCTYPE html>
@@ -1085,9 +1110,9 @@ def login():
         body = f"""
             <div class="auth-intro">
                 <div class="brand-lockup">
-                    <div class="brand-mark" aria-hidden="true">SC</div>
+                    <div class="brand-mark" aria-hidden="true">GL</div>
                     <div>
-                        <div class="brand-name">ScoreCast</div>
+                        <div class="brand-name">GameLine Pro</div>
                         <div class="brand-tag">Unable to load profiles</div>
                     </div>
                 </div>
@@ -1096,7 +1121,7 @@ def login():
                 <div class="error">{escape(str(exc))}</div>
             </div>
         """
-        return render_auth_page("ScoreCast Login", body), 500
+        return render_auth_page("GameLine Pro Login", body), 500
 
     if profiles_exist:
         user = current_user()
@@ -1177,10 +1202,10 @@ def login():
     body = f"""
         <div class="auth-intro">
             <div class="brand-lockup">
-                <div class="brand-mark" aria-hidden="true">SC</div>
+                <div class="brand-mark" aria-hidden="true">GL</div>
                 <div>
-                    <div class="brand-name">ScoreCast</div>
-                    <div class="brand-tag">{subtitle}</div>
+                    <div class="brand-name">GameLine Pro</div>
+                    <div class="brand-tag">GameLine Displays</div>
                 </div>
             </div>
         </div>
@@ -1195,7 +1220,7 @@ def login():
         </div>
     """
 
-    return render_auth_page("ScoreCast Login", body)
+    return render_auth_page("GameLine Pro Login", body)
 
 
 @app.route("/setup", methods=["GET", "POST"])
@@ -1229,9 +1254,9 @@ def setup_root_profile():
     body = f"""
         <div class="auth-intro">
             <div class="brand-lockup">
-                <div class="brand-mark" aria-hidden="true">SC</div>
+                <div class="brand-mark" aria-hidden="true">GL</div>
                 <div>
-                    <div class="brand-name">ScoreCast</div>
+                    <div class="brand-name">GameLine Pro</div>
                     <div class="brand-tag">Create the root profile</div>
                 </div>
             </div>
@@ -1441,7 +1466,7 @@ def restart_scorecast():
 
     return jsonify({
         "ok": True,
-        "message": "ScoreCast is restarting.",
+        "message": "GameLine Pro is restarting.",
     })
 
 
@@ -1630,6 +1655,7 @@ def _profiles_cards_html(saved_message="", error=""):
 def games():
     settings = get_settings()
     hidden = set(settings.get("hidden_games", []))
+    selected_ids = selected_sports_ids(settings)
     league_filters = {
         "selected",
         "all",
@@ -1667,10 +1693,7 @@ def games():
 
         checked = (
             "checked"
-            if (
-                favorite_game
-                or game_id not in hidden
-            )
+            if game_id in selected_ids
             else ""
         )
 
@@ -1680,6 +1703,7 @@ def games():
             continue
 
         display_status = get_display_status(game, league_key)
+        when_label = get_game_when_label(game)
         is_live = is_game_live(game)
 
         is_top_25 = (
@@ -1692,6 +1716,7 @@ def games():
 
         safe_game_id = escape(game_id, quote=True)
         safe_status = escape(str(display_status))
+        safe_when = escape(when_label) if when_label else ""
         favorite_suffix = (
             " · Favorite" if favorite_game else ""
         )
@@ -1721,6 +1746,8 @@ def games():
             details = (
                 f"{summary} · {safe_status}{favorite_suffix}"
             )
+            if safe_when and safe_when not in summary:
+                details = f"{details} · {safe_when}"
         else:
             matchup = (
                 f"{escape(str(game.away))} @ "
@@ -1736,12 +1763,13 @@ def games():
                 f"{away_score} - {home_score} · "
                 f"{safe_status}{favorite_suffix}"
             )
+            if safe_when:
+                details = f"{details} · {safe_when}"
 
         game_rows += f"""
         <div class="game-row-container" draggable="true" data-id="{safe_game_id}" data-league="{league_key}" data-top25="{"true" if is_top_25 else "false"}" data-live="{"true" if is_live else "false"}">
             <label class="game-row">
-                <input type="checkbox" name="game" value="{safe_game_id}" {checked} {"disabled" if favorite_game else ""}> 
-                {f'<input type="hidden" name="game" value="{safe_game_id}">' if favorite_game else ''}
+                <input type="checkbox" name="game" value="{safe_game_id}" {checked}>
                 <div class="game-info">
                     <div class="matchup">{matchup}</div>
                     <div class="details">
@@ -1767,7 +1795,7 @@ def games():
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ScoreCast Games</title>
+    <title>GameLine Pro Games</title>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     {page_styles()}
 </head>
@@ -1778,6 +1806,10 @@ def games():
 
         <form method="POST" action="/save_games">
             <div class="card" id="games_card">
+                <div class="hint" style="margin-bottom:12px;">
+                    Only checked games scroll on the board.
+                    New games stay off until you select them.
+                </div>
                 <input
                     class="search-input"
                     type="text"
@@ -2123,7 +2155,7 @@ def stocks_page():
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ScoreCast Stocks</title>
+    <title>GameLine Pro Stocks</title>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     {page_styles()}
 </head>
@@ -2188,6 +2220,8 @@ def _focus_search_blob(game, league_key):
         str(get_display_status(game, league_key)),
         str(getattr(game, "broadcast", "") or ""),
         str(getattr(game, "start_time", "") or ""),
+        str(getattr(game, "date", "") or ""),
+        str(getattr(game, "when", "") or ""),
     ]
 
     for team in (
@@ -2413,7 +2447,7 @@ def focus_page():
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ScoreCast Focus Mode</title>
+    <title>GameLine Pro Focus Mode</title>
     <meta
         name="viewport"
         content="
@@ -3265,7 +3299,7 @@ def alerts_page():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>ScoreCast Alerts</title>
+        <title>GameLine Pro Alerts</title>
 
         <meta
             name="viewport"
@@ -3976,7 +4010,7 @@ def players_page():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>ScoreCast Players</title>
+        <title>GameLine Pro Players</title>
 
         <meta
             name="viewport"
@@ -4871,7 +4905,7 @@ def fantasy_page():
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ScoreCast Fantasy</title>
+    <title>GameLine Pro Fantasy</title>
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1, viewport-fit=cover"
@@ -4945,6 +4979,163 @@ def fantasy_page():
 </html>
 """
 
+def _logo_team_label(league, team):
+    team = str(team or "").upper()
+    if league == "mlb":
+        return MLB_TEAM_NAMES.get(team, team)
+    if league == "nfl":
+        definition = NFL_TEAM_ALERTS.get(team)
+        if definition is not None:
+            return definition.name
+    return team
+
+
+def _logo_redirect(league, team="", **query):
+    kwargs = {"league": league, **query}
+    if team:
+        kwargs["_anchor"] = f"logo-team-{str(team).upper()}"
+    return redirect(url_for("logos_page", **kwargs))
+
+
+def _set_logo_selection(league, team, variant):
+    settings = get_settings()
+    logo_variants = settings.get("logo_variants") or {}
+    if not isinstance(logo_variants, dict):
+        logo_variants = {}
+    league_selections = logo_variants.get(league) or {}
+    if not isinstance(league_selections, dict):
+        league_selections = {}
+    league_selections[str(team).upper()] = str(variant).strip().lower()
+    logo_variants[league] = league_selections
+    update_settings({"logo_variants": logo_variants})
+
+
+LOGO_LEAGUE_LABELS = {
+    "mlb": "MLB",
+    "nfl": "NFL",
+    "cfb": "College Football",
+    "nba": "NBA",
+    "nhl": "NHL",
+    "soccer": "Soccer",
+}
+
+
+def _render_logo_team_list(league, settings):
+    league_teams = get_team_logo_catalog(league)
+    custom_by_team = get_custom_variants_by_team(league)
+    rows = []
+
+    for team, variants in league_teams.items():
+        team = str(team).upper()
+        custom_variants = custom_by_team.get(team, set())
+        display_name = _logo_team_label(league, team)
+        selected_variant = get_selected_logo_variant(
+            settings,
+            league,
+            team,
+            available=variants,
+        )
+        if selected_variant not in variants:
+            selected_variant = (
+                "current" if "current" in variants else variants[0]
+            )
+
+        variant_options = []
+        for variant in variants:
+            variant = str(variant)
+            selected = "selected" if variant == selected_variant else ""
+            option_label = variant_label(variant)
+            if variant in custom_variants:
+                option_label = f"{option_label} (custom)"
+            variant_options.append(
+                f'<option value="{escape(variant, quote=True)}" {selected}>'
+                f"{escape(option_label)}</option>"
+            )
+
+        safe_team = escape(team, quote=True)
+        safe_league = escape(league, quote=True)
+        safe_name = escape(display_name)
+        search_blob = escape(f"{team} {display_name}".lower(), quote=True)
+        preview_url = (
+            f"/logo-preview/{safe_league}/{safe_team}/"
+            f"{escape(selected_variant, quote=True)}"
+        )
+
+        delete_button = ""
+        if selected_variant in custom_variants:
+            delete_button = f"""
+                <form class="logo-delete-form" method="POST" action="/logos/delete">
+                    <input type="hidden" name="league" value="{safe_league}">
+                    <input type="hidden" name="team" value="{safe_team}">
+                    <input type="hidden" name="variant" value="{escape(selected_variant, quote=True)}">
+                    <button class="ghost-button logo-delete-button" type="submit">
+                        Remove custom logo
+                    </button>
+                </form>
+            """
+
+        rows.append(f"""
+            <div
+                class="logo-team-block"
+                id="logo-team-{safe_team}"
+                data-search="{search_blob}"
+                data-league="{safe_league}"
+                data-team="{safe_team}"
+                data-name="{escape(display_name, quote=True)}"
+            >
+                <div class="logo-team-row">
+                    <div class="logo-preview-box">
+                        <img
+                            class="logo-preview"
+                            id="logo-preview-{safe_team}"
+                            src="{preview_url}"
+                            alt="{safe_team} logo preview"
+                            width="30"
+                            height="30"
+                            loading="lazy"
+                            decoding="async"
+                        >
+                    </div>
+                    <div class="logo-team-controls">
+                        <div class="logo-team-heading">
+                            <div class="logo-team-copy">
+                                <div class="logo-team-name">{safe_name}</div>
+                                <div class="logo-team-abbr">{safe_team}</div>
+                            </div>
+                            <button
+                                type="button"
+                                class="icon-button logo-add-button"
+                                aria-label="Add logo for {safe_name}"
+                            >
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M12 5v14M5 12h14"></path>
+                                </svg>
+                            </button>
+                        </div>
+                        <select
+                            class="logo-variant-select"
+                            name="logo:{safe_team}"
+                            form="logo-save-form"
+                            data-league="{safe_league}"
+                            data-team="{safe_team}"
+                            data-preview-id="logo-preview-{safe_team}"
+                        >
+                            {''.join(variant_options)}
+                        </select>
+                        {delete_button}
+                    </div>
+                </div>
+            </div>
+        """)
+
+    if not rows:
+        return (
+            '<div class="empty">No team logos were found.</div>',
+            0,
+        )
+    return "".join(rows), len(league_teams)
+
+
 @app.route(
     "/logo-preview/<league>/<team>/<variant>"
 )
@@ -4966,179 +5157,64 @@ def logo_preview(
     return send_file(
         logo_path,
         mimetype="image/png",
-        max_age=60,
+        max_age=86400,
+        conditional=True,
     )
 
 @app.route("/logos")
 @login_required
 def logos_page():
     settings = get_settings()
-
-    league_labels = {
-        "mlb": "MLB",
-        "nfl": "NFL",
-        "cfb": "College Football",
-        "nba": "NBA",
-        "nhl": "NHL",
-        "soccer": "Soccer",
-    }
-
-    teams_by_league = {}
-
-    for league in league_labels:
-        teams = get_teams_with_logo_variants(
-            league,
-        )
-
-        if teams:
-            teams_by_league[league] = teams
-
     requested_league = (
         request.args.get("league", "")
         .strip()
         .lower()
     )
-
-    if requested_league in teams_by_league:
+    if requested_league in LOGO_LEAGUE_LABELS:
         selected_league = requested_league
-    elif teams_by_league:
-        selected_league = next(iter(teams_by_league))
     else:
-        selected_league = ""
+        selected_league = "mlb"
 
-    league_options = ""
-
-    for league, label in league_labels.items():
-        if league not in teams_by_league:
-            continue
-
-        selected = (
-            "selected"
-            if league == selected_league
-            else ""
-        )
-
-        league_options += f"""
+    league_options = "".join(
+        f"""
         <option
             value="{escape(league, quote=True)}"
-            {selected}
+            {"selected" if league == selected_league else ""}
         >
             {escape(label)}
         </option>
         """
-
-    team_rows = ""
-
-    if selected_league:
-        league_teams = teams_by_league.get(
-            selected_league,
-            {},
-        )
-
-        for team, variants in sorted(
-            league_teams.items()
-        ):
-            team = str(team).upper()
-
-            selected_variant = (
-                get_selected_logo_variant(
-                    settings,
-                    selected_league,
-                    team,
-                )
-            )
-
-            if selected_variant not in variants:
-                selected_variant = "current"
-
-            variant_options = ""
-
-            for variant in variants:
-                variant = str(variant)
-
-                selected = (
-                    "selected"
-                    if variant == selected_variant
-                    else ""
-                )
-
-                variant_label = (
-                    variant
-                    .replace("_", " ")
-                    .replace("-", " ")
-                    .title()
-                )
-
-                variant_options += f"""
-                <option
-                    value="{escape(variant, quote=True)}"
-                    {selected}
-                >
-                    {escape(variant_label)}
-                </option>
-                """
-
-            safe_team = escape(
-                team,
-                quote=True,
-            )
-            safe_league = escape(
-                selected_league,
-                quote=True,
-            )
-            safe_variant = escape(
-                str(selected_variant),
-                quote=True,
-            )
-
-            preview_url = url_for(
-                "logo_preview",
-                league=selected_league,
-                team=team,
-                variant=selected_variant,
-            )
-
-            team_rows += f"""
-            <div class="logo-team-row">
-                <div class="logo-preview-box">
-                    <img
-                        class="logo-preview"
-                        id="logo-preview-{safe_team}"
-                        src="{preview_url}"
-                        alt="{safe_team} logo preview"
-                    >
-                </div>
-
-                <div class="logo-team-controls">
-                    <div class="logo-team-name">
-                        {safe_team}
-                    </div>
-
-                    <select
-                        class="logo-variant-select"
-                        name="logo:{safe_team}"
-                        data-league="{safe_league}"
-                        data-team="{safe_team}"
-                        data-preview-id="
-                            logo-preview-{safe_team}
-                        "
-                    >
-                        {variant_options}
-                    </select>
-                </div>
-            </div>
-            """
-
-    if not team_rows:
-        team_rows = """
-        <div class="empty">
-            No teams with alternate logos were found.
-        </div>
-        """
+        for league, label in LOGO_LEAGUE_LABELS.items()
+        if league in EDITABLE_LOGO_LEAGUES
+    )
+    team_rows, team_count = _render_logo_team_list(
+        selected_league,
+        settings,
+    )
 
     saved_message = ""
+    saved_state = request.args.get("saved", "")
+    error_text = request.args.get("error", "").strip()
 
-    if request.args.get("saved") == "1":
+    if error_text:
+        saved_message = f"""
+        <div class="logo-error">
+            {escape(error_text)}
+        </div>
+        """
+    elif saved_state == "uploaded":
+        saved_message = """
+        <div class="logo-success">
+            Custom logo saved on this GameLine Pro.
+        </div>
+        """
+    elif saved_state == "deleted":
+        saved_message = """
+        <div class="logo-success">
+            Custom logo removed.
+        </div>
+        """
+    elif saved_state == "1":
         saved_message = """
         <div class="logo-success">
             Logo selections saved.
@@ -5154,7 +5230,7 @@ def logos_page():
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ScoreCast Logos</title>
+    <title>GameLine Pro Logos</title>
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1, viewport-fit=cover"
@@ -5182,34 +5258,52 @@ def logos_page():
                 </select>
 
                 <div class="hint">
-                    Only leagues containing teams with
-                    alternate logos are listed.
+                    Custom logos stay on this GameLine Pro
+                    through software updates.
                 </div>
                 '''
                 if league_options
                 else '''
                 <div class="empty">
-                    No alternate logos were found.
+                    No team logos were found.
                 </div>
                 '''
             }
         </div>
 
-        <form method="POST" action="/save_logos">
+        <div class="card">
+            <div class="card-title">
+                Team Logos
+            </div>
+            {
+                f'''
+                <input
+                    id="logo-search"
+                    class="search-input"
+                    type="search"
+                    placeholder="Search {team_count} teams"
+                    autocomplete="off"
+                >
+                '''
+                if selected_league
+                else ""
+            }
+
+            <div id="logo-team-list">
+                {team_rows}
+            </div>
+        </div>
+
+        <form
+            id="logo-save-form"
+            method="POST"
+            action="/save_logos"
+        >
             <input
                 type="hidden"
                 name="league"
                 value="{safe_selected_league}"
             >
-
-            <div class="card">
-                <div class="card-title">
-                    Team Logos
-                </div>
-
-                {team_rows}
-            </div>
-
             {
                 '''
                 <button
@@ -5225,62 +5319,252 @@ def logos_page():
         </form>
     </div>
 
+    <div
+        id="logo-add-sheet"
+        class="logo-sheet"
+        hidden
+    >
+        <button
+            type="button"
+            class="logo-sheet-backdrop"
+            data-logo-sheet-close="1"
+            aria-label="Close"
+        ></button>
+        <div
+            class="logo-sheet-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="logo-add-title"
+        >
+            <div class="logo-sheet-header">
+                <h3 id="logo-add-title">Add logo</h3>
+                <button
+                    type="button"
+                    class="icon-button"
+                    data-logo-sheet-close="1"
+                    aria-label="Close"
+                >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M6 6l12 12M18 6L6 18"></path>
+                    </svg>
+                </button>
+            </div>
+            <form
+                class="logo-upload-form"
+                method="POST"
+                action="/logos/upload"
+                enctype="multipart/form-data"
+            >
+                <input
+                    id="logo-add-league"
+                    type="hidden"
+                    name="league"
+                    value=""
+                >
+                <input
+                    id="logo-add-team"
+                    type="hidden"
+                    name="team"
+                    value=""
+                >
+                <input
+                    id="logo-add-name"
+                    class="search-input logo-name-input"
+                    type="text"
+                    name="name"
+                    maxlength="40"
+                    placeholder="Name this logo"
+                    required
+                    autocomplete="off"
+                >
+                <input
+                    class="logo-file-input"
+                    type="file"
+                    name="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    required
+                >
+                <button
+                    class="save-button logo-upload-button"
+                    type="submit"
+                >
+                    Upload logo
+                </button>
+            </form>
+        </div>
+    </div>
+
     <script>
         const leagueSelector =
             document.getElementById(
                 "logo_league"
             );
 
+        const logoList =
+            document.getElementById("logo-team-list");
+        const logoLeagueField =
+            document.querySelector(
+                "#logo-save-form input[name='league']"
+            );
+
+        function applyLogoFilter() {{
+            if (!logoSearch) {{
+                return;
+            }}
+            const query =
+                logoSearch.value.trim().toLowerCase();
+            document.querySelectorAll(
+                ".logo-team-block"
+            ).forEach(function (row) {{
+                const haystack = row.dataset.search || "";
+                row.hidden = Boolean(
+                    query && haystack.indexOf(query) === -1
+                );
+            }});
+        }}
+
         if (leagueSelector) {{
             leagueSelector.addEventListener(
                 "change",
                 function () {{
-                    const league =
-                        encodeURIComponent(
-                            leagueSelector.value
+                    const league = leagueSelector.value;
+                    if (logoList) {{
+                        logoList.innerHTML =
+                            '<div class="empty">Loading teams…</div>';
+                    }}
+                    fetch(
+                        "/logos/teams?league="
+                        + encodeURIComponent(league),
+                        {{ headers: {{ "Accept": "text/html" }} }}
+                    ).then(function (response) {{
+                        if (!response.ok) {{
+                            throw new Error("load failed");
+                        }}
+                        return response.text();
+                    }}).then(function (html) {{
+                        if (logoList) {{
+                            logoList.innerHTML = html;
+                        }}
+                        if (logoLeagueField) {{
+                            logoLeagueField.value = league;
+                        }}
+                        if (logoSearch) {{
+                            const count =
+                                document.querySelectorAll(
+                                    ".logo-team-block"
+                                ).length;
+                            logoSearch.placeholder =
+                                "Search " + count + " teams";
+                            logoSearch.value = "";
+                        }}
+                        window.history.replaceState(
+                            {{}},
+                            "",
+                            "/logos?league="
+                            + encodeURIComponent(league)
                         );
-
-                    window.location.href =
-                        "/logos?league=" + league;
+                    }}).catch(function () {{
+                        window.location.href =
+                            "/logos?league="
+                            + encodeURIComponent(league);
+                    }});
                 }}
             );
         }}
 
-        document.querySelectorAll(
-            ".logo-variant-select"
-        ).forEach(function (selector) {{
-            selector.addEventListener(
+        const logoSearch =
+            document.getElementById("logo-search");
+
+        if (logoSearch) {{
+            logoSearch.addEventListener("input", applyLogoFilter);
+        }}
+
+        const logoSheet =
+            document.getElementById("logo-add-sheet");
+        const logoAddTitle =
+            document.getElementById("logo-add-title");
+        const logoAddLeague =
+            document.getElementById("logo-add-league");
+        const logoAddTeam =
+            document.getElementById("logo-add-team");
+        const logoAddName =
+            document.getElementById("logo-add-name");
+
+        function closeLogoSheet() {{
+            if (!logoSheet) {{
+                return;
+            }}
+            logoSheet.hidden = true;
+            document.body.classList.remove(
+                "logo-sheet-open"
+            );
+        }}
+
+        function openLogoSheet(block) {{
+            if (!logoSheet || !block) {{
+                return;
+            }}
+            const teamName =
+                block.dataset.name || block.dataset.team;
+            logoAddLeague.value = block.dataset.league || "";
+            logoAddTeam.value = block.dataset.team || "";
+            logoAddName.value = "";
+            const fileInput =
+                logoSheet.querySelector(
+                    "input[type='file']"
+                );
+            if (fileInput) {{
+                fileInput.value = "";
+            }}
+            logoAddTitle.textContent =
+                "Add logo for " + teamName;
+            logoSheet.hidden = false;
+            document.body.classList.add(
+                "logo-sheet-open"
+            );
+            window.setTimeout(function () {{
+                logoAddName.focus();
+            }}, 50);
+        }}
+
+        if (logoList) {{
+            logoList.addEventListener(
+                "click",
+                function (event) {{
+                    const button = event.target.closest(
+                        ".logo-add-button"
+                    );
+                    if (button) {{
+                        openLogoSheet(
+                            button.closest(".logo-team-block")
+                        );
+                    }}
+                }}
+            );
+            logoList.addEventListener(
                 "change",
-                function () {{
-                    const league =
-                        encodeURIComponent(
-                            selector.dataset.league
-                        );
-
-                    const team =
-                        encodeURIComponent(
-                            selector.dataset.team
-                        );
-
-                    const variant =
-                        encodeURIComponent(
-                            selector.value
-                        );
-
-                    const previewId = (
-                        selector.dataset.previewId
-                        || ""
-                    ).trim();
-
-                    const preview =
-                        document.getElementById(
-                            previewId
-                        );
-
+                function (event) {{
+                    const selector = event.target.closest(
+                        ".logo-variant-select"
+                    );
+                    if (!selector) {{
+                        return;
+                    }}
+                    const league = encodeURIComponent(
+                        selector.dataset.league
+                    );
+                    const team = encodeURIComponent(
+                        selector.dataset.team
+                    );
+                    const variant = encodeURIComponent(
+                        selector.value
+                    );
+                    const preview = document.getElementById(
+                        (selector.dataset.previewId || "").trim()
+                    );
                     if (!preview) {{
                         return;
                     }}
-
                     preview.src =
                         "/logo-preview/"
                         + league
@@ -5290,7 +5574,6 @@ def logos_page():
                         + variant
                         + "?cache="
                         + Date.now();
-
                     preview.alt =
                         selector.dataset.team
                         + " "
@@ -5298,11 +5581,56 @@ def logos_page():
                         + " logo preview";
                 }}
             );
-        }});
+        }}
+
+        if (logoSheet) {{
+            logoSheet.addEventListener(
+                "click",
+                function (event) {{
+                    if (
+                        event.target.closest(
+                            "[data-logo-sheet-close]"
+                        )
+                    ) {{
+                        closeLogoSheet();
+                    }}
+                }}
+            );
+        }}
+
+        document.addEventListener(
+            "keydown",
+            function (event) {{
+                if (event.key === "Escape") {{
+                    closeLogoSheet();
+                }}
+            }}
+        );
+
+        if ({str(bool(error_text)).lower()}) {{
+            const hash = window.location.hash.slice(1);
+            const block = hash
+                ? document.getElementById(hash)
+                : null;
+            if (block) {{
+                openLogoSheet(block);
+            }}
+        }}
     </script>
 </body>
 </html>
     """
+
+
+@app.route("/logos/teams")
+@login_required
+def logo_team_list():
+    league = request.args.get("league", "").strip().lower()
+    if league not in LOGO_LEAGUE_LABELS:
+        abort(400)
+    html, _count = _render_logo_team_list(league, get_settings())
+    return html
+
 
 @app.route(
     "/save_logos",
@@ -5316,11 +5644,10 @@ def save_logos():
         .lower()
     )
 
-    available_teams = (
-        get_teams_with_logo_variants(
-            league,
-        )
-    )
+    try:
+        available_teams = get_team_logo_catalog(league)
+    except ValueError:
+        abort(400)
 
     if not available_teams:
         abort(400)
@@ -5366,13 +5693,96 @@ def save_logos():
         "logo_variants": logo_variants,
     })
 
-    return redirect(
-        url_for(
-            "logos_page",
-            league=league,
-            saved="1",
-        )
+    return _logo_redirect(league, saved="1")
+
+
+@app.route(
+    "/logos/upload",
+    methods=["POST"],
+)
+@login_required
+def upload_custom_logo():
+    league = (
+        request.form.get("league", "")
+        .strip()
+        .lower()
     )
+    team = (
+        request.form.get("team", "")
+        .strip()
+        .upper()
+    )
+    name = request.form.get("name", "")
+    upload = request.files.get("file")
+    payload = upload.read() if upload else b""
+
+    try:
+        variant = save_custom_logo(
+            league,
+            team,
+            name,
+            payload,
+        )
+    except (LogoError, ValueError) as error:
+        return _logo_redirect(
+            league,
+            team,
+            error=str(error),
+        )
+
+    _set_logo_selection(league, team, variant)
+    return _logo_redirect(
+        league,
+        team,
+        saved="uploaded",
+    )
+
+
+@app.route(
+    "/logos/delete",
+    methods=["POST"],
+)
+@login_required
+def delete_uploaded_logo():
+    league = (
+        request.form.get("league", "")
+        .strip()
+        .lower()
+    )
+    team = (
+        request.form.get("team", "")
+        .strip()
+        .upper()
+    )
+    variant = (
+        request.form.get("variant", "")
+        .strip()
+        .lower()
+    )
+
+    try:
+        delete_custom_logo(league, team, variant)
+    except (LogoError, ValueError) as error:
+        return _logo_redirect(
+            league,
+            team,
+            error=str(error),
+        )
+
+    selected = get_selected_logo_variant(
+        get_settings(),
+        league,
+        team,
+    )
+    if selected == variant:
+        _set_logo_selection(league, team, "current")
+
+    return _logo_redirect(
+        league,
+        team,
+        saved="deleted",
+    )
+
 
 @app.route("/settings")
 @login_required
@@ -5498,7 +5908,7 @@ def settings_page():
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ScoreCast Settings</title>
+    <title>GameLine Pro Settings</title>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     {page_styles()}
 </head>
@@ -5692,7 +6102,7 @@ def settings_page():
                         type="button"
                         id="update_button"
                         class="ghost-button"
-                        onclick="startScoreCastUpdate()"
+                        onclick="startGameLineUpdate()"
                     >
                         Check for update
                     </button>
@@ -5714,7 +6124,7 @@ def settings_page():
                         type="button"
                         id="system_restart_button"
                         class="quiet-button"
-                        onclick="restartScoreCast()"
+                        onclick="restartGameLine()"
                     >
                         Restart
                     </button>
@@ -5740,7 +6150,7 @@ def settings_page():
             downloading: "Preparing Release",
             installing: "Installing Dependencies",
             validating: "Validating Release",
-            restarting: "Restarting ScoreCast",
+            restarting: "Restarting GameLine Pro",
             rolling_back: "Restoring Previous Release",
             complete: "Update Complete",
             current: "Already Up to Date",
@@ -5920,7 +6330,7 @@ def settings_page():
 
                 if (version) {{
                     details.textContent = (
-                        "ScoreCast "
+                        "GameLine Pro "
                         + version
                         + " is ready to install."
                     );
@@ -6086,7 +6496,7 @@ def settings_page():
                     document.getElementById(
                         "update_status_message"
                     ).textContent = (
-                        "Reconnecting to ScoreCast…"
+                        "Reconnecting to GameLine Pro…"
                     );
 
                     document.getElementById(
@@ -6121,9 +6531,9 @@ def settings_page():
             }}
         }}
 
-        async function startScoreCastUpdate() {{
+        async function startGameLineUpdate() {{
             const confirmed = window.confirm(
-                "Install the latest stable ScoreCast release? "
+                "Install the latest stable GameLine Pro release? "
                 + "The display and dashboard will restart."
             );
 
@@ -6219,9 +6629,9 @@ def settings_page():
         }}
 
 
-        async function restartScoreCast() {{
+        async function restartGameLine() {{
             const confirmed = window.confirm(
-                "Restart ScoreCast? "
+                "Restart GameLine Pro? "
                 + "The display and dashboard will briefly disconnect."
             );
 
@@ -6244,7 +6654,7 @@ def settings_page():
 
             if (status) {{
                 status.textContent = (
-                    "Restart requested. Waiting for ScoreCast to come back online…"
+                    "Restart requested. Waiting for GameLine Pro to come back online…"
                 );
             }}
 
@@ -6286,7 +6696,7 @@ def settings_page():
                             return;
                         }}
                     }} catch (error) {{
-                        // ScoreCast is still restarting.
+                        // GameLine Pro is still restarting.
                     }}
 
                     await new Promise(
@@ -6435,7 +6845,7 @@ def settings_page():
         async function rebootRaspberryPi() {{
             const confirmed = window.confirm(
                 "Reboot the Raspberry Pi? "
-                + "ScoreCast and the dashboard will go offline "
+                + "GameLine Pro and the dashboard will go offline "
                 + "until the board comes back."
             );
 
@@ -6659,7 +7069,7 @@ def favorites_page():
 <head>
 
     <title>
-        ScoreCast Favorites
+        GameLine Pro Favorites
     </title>
 
     <meta
@@ -6704,7 +7114,7 @@ def favorites_page():
                     each league. Whenever
                     one of those teams has
                     a loaded game,
-                    ScoreCast keeps that
+                    GameLine Pro keeps that
                     matchup selected
                     automatically.
                 </div>
@@ -6836,28 +7246,10 @@ def save_games():
         if not _is_stock_id(game_id)
     ]
 
-    visible_games = [
+    visible_games = list(dict.fromkeys(
         game_id
         for game_id in request.form.getlist("game")
-        if not _is_stock_id(game_id)
-    ]
-
-    favorite_game_ids = {
-        get_game_id(game)
-        for game in latest_games
-        if (
-            not _is_stock_id(get_game_id(game))
-            and is_favorite_game(game, settings)
-        )
-    }
-
-    visible_games = list(dict.fromkeys(
-        visible_games
-        + [
-            game_id
-            for game_id in sport_ids
-            if game_id in favorite_game_ids
-        ]
+        if game_id in sport_ids
     ))
 
     hidden_sports = [
@@ -6883,6 +7275,7 @@ def save_games():
             stock_order.append(game_id)
 
     update_settings({
+        "selected_games": visible_games,
         "hidden_games": hidden_sports + stock_hidden,
         "game_order": visible_games + hidden_sports + stock_order,
     })
@@ -7030,11 +7423,19 @@ def api_stocks_search():
 )
 @login_required
 def api_update_status():
-    status = read_status()
-
-    status["service_active"] = (
-        is_update_service_active()
+    service_state = update_service_state()
+    service_active = service_state_is_running(
+        service_state
     )
+
+    if service_state == "unknown":
+        status = read_status()
+    else:
+        status = reconcile_status(
+            service_running=service_active
+        )
+
+    status["service_active"] = service_active
     status["release"] = latest_release_info(
         get_scorecast_version()
     )
@@ -7047,19 +7448,38 @@ def api_update_status():
 )
 @login_required
 def api_start_update():
-    status = read_status()
+    service_state = update_service_state()
+
+    if service_state == "unknown":
+        return jsonify({
+            "ok": False,
+            "message": (
+                "GameLine Pro could not check whether "
+                "an update is already running."
+            ),
+        }), 500
+
+    service_active = service_state_is_running(
+        service_state
+    )
+    status = reconcile_status(
+        service_running=service_active
+    )
 
     if (
-        status.get("state")
+        str(status.get("state", "")).strip().lower()
         in ACTIVE_UPDATE_STATES
-        or is_update_service_active()
+        or service_active
     ):
         return jsonify({
             "ok": False,
             "message": (
-                "A ScoreCast update is already running."
+                "A GameLine Pro update is already running."
             ),
         }), 409
+
+    requested_version = str(status.get("version") or "")
+    mark_start_requested(requested_version)
 
     try:
         result = subprocess.run(
@@ -7076,6 +7496,11 @@ def api_start_update():
         )
 
     except subprocess.TimeoutExpired:
+        write_status(
+            "failed",
+            "Starting the updater timed out.",
+            requested_version,
+        )
         return jsonify({
             "ok": False,
             "message": (
@@ -7084,6 +7509,11 @@ def api_start_update():
         }), 500
 
     except OSError as error:
+        write_status(
+            "failed",
+            f"Unable to start updater: {error}",
+            requested_version,
+        )
         return jsonify({
             "ok": False,
             "message": (
@@ -7097,6 +7527,11 @@ def api_start_update():
             or result.stdout.strip()
             or "systemctl returned an error"
         )
+        write_status(
+            "failed",
+            error_message,
+            requested_version,
+        )
 
         return jsonify({
             "ok": False,
@@ -7106,7 +7541,7 @@ def api_start_update():
     return jsonify({
         "ok": True,
         "message": (
-            "ScoreCast update started."
+            "GameLine Pro update started."
         ),
     })
 

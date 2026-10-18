@@ -45,7 +45,7 @@ _by_id = None
 
 _session = requests.Session()
 _session.headers.update({
-    "User-Agent": "ScoreCast/1.0",
+    "User-Agent": "GameLine/1.0",
     "Accept": "application/json",
 })
 

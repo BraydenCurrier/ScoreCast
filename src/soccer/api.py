@@ -1,8 +1,8 @@
-from datetime import datetime
 import json
 
 import requests
 
+from common.broadcast import format_broadcast as _get_broadcast
 from common.espn_scoreboard import (
     competitor_stat_int,
     safe_int,
@@ -10,7 +10,7 @@ from common.espn_scoreboard import (
 )
 from common.http import failure_text, get_body
 from common.settings import get_settings
-from common.timezone import get_local_timezone
+from common.timezone import format_local_date, format_local_time
 from soccer.models import SoccerGame
 
 
@@ -110,30 +110,6 @@ def fetch_soccer_scoreboard(league_id):
         )
 
     return data
-
-
-def format_local_time(date_string):
-    utc_dt = datetime.fromisoformat(
-        date_string.replace("Z", "+00:00")
-    )
-
-    local_dt = utc_dt.astimezone(
-        get_local_timezone()
-    )
-
-    return local_dt.strftime("%-I:%M")
-
-
-def format_local_date(date_string):
-    utc_dt = datetime.fromisoformat(
-        date_string.replace("Z", "+00:00")
-    )
-
-    local_dt = utc_dt.astimezone(
-        get_local_timezone()
-    )
-
-    return local_dt.strftime("%b %-d")
 
 
 def get_record(team):
@@ -323,9 +299,6 @@ def get_match_status(status):
         return "Live", period, clock
 
     return "Final", period, clock
-
-
-from common.broadcast import format_broadcast as _get_broadcast
 
 
 def _parse_events(data, league_id):

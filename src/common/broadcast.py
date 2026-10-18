@@ -52,8 +52,10 @@ BROADCAST_ALIASES = {
     "FANDUEL SPORTS NETWORK": ("FANDUEL",),
     "FLOSPORTS": ("FLOSPORTS",),
     "FOX": ("FOX",),
+    "FOX ONE": ("FS1", "FOX"),
     "FOX SPORTS 1": ("FS1",),
     "FOX SPORTS 2": ("FS2",),
+    "FOX DEPORTES": ("FOX",),
     "FS1": ("FS1",),
     "FS2": ("FS2",),
     "HBO MAX": ("MAX", "TNT"),
@@ -270,28 +272,6 @@ def resolve_broadcast_identifier(raw: str) -> str | None:
             return identifier
 
     return None
-
-
-def missing_broadcast_identifiers(raw: str) -> list[str]:
-    available = available_broadcast_ids()
-    missing = []
-    seen = set()
-    for identifier in broadcast_candidates(raw):
-        if identifier in available or identifier in seen:
-            continue
-        if identifier in {
-            ident
-            for aliases in BROADCAST_ALIASES.values()
-            for ident in aliases
-        } or identifier:
-            # Prefer the first alias that is not already on disk.
-            aliases = BROADCAST_ALIASES.get(_normalize_key(raw), ())
-            preferred = aliases[0] if aliases else identifier
-            if preferred not in available and preferred not in seen:
-                seen.add(preferred)
-                missing.append(preferred)
-            break
-    return missing
 
 
 def draw_broadcast_logo(image, broadcast, x, y, settings):

@@ -5,6 +5,8 @@ import json
 import requests
 
 from cfb.models import CollegeFootballGame
+from common.broadcast import format_broadcast as _get_broadcast
+from common.football_week import MONDAY, date_span, week_date_range
 from common.football_play import (
     box_totals_for,
     parse_last_play,
@@ -13,7 +15,7 @@ from common.football_play import (
 )
 from common.http import failure_text, get_body
 from common.settings import get_settings
-from common.timezone import get_local_timezone
+from common.timezone import format_local_time, get_local_timezone
 
 
 CFB_CONFERENCES = {
@@ -68,12 +70,14 @@ def get_selected_conference_groups():
     return selected
 
 
-def fetch_scoreboard_group(group_id):
+def fetch_scoreboard_group(group_id, on_date=None):
     url = (
         f"{NCAAF_SCHEDULE_URL}"
         f"?groups={str(group_id)}"
         "&limit=200"
     )
+    if on_date is not None:
+        url += f"&dates={on_date.strftime('%Y%m%d')}"
 
     try:
         body = get_body(
@@ -244,17 +248,6 @@ def get_team_abbr(team):
     }
 
     return overrides.get(raw_abbr, raw_abbr)
-
-
-def format_local_time(utc_time_str):
-    utc_dt = datetime.fromisoformat(
-        utc_time_str.replace("Z", "+00:00")
-    )
-    local_dt = utc_dt.astimezone(
-        get_local_timezone()
-    )
-
-    return local_dt.strftime("%-I:%M")
 
 
 def get_record(team_data):
@@ -475,9 +468,6 @@ def _get_possession_abbr(
     return ""
 
 
-from common.broadcast import format_broadcast as _get_broadcast
-
-
 def get_today_games(conference_groups=None):
     if conference_groups is None:
         selected_groups = (
@@ -502,35 +492,43 @@ def get_today_games(conference_groups=None):
 
     events_by_id = {}
     week_number = 0
+    week_start, week_end = week_date_range(
+        hold_until_weekday=MONDAY,
+    )
 
     for group_id in selected_groups:
-        try:
-            data = fetch_scoreboard_group(group_id)
-        except Exception as error:
-            print(
-                "CFB conference fetch failed "
-                f"for group {group_id}: {error}"
-            )
-            continue
+        for day in date_span(week_start, week_end):
+            try:
+                data = fetch_scoreboard_group(
+                    group_id,
+                    day,
+                )
+            except Exception as error:
+                print(
+                    "CFB conference fetch failed "
+                    f"for group {group_id} on "
+                    f"{day.isoformat()}: {error}"
+                )
+                continue
 
-        if not week_number:
-            week_number = safe_int(
-                (data.get("week") or {}).get("number"),
-                0,
-            )
-
-        for event in data.get("events", []):
-            event_id = str(
-                event.get("id", "")
-            ).strip()
-
-            if not event_id:
-                event_id = (
-                    f"{event.get('date', '')}:"
-                    f"{event.get('name', '')}"
+            if not week_number:
+                week_number = safe_int(
+                    (data.get("week") or {}).get("number"),
+                    0,
                 )
 
-            events_by_id[event_id] = event
+            for event in data.get("events", []):
+                event_id = str(
+                    event.get("id", "")
+                ).strip()
+
+                if not event_id:
+                    event_id = (
+                        f"{event.get('date', '')}:"
+                        f"{event.get('name', '')}"
+                    )
+
+                events_by_id[event_id] = event
 
     games = []
 

@@ -1,11 +1,59 @@
 from mlb.colors import YELLOW, WHITE, GREY, RED, team_color
+from common.broadcast import draw_broadcast_logo
 from common.logo_store import draw_logo, get_selected_logo_variant
-from common.fonts import print_3x5, get_3x5_width, print_3x5_right, print_4x5, print_gfx_5x7, draw_text_right
+from common.fonts import (
+    print_3x5,
+    get_3x5_width,
+    print_3x5_right,
+    print_4x5,
+    print_4x5_centered,
+    print_gfx_5x7,
+    draw_text_right,
+    gfx_5x7_width,
+)
 
 LOGO_SIZE = 30
 CARD_WIDTH = 64
-GAME_GAP = 5
-GAME_WIDTH = LOGO_SIZE + CARD_WIDTH + LOGO_SIZE
+
+PAD_CX = 32
+NAME_Y = 2
+CLOCK_Y = 10
+SCORE_Y = 18
+RECORD_Y = 22
+
+
+def _status(game):
+    return str(game.status or "").strip().upper()
+
+
+def is_scheduled(game):
+    return _status(game) in {
+        "PREVIEW",
+        "SCHEDULED",
+        "PRE",
+        "PRE-GAME",
+        "PREGAME",
+        "WARMUP",
+    }
+
+
+def is_final(game):
+    status = _status(game)
+    return (
+        "FINAL" in status
+        or status in {"GAME OVER", "COMPLETED EARLY"}
+    )
+
+
+def final_label(game):
+    try:
+        inning = int(game.inning or 0)
+    except (TypeError, ValueError):
+        inning = 0
+    if inning > 9:
+        return f"F-{inning}"
+    return "FINAL"
+
 
 def draw_base_diamond(draw, cx, cy, occupied, size=5):
     color = WHITE if occupied else GREY
@@ -32,7 +80,6 @@ def draw_outs(draw, x, y, outs):
             draw.rectangle(box, outline=(70, 70, 70))
 
 def draw_inning(draw, x, y, inning, top, color):
-    # make sure inning is dsiplayed correctly for double digit innings
     if inning > 9:
         if top:
             draw.polygon([(x - 1, y), (x - 1, y + 2), (x, y + 2)], fill=color)
@@ -72,64 +119,86 @@ def draw_team_logo(
         variant=variant,
     )
 
-def draw_team_pitcher(
-    image,
-    team_abbreviation,
-    x_start,
-    y_start,
-    settings,
-):
-    variant = get_selected_logo_variant(
-        settings,
-        "pitchers",
-        team_abbreviation,
+def _draw_pregame(image, draw, game, offset_x, settings):
+    time_text = str(game.start_time or "")
+    time_width = get_3x5_width(time_text)
+    print_3x5(
+        draw,
+        time_text,
+        (CARD_WIDTH - time_width) // 2 + offset_x,
+        NAME_Y,
+        YELLOW,
+    )
+    if game.date:
+        print_4x5_centered(draw, game.date, PAD_CX + offset_x, 11, WHITE)
+    print_3x5(
+        draw,
+        f"{int(game.away_wins or 0)}-{int(game.away_losses or 0)}",
+        2 + offset_x,
+        RECORD_Y,
+        GREY,
+    )
+    print_3x5_right(
+        draw,
+        f"{int(game.home_wins or 0)}-{int(game.home_losses or 0)}",
+        CARD_WIDTH - 2 + offset_x,
+        RECORD_Y,
+        GREY,
+    )
+    if game.broadcast:
+        draw_broadcast_logo(image, game.broadcast, 31 + offset_x, 24, settings)
+
+
+def _draw_scores(draw, game, offset_x, y):
+    away = str(game.away_score)
+    home = str(game.home_score)
+    print_gfx_5x7(draw, away, 2 + offset_x, y, YELLOW)
+    print_gfx_5x7(
+        draw,
+        home,
+        CARD_WIDTH - 2 - gfx_5x7_width(home) + offset_x,
+        y,
+        YELLOW,
     )
 
-    return draw_logo(
-        destination=image,
-        league="pitchers",
-        identifier=team_abbreviation,
-        x=x_start,
-        y=y_start,
-        variant=variant,
-    )
 
 def render_baseball_game_onto(image, draw, game, offset_x, settings):
-    # print away team
-    print_gfx_5x7(draw, game.away, 3 + offset_x, 2, team_color(game.away))
+    print_gfx_5x7(draw, game.away, 3 + offset_x, NAME_Y, team_color(game.away))
+    print_gfx_5x7(draw, game.home, 44 + offset_x, NAME_Y, team_color(game.home))
 
-    # print home team
-    print_gfx_5x7(draw, game.home, 44 + offset_x, 2, team_color(game.home))
+    if is_scheduled(game):
+        _draw_pregame(image, draw, game, offset_x, settings)
+        return
 
-    # preview or live/final
-    if game.status == "Preview":
-        width = get_3x5_width(game.start_time)
-        centered_x = (64 - width) // 2
-        print_3x5(draw, game.start_time, centered_x + offset_x, 2, YELLOW)
-        #draw_team_pitcher(image, "SKUBAL", 3 + offset_x, 11, settings)
+    if is_final(game):
+        print_4x5_centered(
+            draw,
+            final_label(game),
+            PAD_CX + offset_x,
+            CLOCK_Y,
+            YELLOW,
+        )
+        _draw_scores(draw, game, offset_x, SCORE_Y)
+        return
+
+    draw_inning(draw, 27 + offset_x, 19, game.inning, game.top_inning, YELLOW)
+
+    draw_base_diamond(draw, 24 + offset_x, 14, game.third)
+    draw_base_diamond(draw, 38 + offset_x, 14, game.first)
+    draw_base_diamond(draw, 31 + offset_x, 7, game.second)
+
+    if game.away_score < 10:
+        print_gfx_5x7(draw, str(game.away_score), 9 + offset_x, 13, YELLOW)
     else:
-        # print inning and base diamond
-        draw_inning(draw, 27 + offset_x, 19, game.inning, game.top_inning, YELLOW)
+        print_gfx_5x7(draw, str(game.away_score), 5 + offset_x, 13, YELLOW)
 
-        draw_base_diamond(draw, 24 + offset_x, 14, game.third)
-        draw_base_diamond(draw, 38 + offset_x, 14, game.first)
-        draw_base_diamond(draw, 31 + offset_x, 7, game.second)
+    if game.home_score < 10:
+        draw_text_right(draw, game.home_score, 55 + offset_x, 13, YELLOW)
+    else:
+        draw_text_right(draw, game.home_score, 60 + offset_x, 13, YELLOW)
 
-        # print scores centered
-        if game.away_score < 10:
-            print_gfx_5x7(draw, str(game.away_score), 9 + offset_x, 13, YELLOW)
-        else:
-            print_gfx_5x7(draw, str(game.away_score), 5 + offset_x, 13, YELLOW)
+    draw_outs(draw, 25 + offset_x, 26, game.outs)
 
-        if game.home_score < 10:
-            draw_text_right(draw, game.home_score, 55 + offset_x, 13, YELLOW)
-        else:
-            draw_text_right(draw, game.home_score, 60 + offset_x, 13, YELLOW)
-
-        # print outs
-        draw_outs(draw, 25 + offset_x, 26, game.outs)
-
-    # print records
     print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 2 + offset_x, 25, GREY)
     print_3x5_right(draw, f"{game.home_wins}-{game.home_losses}", 60 + offset_x, 25, GREY)
 

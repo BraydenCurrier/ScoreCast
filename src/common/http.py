@@ -21,7 +21,7 @@ def session():
         client = requests.Session()
         client.headers.update({
             "Accept": "application/json",
-            "User-Agent": "ScoreCast/1.0",
+            "User-Agent": "GameLine/1.0",
         })
         _thread_local.session = client
 

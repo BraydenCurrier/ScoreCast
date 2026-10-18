@@ -41,3 +41,4 @@ class HockeyGame:
     home_goalie: str = ""
     away_save_pct: str = ""
     home_save_pct: str = ""
+    event_id: str = ""

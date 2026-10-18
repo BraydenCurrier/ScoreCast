@@ -1,14 +1,14 @@
 from datetime import datetime, timedelta
 import json
 import re
-import threading
 from urllib.parse import urlencode
-from zoneinfo import ZoneInfo
 
 import requests
 
+from common.broadcast import format_broadcast as _get_broadcast
+from common.football_week import TUESDAY, week_date_range
 from common.http import failure_text, get_body
-from common.timezone import get_local_timezone
+from common.timezone import format_local_time, get_local_timezone
 
 from nfl.models import FootballGame
 from common.football_play import (
@@ -24,28 +24,8 @@ NFL_SCHEDULE_URL = (
     "sports/football/nfl/scoreboard"
 )
 
-##CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
-
 HTTP_TIMEOUT = (3.05, 10)
 
-NFL_SEARCH_DAYS = 45
-NFL_SLATE_DAYS = 6
-
-_slate_lock = threading.Lock()
-_slate_refresh_lock = threading.Lock()
-
-_slate_cache = {
-    # Local calendar date when the slate was selected.
-    "selected_on": None,
-
-    # Inclusive date range containing the selected slate.
-    "start_date": None,
-    "end_date": None,
-
-    # Event IDs prevent an overlapping date range from accidentally
-    # including a game from the following NFL week.
-    "event_ids": frozenset(),
-}
 
 def safe_int(value, default=0):
     try:
@@ -80,24 +60,6 @@ def get_team_abbr(team):
     name = str(team.get("name", ""))
 
     return name[:3].upper()
-
-
-def format_local_time(utc_time_str):
-    if not utc_time_str:
-        return ""
-
-    try:
-        utc_dt = datetime.fromisoformat(
-            str(utc_time_str).replace("Z", "+00:00")
-        )
-    except ValueError:
-        return str(utc_time_str)
-
-    local_dt = utc_dt.astimezone(
-        get_local_timezone()
-    )
-
-    return local_dt.strftime("%-I:%M")
 
 
 def get_record(team_data):
@@ -282,28 +244,6 @@ def _format_event_date(raw_date_string):
     except ValueError:
         return str(raw_date_string)
 
-def _parse_event_datetime(event):
-    """Parse an ESPN event timestamp as a timezone-aware datetime."""
-    raw_date = event.get("date")
-
-    if not raw_date:
-        return None
-
-    try:
-        return datetime.fromisoformat(
-            str(raw_date).replace("Z", "+00:00")
-        )
-    except (TypeError, ValueError):
-        return None
-
-
-def _get_local_today():
-    """Return the current date in ScoreCast's configured timezone."""
-    return datetime.now(
-        get_local_timezone()
-    ).date()
-
-
 def _fetch_events_between(start_date, end_date):
     """
     Fetch ESPN NFL data for an inclusive local-date range.
@@ -375,204 +315,18 @@ def _fetch_events_between(start_date, end_date):
     }
 
 
-def _get_event_slate_key(event):
-    """Return a stable season/week key when ESPN provides one."""
-    season = event.get("season", {})
-    season_year = safe_int(
-        season.get("year") if isinstance(season, dict) else None,
-        0,
-    )
-    season_type = safe_int(
-        season.get("type") if isinstance(season, dict) else None,
-        0,
-    )
-    week_number = _get_event_week(event)
-
-    if season_year and season_type and week_number:
-        return season_year, season_type, week_number
-
-    return None
-
-
-def _select_next_slate(events):
-    """
-    Select the nearest unfinished NFL slate.
-
-    ESPN's season type and week number are preferred so a future Thursday
-    game is not mixed into the current week's Sunday/Monday slate. A bounded
-    date window is used only when week metadata is unavailable.
-    """
-    utc_timezone = ZoneInfo("UTC")
-    now_utc = datetime.now(
-        get_local_timezone()
-    ).astimezone(utc_timezone)
-
-    upcoming_events = []
-    seen_event_ids = set()
-
-    for event in events:
-        event_time = _parse_event_datetime(event)
-
-        if event_time is None:
-            continue
-
-        status_type = (
-            event.get("status", {})
-            .get("type", {})
-        )
-
-        if bool(status_type.get("completed", False)):
-            continue
-
-        state = str(
-            status_type.get("state", "")
-        ).lower()
-
-        # Preserve games ESPN identifies as active after scheduled kickoff.
-        if event_time < now_utc and state != "in":
-            continue
-
-        event_id = str(event.get("id", ""))
-
-        if event_id and event_id in seen_event_ids:
-            continue
-
-        if event_id:
-            seen_event_ids.add(event_id)
-
-        upcoming_events.append(event)
-
-    upcoming_events.sort(
-        key=lambda event: (
-            _parse_event_datetime(event)
-            or datetime.max.replace(tzinfo=utc_timezone)
-        )
-    )
-
-    if not upcoming_events:
-        return []
-
-    first_event = upcoming_events[0]
-    first_game_time = _parse_event_datetime(first_event)
-
-    if first_game_time is None:
-        return []
-
-    first_slate_key = _get_event_slate_key(first_event)
-
-    if first_slate_key is not None:
-        same_week_events = [
-            event
-            for event in upcoming_events
-            if _get_event_slate_key(event) == first_slate_key
-        ]
-
-        if same_week_events:
-            return same_week_events
-
-    # Fallback for incomplete ESPN metadata. Six days is wide enough for
-    # normal Thursday-through-Monday slates, but is used only when a week
-    # identity cannot be established.
-    slate_end = first_game_time + timedelta(
-        days=NFL_SLATE_DAYS
-    )
-
-    return [
-        event
-        for event in upcoming_events
-        if (
-            (event_time := _parse_event_datetime(event))
-            is not None
-            and event_time <= slate_end
-        )
-    ]
-
-def _find_next_slate_dates(today):
-    """Search once for the nearest slate and return its local date range."""
-    search_end = today + timedelta(
-        days=NFL_SEARCH_DAYS
-    )
-
-    data = _fetch_events_between(
-        today,
-        search_end,
-    )
-
-    events = _select_next_slate(
-        data.get("events", [])
-    )
-
-    if not events:
-        return None, None, frozenset()
-
-    local_timezone = get_local_timezone()
-    event_dates = []
-    event_ids = set()
-
-    for event in events:
-        event_time = _parse_event_datetime(event)
-
-        if event_time is None:
-            continue
-
-        event_dates.append(
-            event_time.astimezone(
-                local_timezone
-            ).date()
-        )
-
-        event_id = str(event.get("id", ""))
-        if event_id:
-            event_ids.add(event_id)
-
-    if not event_dates:
-        return None, None, frozenset()
-
-    return (
-        min(event_dates),
-        max(event_dates),
-        frozenset(event_ids),
-    )
-
-
 def _get_slate_dates():
     """
-    Return the slate selected for the current local date.
+    Return this football week's date range through Tuesday night.
 
-    The wide schedule search runs on the first call after startup and on
-    the first normal API refresh after the local date changes at midnight.
+    Finished games stay on the ticker until Wednesday. The held Thursday
+    through Tuesday window is used directly so a Sunday or Monday refresh
+    does not start searching from "today" and drop Thursday/Friday games.
     """
-    today = _get_local_today()
-
-    with _slate_lock:
-        if _slate_cache["selected_on"] == today:
-            return (
-                _slate_cache["start_date"],
-                _slate_cache["end_date"],
-                _slate_cache["event_ids"],
-            )
-
-    # Serialize the expensive daily search without holding the state lock.
-    with _slate_refresh_lock:
-        with _slate_lock:
-            if _slate_cache["selected_on"] == today:
-                return (
-                    _slate_cache["start_date"],
-                    _slate_cache["end_date"],
-                    _slate_cache["event_ids"],
-                )
-
-        start_date, end_date, event_ids = _find_next_slate_dates(
-            today
-        )
-
-        with _slate_lock:
-            _slate_cache["selected_on"] = today
-            _slate_cache["start_date"] = start_date
-            _slate_cache["end_date"] = end_date
-            _slate_cache["event_ids"] = event_ids
-
-        return start_date, end_date, event_ids
+    week_start, week_end = week_date_range(
+        hold_until_weekday=TUESDAY,
+    )
+    return week_start, week_end, frozenset()
 
 
 def _get_event_week(event, default_week=0):
@@ -601,7 +355,6 @@ def _get_event_week(event, default_week=0):
 
     return default_week
 
-from common.broadcast import format_broadcast as _get_broadcast
 
 def get_today_games():
     slate_start, slate_end, slate_event_ids = _get_slate_dates()
@@ -609,8 +362,6 @@ def get_today_games():
     if slate_start is None or slate_end is None:
         return []
 
-    # Normal application refreshes still update this slate's live data.
-    # Only the wide slate-selection search is limited to once per local day.
     data = _fetch_events_between(
         slate_start,
         slate_end,

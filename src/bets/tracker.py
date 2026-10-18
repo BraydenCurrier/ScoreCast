@@ -566,10 +566,6 @@ def _leg_parts(leg) -> tuple[str, str, str, str, str, str]:
     return status, text[:10], "", chance, league, team[:4], unit
 
 
-def _leg_summary(leg) -> tuple[str, str, str, str, str, str]:
-    return _leg_parts(leg)
-
-
 def _parlay_grid(leg_count: int) -> tuple[int, int]:
     count = max(1, int(leg_count))
     if count <= 3:
@@ -581,7 +577,7 @@ def _parlay_grid(leg_count: int) -> tuple[int, int]:
 
 def _parlay_tickets(bet) -> list[BetTicket]:
     legs = bet.get("legs") or []
-    summaries = tuple(_leg_summary(leg) for leg in legs)
+    summaries = tuple(_leg_parts(leg) for leg in legs)
     won = sum(1 for item in summaries if item[0] == STATUS_WON)
     count = len(summaries)
     _cols, width = _parlay_grid(count)

@@ -1,5 +1,5 @@
 [Unit]
-Description=Update ScoreCast from GitHub
+Description=Update GameLine Pro from GitHub
 After=network-online.target
 Wants=network-online.target
 

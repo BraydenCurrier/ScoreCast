@@ -441,7 +441,7 @@
         parlayConverted.textContent = convertedLabel(odds);
       }
       if (combined !== null) {
-        hintText = "Enter the win % DraftKings shows. ScoreCast converts it to American odds. Parlay % is combined from the legs; edit it if your slip differs.";
+        hintText = "Enter the win % DraftKings shows. GameLine Pro converts it to American odds. Parlay % is combined from the legs; edit it if your slip differs.";
       } else if (legFields.length >= 2 && legOdds.length < legFields.length) {
         hintText = "Enter the DK win % on every leg to calculate the parlay price.";
       }

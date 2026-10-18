@@ -1,8 +1,8 @@
-from datetime import datetime
 import json
 
 import requests
 
+from common.broadcast import format_broadcast as _get_broadcast
 from common.espn_scoreboard import (
     bonus_side,
     possession_abbr,
@@ -10,7 +10,7 @@ from common.espn_scoreboard import (
     timeouts_remaining,
 )
 from common.http import failure_text, get_body
-from common.timezone import get_local_timezone
+from common.timezone import format_local_date, format_local_time
 
 from nba.models import BasketballGame
 
@@ -53,30 +53,6 @@ def fetch_nba_scoreboard():
     return data
 
 
-def format_local_time(date_string):
-    utc_dt = datetime.fromisoformat(
-        date_string.replace("Z", "+00:00")
-    )
-
-    local_dt = utc_dt.astimezone(
-        get_local_timezone()
-    )
-
-    return local_dt.strftime("%-I:%M")
-
-
-def format_local_date(date_string):
-    utc_dt = datetime.fromisoformat(
-        date_string.replace("Z", "+00:00")
-    )
-
-    local_dt = utc_dt.astimezone(
-        get_local_timezone()
-    )
-
-    return local_dt.strftime("%b %-d")
-
-
 def get_record(team):
     records = team.get("records", [])
 
@@ -94,7 +70,6 @@ def get_record(team):
     except (TypeError, ValueError):
         return 0, 0
 
-from common.broadcast import format_broadcast as _get_broadcast
 
 def get_today_games():
     data = fetch_nba_scoreboard()
@@ -211,6 +186,7 @@ def get_today_games():
                     home_team,
                     away_team,
                 ),
+                event_id=str(event.get("id") or ""),
             )
         )
 

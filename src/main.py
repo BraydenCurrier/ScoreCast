@@ -14,6 +14,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image, ImageDraw
 
 from common.matrix import PANEL_REFRESH_HZ, create_matrix
+from common.game_ids import game_id as shared_game_id
+from common.game_ids import game_is_shown
 from common.settings import get_developer_settings, get_settings
 from common.splash import render_idle_splash
 from common.ticker_scroll import (
@@ -253,8 +255,8 @@ def _game_phase(game):
     return "live"
 
 
-def _game_is_shown(game, settings, hidden):
-    return game_id(game) not in hidden or is_favorite_game(game, settings)
+def _game_is_shown(game, settings, hidden=None):
+    return game_is_shown(game, settings)
 
 
 def _hidden_game_ids(settings):
@@ -329,6 +331,7 @@ def _schedule_mark_value(settings):
     return (
         _live_refresh_seconds(settings),
         tuple(sorted(_hidden_game_ids(settings))),
+        tuple(sorted(str(item) for item in (settings.get("selected_games") or []))),
         bool(fantasy.get("enabled")),
         fantasy_interval,
         bool(bets.get("ticker_enabled", True)),
@@ -463,19 +466,7 @@ def is_fantasy_game(game):
     return game.__class__.__name__ == "FantasyMatchup"
 
 def game_id(game):
-    if is_bet_ticket(game):
-        return game.ticket_id
-
-    if is_soccer_game(game) and getattr(game, "event_id", ""):
-        return f"soccer:{game.event_id}"
-
-    if is_pga_tournament(game):
-        return f"pga:{game.event_id}"
-
-    if is_stock_quote(game):
-        return f"stocks:{game.symbol}"
-
-    return f"{get_sport(game)}:{game.away}@{game.home}"
+    return shared_game_id(game)
 
 def get_sport(game):
     if is_cfb_game(game):
@@ -714,8 +705,11 @@ def get_focus_games(
     return matching_games
 
 def get_visible_games(all_games, settings):
-    hidden = set(settings.get("hidden_games", []))
-    return [game for game in all_games if game_id(game) not in hidden or is_favorite_game(game, settings)]
+    return [
+        game
+        for game in all_games
+        if game_is_shown(game, settings)
+    ]
 
 def render_error_card(game, error):
     card_width = get_game_width(game)
@@ -811,6 +805,7 @@ def render_card(game, settings):
 def card_settings_signature(settings):
     return (
         tuple(settings.get("hidden_games", [])),
+        tuple(settings.get("selected_games", [])),
         tuple(settings.get("game_order", [])),
         tuple(
             (league, tuple(teams if isinstance(teams, list) else [teams]))

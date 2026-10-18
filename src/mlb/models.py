@@ -70,3 +70,5 @@ class BaseballGame:
     strike_zone_bottom: float = 1.5
     pitcher_pitches: int = 0
     batter_stat: str = ""
+    date: str = ""
+    broadcast: str = ""
