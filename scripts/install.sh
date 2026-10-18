@@ -527,7 +527,7 @@ create_release_venv() {
         "${RGB_MATRIX_DIR}"
 
     log "Verifying the RGB matrix Python binding."
-    if ! "${VENV_PYTHON}" -c 'import rgbmatrix' >/dev/null 2>&1; then
+    if ! "${VENV_PYTHON}" -c 'from rgbmatrix import RGBMatrix, RGBMatrixOptions' >/dev/null 2>&1; then
         die "The rgbmatrix Python binding could not be imported from ${VENV_DIR}."
     fi
 }
