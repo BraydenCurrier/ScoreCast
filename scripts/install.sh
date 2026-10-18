@@ -511,24 +511,29 @@ create_release_venv() {
     log "Installing Python dependencies."
     "${VENV_PYTHON}" -m pip install \
         --disable-pip-version-check \
+        --no-cache-dir \
         --upgrade \
         pip \
         setuptools \
         wheel
 
-    "${VENV_PIP}" install \
+    "${VENV_PYTHON}" -m pip install \
         --disable-pip-version-check \
+        --no-cache-dir \
         -r "${RELEASE_DIR}/requirements.txt"
 
     log "Installing the RGB matrix Python binding."
 
-    "${VENV_PIP}" install \
+    "${VENV_PYTHON}" -m pip install \
         --disable-pip-version-check \
+        --no-cache-dir \
         "${RGB_MATRIX_DIR}"
 
-    log "Verifying the RGB matrix Python binding."
-    if ! "${VENV_PYTHON}" -c 'from rgbmatrix import RGBMatrix, RGBMatrixOptions' >/dev/null 2>&1; then
-        die "The rgbmatrix Python binding could not be imported from ${VENV_DIR}."
+    sync
+
+    log "Verifying the Python environment."
+    if ! "${VENV_PYTHON}" -c 'from rgbmatrix import RGBMatrix, RGBMatrixOptions; import requests; from PIL import Image; import flask; requests.Session(); Image.new("RGB", (8, 8))' >/dev/null 2>&1; then
+        die "The Python environment for ${RELEASE_VERSION} did not install completely."
     fi
 }
 
