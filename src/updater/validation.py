@@ -149,14 +149,22 @@ def service_is_active() -> bool:
     result = subprocess.run(
         [
             "/usr/bin/systemctl",
-            "is-active",
-            "--quiet",
+            "show",
             SERVICE_NAME,
+            "-p",
+            "ActiveState",
+            "-p",
+            "SubState",
         ],
+        capture_output=True,
+        text=True,
         check=False,
     )
-
-    return result.returncode == 0
+    output = result.stdout or ""
+    return (
+        "ActiveState=active" in output
+        and "SubState=running" in output
+    )
 
 
 def web_dashboard_is_healthy() -> bool:
@@ -194,13 +202,19 @@ def wait_for_service_health() -> None:
         time.monotonic()
         + STARTUP_TIMEOUT_SECONDS
     )
+    healthy_since = None
 
     while time.monotonic() < deadline:
         if (
             service_is_active()
             and web_dashboard_is_healthy()
         ):
-            return
+            if healthy_since is None:
+                healthy_since = time.monotonic()
+            elif time.monotonic() - healthy_since >= 8:
+                return
+        else:
+            healthy_since = None
 
         time.sleep(1)
 

@@ -574,6 +574,15 @@ RGBMATRIX_IMPORT = (
     "from rgbmatrix import RGBMatrix, RGBMatrixOptions"
 )
 
+VENV_RUNTIME_CHECK = """
+from rgbmatrix import RGBMatrix, RGBMatrixOptions
+import requests
+from PIL import Image, ImageDraw
+import flask
+requests.Session()
+Image.new("RGB", (8, 8))
+"""
+
 
 def rgbmatrix_binding_is_healthy(python_path: Path) -> bool:
     """True only if the hzeller LED binding can actually be imported."""
@@ -605,6 +614,21 @@ def rgbmatrix_binding_is_healthy(python_path: Path) -> bool:
 
     core_so = Path(locate.stdout.strip())
     return core_so.is_file() and core_so.stat().st_size > 10_000
+
+
+def venv_runtime_is_healthy(python_path: Path) -> bool:
+    """True if LED, Pillow, and requests can all load from this interpreter."""
+    if not python_path.is_file():
+        return False
+    if not rgbmatrix_binding_is_healthy(python_path):
+        return False
+    check = subprocess.run(
+        [str(python_path), "-c", VENV_RUNTIME_CHECK],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return check.returncode == 0
 
 
 def copy_rgbmatrix_binding(
@@ -677,7 +701,7 @@ def create_release_venv(
     )
 
     if python_path.is_file():
-        if rgbmatrix_binding_is_healthy(python_path):
+        if venv_runtime_is_healthy(python_path):
             log(
                 f"Virtual environment for "
                 f"{version} already exists."
@@ -810,6 +834,12 @@ def create_release_venv(
         progress=78,
         step="Installing dependencies",
     )
+
+    if not venv_runtime_is_healthy(python_path):
+        log(
+            f"Virtual environment for {version} "
+            "is incomplete after install."
+        )
 
     return venv_path
 
@@ -950,11 +980,26 @@ def install_update(
         release_path,
         version,
     )
-    build_panel_shift(release_path)
-
     python_path = (
         venv_path / "bin" / "python"
     )
+
+    if not venv_runtime_is_healthy(python_path):
+        log(
+            "New virtual environment is damaged; "
+            "keeping the working environment."
+        )
+        if venv_path != old_venv and venv_path.exists():
+            shutil.rmtree(venv_path)
+        venv_path = old_venv
+        python_path = venv_path / "bin" / "python"
+        if not venv_runtime_is_healthy(python_path):
+            raise UpdateError(
+                "The working Python environment "
+                "is also damaged."
+            )
+
+    build_panel_shift(release_path)
 
     write_status(
         "validating",
