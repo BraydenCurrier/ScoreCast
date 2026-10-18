@@ -570,6 +570,43 @@ def build_panel_shift(release_path: Path) -> None:
         )
 
 
+RGBMATRIX_IMPORT = (
+    "from rgbmatrix import RGBMatrix, RGBMatrixOptions"
+)
+
+
+def rgbmatrix_binding_is_healthy(python_path: Path) -> bool:
+    """True only if the hzeller LED binding can actually be imported."""
+    check = subprocess.run(
+        [str(python_path), "-c", RGBMATRIX_IMPORT],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if check.returncode != 0:
+        return False
+
+    locate = subprocess.run(
+        [
+            str(python_path),
+            "-c",
+            (
+                "import pathlib, rgbmatrix; "
+                "print(pathlib.Path(rgbmatrix.__file__)"
+                ".resolve().parent / 'core.so')"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if locate.returncode != 0:
+        return False
+
+    core_so = Path(locate.stdout.strip())
+    return core_so.is_file() and core_so.stat().st_size > 10_000
+
+
 def copy_rgbmatrix_binding(
     source_python: Path,
     target_python: Path,
@@ -623,6 +660,13 @@ def copy_rgbmatrix_binding(
         target_package,
     )
 
+    if not rgbmatrix_binding_is_healthy(target_python):
+        raise RuntimeError(
+            "Copied rgbmatrix binding is missing RGBMatrix. "
+            "The LED library did not install correctly."
+        )
+
+
 def create_release_venv(
     release_path: Path,
     version: str,
@@ -633,18 +677,7 @@ def create_release_venv(
     )
 
     if python_path.is_file():
-        rgbmatrix_check = subprocess.run(
-            [
-                str(python_path),
-                "-c",
-                "import rgbmatrix",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        if rgbmatrix_check.returncode == 0:
+        if rgbmatrix_binding_is_healthy(python_path):
             log(
                 f"Virtual environment for "
                 f"{version} already exists."
