@@ -32,6 +32,7 @@ from common.logo_store import (
     get_selected_logo_variant,
     get_team_logo_catalog,
     get_teams_with_logos,
+    normalize_identifier,
     save_custom_logo,
     variant_label,
 )
@@ -274,24 +275,34 @@ def root_required(f):
 
 
 def page_header(active_page="games"):
+    more_pages = (
+        "stocks",
+        "fantasy",
+        "players",
+        "logos",
+        "favorites",
+        "settings",
+        "profiles",
+    )
+    bets_pages = ("bets", "live", "history", "analytics", "new")
     games_active = "active" if active_page == "games" else ""
     focus_active = "active" if active_page == "focus" else ""
-    fantasy_active = "active" if active_page == "fantasy" else ""
     alerts_active = "active" if active_page == "alerts" else ""
-    players_active = "active" if active_page == "players" else ""
-    bets_active = "active" if active_page == "bets" else ""
-    logos_active = "active" if active_page == "logos" else ""
+    bets_active = "active" if active_page in bets_pages else ""
+    more_active = "active" if active_page in more_pages else ""
     settings_active = "active" if active_page in ("settings", "profiles") else ""
-    favorites_active = "active" if active_page == "favorites" else ""
-    stocks_active = "active" if active_page == "stocks" else ""
 
     page_titles = {
-        "games": ("Games", "Choose what scrolls on the board"),
+        "games": ("Scores", "Select games for the board"),
         "focus": ("Focus", "Pin one game full-width"),
         "fantasy": ("Fantasy", "Sleeper matchups on the ticker"),
         "alerts": ("Alerts", "Team takeovers and chants"),
         "players": ("Players", "Big-play alerts for NFL stars"),
         "bets": ("Bets", "Track slips you already placed"),
+        "live": ("Live", "Open bets in progress"),
+        "history": ("History", "Settled slips"),
+        "analytics": ("Analytics", "Your tracked results"),
+        "new": ("Add Bet", "Log a slip you already placed"),
         "logos": ("Logos", "Pick a look or upload your own"),
         "settings": ("Settings", "Display, updates, and access"),
         "favorites": ("Favorites", "Keep your teams first"),
@@ -341,9 +352,8 @@ def page_header(active_page="games"):
         <div class="topbar-main">
             <div class="brand-lockup brand-lockup-compact">
                 <div class="brand-mark" aria-hidden="true">GL</div>
-                <h1 class="title">GameLine Pro</h1>
+                <h1 class="title">GameLine</h1>
             </div>
-
             <div class="topbar-actions">
                 <a
                     class="icon-button {settings_active}"
@@ -353,82 +363,95 @@ def page_header(active_page="games"):
                 >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                         <circle cx="12" cy="12" r="3"></circle>
-                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"></path>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0 1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"></path>
                     </svg>
                 </a>
-
-            <form
-                class="display-power-form"
-                method="POST"
-                action="/display/power/toggle"
-            >
-                <input
-                    type="hidden"
-                    name="next"
-                    value="{escape(request.path, quote=True)}"
+                <form
+                    class="display-power-form"
+                    method="POST"
+                    action="/display/power/toggle"
                 >
-
-                <button
-                    type="submit"
-                    class="display-power-button {power_class}"
-                    aria-label="{power_label}"
-                    title="{power_label}"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        aria-hidden="true"
+                    <input
+                        type="hidden"
+                        name="next"
+                        value="{escape(request.path, quote=True)}"
                     >
-                        <path
-                            d="
-                                M12 2
-                                V12
-                                M7.05 4.93
-                                A9 9 0 1 0 16.95 4.93
-                            "
-                        />
-                    </svg>
-                </button>
-            </form>
+                    <button
+                        type="submit"
+                        class="display-power-button {power_class}"
+                        aria-label="{power_label}"
+                        title="{power_label}"
+                    >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M12 2 V12 M7.05 4.93 A9 9 0 1 0 16.95 4.93"/>
+                        </svg>
+                    </button>
+                </form>
             </div>
-        </div>
-
-        <div class="topbar-account">
-            <div class="account-chip">
-                <span class="account-name">{username}</span>
-                {root_badge}
-            </div>
-            <a class="logout-link" href="/logout">Sign out</a>
         </div>
     </header>
-
-    <nav class="tabs" id="gameline-tabs" aria-label="GameLine Pro">
-        <a class="tab {games_active}" href="/games">Games</a>
-        <a class="tab {stocks_active}" href="/stocks">Stocks</a>
-        <a class="tab {focus_active}" href="/focus">Focus</a>
-        <a class="tab {alerts_active}" href="/alerts">Alerts</a>
-        <a class="tab {players_active}" href="/players">Players</a>
-        <a class="tab {bets_active}" href="/bets">Bets</a>
-        <a class="tab {fantasy_active}" href="/fantasy">Fantasy</a>
-        <a class="tab {favorites_active}" href="/favorites">Favorites</a>
-        <a class="tab {logos_active}" href="/logos">Logos</a>
-    </nav>
-    <script>
-    (function () {{
-      var nav = document.getElementById("gameline-tabs");
-      var active = nav && nav.querySelector(".tab.active");
-      if (!nav || !active) {{
-        return;
-      }}
-      var maxScroll = Math.max(0, nav.scrollWidth - nav.clientWidth);
-      var target = active.offsetLeft - ((nav.clientWidth - active.offsetWidth) / 2);
-      nav.scrollLeft = Math.max(0, Math.min(maxScroll, target));
-    }})();
-    </script>
 
     <div class="page-intro">
         <h2 class="page-title">{escape(page_title)}</h2>
         <p class="page-lede">{escape(page_lede)}</p>
     </div>
+
+    <nav class="bottom-nav" aria-label="GameLine Pro">
+        <a class="bottom-nav-item {games_active}" href="/games">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 9h18"></path></svg>
+            <span>Scores</span>
+        </a>
+        <a class="bottom-nav-item {focus_active}" href="/focus">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="3"></circle></svg>
+            <span>Focus</span>
+        </a>
+        <a class="bottom-nav-item {alerts_active}" href="/alerts">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 7 3 9H3c0-2 3-2 3-9"></path><path d="M10 21h4"></path></svg>
+            <span>Alerts</span>
+        </a>
+        <a class="bottom-nav-item {bets_active}" href="/bets">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"></rect><path d="M3 10h18"></path></svg>
+            <span>Bets</span>
+        </a>
+        <button class="bottom-nav-item {more_active}" type="button" id="more-tab" aria-expanded="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="19" cy="12" r="1.6"></circle></svg>
+            <span>More</span>
+        </button>
+    </nav>
+    <div class="more-sheet" id="more-sheet" hidden>
+        <button class="more-sheet-backdrop" type="button" aria-label="Close menu"></button>
+        <div class="more-sheet-card">
+            <div class="more-sheet-account">
+                <span class="account-name">{username}</span>
+                {root_badge}
+            </div>
+            <a class="more-link" href="/stocks">Stocks</a>
+            <a class="more-link" href="/fantasy">Fantasy</a>
+            <a class="more-link" href="/players">Players</a>
+            <a class="more-link" href="/favorites">Favorites</a>
+            <a class="more-link" href="/logos">Logos</a>
+            <a class="more-link" href="/settings">Settings</a>
+            <a class="more-link more-link-quiet" href="/logout">Sign out</a>
+        </div>
+    </div>
+    <script>
+    (function () {{
+      var tab = document.getElementById("more-tab");
+      var sheet = document.getElementById("more-sheet");
+      if (!tab || !sheet) return;
+      function closeMore() {{
+        sheet.hidden = true;
+        tab.setAttribute("aria-expanded", "false");
+      }}
+      tab.addEventListener("click", function () {{
+        var open = sheet.hidden;
+        sheet.hidden = !open;
+        tab.setAttribute("aria-expanded", open ? "true" : "false");
+      }});
+      var backdrop = sheet.querySelector(".more-sheet-backdrop");
+      if (backdrop) backdrop.addEventListener("click", closeMore);
+    }})();
+    </script>
     <script>
     (function () {{
       var busyStates = {{
@@ -610,7 +633,7 @@ def page_styles():
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/app.css?v=19">
+    <link rel="stylesheet" href="/static/app.css?v=24">
     <script>
     (function () {
       if (navigator.serviceWorker) {
@@ -632,6 +655,118 @@ def page_styles():
     <script>
     document.addEventListener("DOMContentLoaded", function () {
       setupStockSearch();
+    });
+
+    function isAutosaveForm(form) {
+      return !!(form && form.getAttribute("data-autosave") === "1");
+    }
+
+    var autosaveTimers = new WeakMap();
+    var autosaveQueued = new WeakMap();
+
+    window.autosaveForm = function (form, delay) {
+      if (!isAutosaveForm(form)) {
+        return;
+      }
+
+      delay = delay == null ? 160 : delay;
+      var existing = autosaveTimers.get(form);
+      if (existing) {
+        window.clearTimeout(existing);
+      }
+
+      autosaveTimers.set(form, window.setTimeout(function () {
+        autosaveTimers.delete(form);
+        if (form.dataset.autosaveBusy === "1") {
+          autosaveQueued.set(form, true);
+          return;
+        }
+
+        form.dataset.autosaveBusy = "1";
+        fetch(form.getAttribute("action") || window.location.pathname, {
+          method: "POST",
+          body: new FormData(form),
+          credentials: "same-origin",
+          headers: {
+            "X-GameLine-Autosave": "1",
+            "Accept": "application/json"
+          }
+        }).catch(function () {
+          return null;
+        }).finally(function () {
+          form.dataset.autosaveBusy = "0";
+          if (autosaveQueued.get(form)) {
+            autosaveQueued.delete(form);
+            window.autosaveForm(form, 0);
+          }
+        });
+      }, delay));
+    };
+
+    function shouldSkipAutosave(target) {
+      if (!target || target.disabled) {
+        return true;
+      }
+      if (target.closest("[data-no-autosave]")) {
+        return true;
+      }
+      if (target.type === "search") {
+        return true;
+      }
+      if (target.id && /search/i.test(target.id)) {
+        return true;
+      }
+      if (target.id === "alert_league" || target.id === "logo_league") {
+        return true;
+      }
+      if (target.id === "live_games_only" || target.id === "league_filter") {
+        return true;
+      }
+      if (!target.name && target.type !== "range") {
+        return true;
+      }
+      return false;
+    }
+
+    document.addEventListener("change", function (event) {
+      var target = event.target;
+      var form = target && target.form;
+      if (!isAutosaveForm(form) || shouldSkipAutosave(target)) {
+        return;
+      }
+      var delay = (
+        target.type === "text"
+        || target.type === "number"
+        || target.type === "range"
+      ) ? 280 : 60;
+      window.autosaveForm(form, delay);
+    });
+
+    document.addEventListener("input", function (event) {
+      var target = event.target;
+      var form = target && target.form;
+      if (!isAutosaveForm(form) || shouldSkipAutosave(target)) {
+        return;
+      }
+      if (target.name === "username" || target.name === "season") {
+        return;
+      }
+      if (
+        target.type === "range"
+        || target.type === "number"
+        || target.type === "text"
+      ) {
+        window.autosaveForm(form, 280);
+      }
+    });
+
+    document.addEventListener("submit", function (event) {
+      var form = event.target;
+      if (!isAutosaveForm(form)) {
+        return;
+      }
+      event.preventDefault();
+      window.autosaveForm(form, 0);
     });
 
     function handleCfbConferenceChange(changedCheckbox) {
@@ -784,6 +919,9 @@ def page_styles():
         search.value = "";
         hideResults();
         refreshEmpty();
+        if (window.autosaveForm && search.form) {
+          window.autosaveForm(search.form, 0);
+        }
       }
 
       function renderResults(items) {
@@ -888,6 +1026,9 @@ def page_styles():
         if (row) {
           row.remove();
           refreshEmpty();
+          if (window.autosaveForm && list.closest("form")) {
+            window.autosaveForm(list.closest("form"), 0);
+          }
         }
       });
 
@@ -900,6 +1041,18 @@ def page_styles():
     </script>
     """
 
+
+def is_autosave_request():
+    return request.headers.get("X-GameLine-Autosave") == "1"
+
+
+def autosave_response(url, extra=None):
+    if is_autosave_request():
+        payload = {"ok": True}
+        if extra:
+            payload.update(extra)
+        return jsonify(payload)
+    return redirect(url)
 
 
 def get_game_league(game):
@@ -933,6 +1086,111 @@ def get_game_league(game):
 
 def get_game_id(game):
     return shared_game_id(game)
+
+
+_WEB_COLOR_LEAGUES = {
+    "nfl": "nfl.colors",
+    "cfb": "cfb.colors",
+    "mlb": "mlb.colors",
+    "nhl": "nhl.colors",
+}
+_LOGO_MARK_LEAGUES = frozenset(
+    {"nfl", "nba", "mlb", "nhl", "cfb", "soccer"}
+)
+
+
+def _web_team_rgb(league_key, abbreviation):
+    module_name = _WEB_COLOR_LEAGUES.get(str(league_key or "").lower())
+    if not module_name:
+        return None
+    try:
+        module = __import__(module_name, fromlist=["team_color"])
+        rgb = module.team_color(abbreviation)
+    except Exception:
+        return None
+    if not rgb or len(rgb) < 3:
+        return None
+    red, green, blue = (int(rgb[0]), int(rgb[1]), int(rgb[2]))
+    if red + green + blue >= 720:
+        return None
+    return (red, green, blue)
+
+
+def _accent_from_logo(logo_path):
+    try:
+        from PIL import Image
+
+        image = Image.open(logo_path).convert("RGBA")
+    except Exception:
+        return None
+
+    best = None
+    best_sat = 12
+    pixels = list(image.getdata())
+    step = max(1, len(pixels) // 500)
+    for index in range(0, len(pixels), step):
+        red, green, blue, alpha = pixels[index]
+        if alpha < 48:
+            continue
+        luminance = red + green + blue
+        if luminance < 70 or luminance > 700:
+            continue
+        sat = max(red, green, blue) - min(red, green, blue)
+        if sat > best_sat:
+            best_sat = sat
+            best = (red, green, blue)
+    return best
+
+
+def web_team_mark(league_key, abbreviation, settings, rank=None):
+    raw = str(abbreviation or "").strip()
+    if not raw:
+        return '<span class="score-team-main"><span class="score-abbr"></span></span>'
+
+    label = escape(raw)
+    logo_html = ""
+    color_style = ""
+    rgb = _web_team_rgb(league_key, raw)
+    league = str(league_key or "").strip().lower()
+
+    if league in _LOGO_MARK_LEAGUES:
+        try:
+            ident = normalize_identifier(raw)
+            variant = get_selected_logo_variant(settings, league, ident)
+            logo_path = get_logo_variant_path(league, ident, variant)
+        except ValueError:
+            ident = ""
+            variant = "current"
+            logo_path = None
+
+        if logo_path is not None:
+            src = (
+                f"/logo-preview/{escape(league, quote=True)}"
+                f"/{escape(ident, quote=True)}"
+                f"/{escape(str(variant), quote=True)}"
+            )
+            logo_html = (
+                f'<img class="score-logo" src="{src}" alt="" '
+                f'width="24" height="24">'
+            )
+            if rgb is None:
+                rgb = _accent_from_logo(logo_path)
+
+    if rgb is not None:
+        color_style = (
+            f' style="color: rgb({rgb[0]}, {rgb[1]}, {rgb[2]})"'
+        )
+
+    rank_html = ""
+    if rank not in (None, "", 0):
+        rank_html = (
+            f'<span class="score-rank">{escape(str(rank))}</span>'
+        )
+
+    return (
+        f'<span class="score-team-main">{rank_html}{logo_html}'
+        f'<span class="score-abbr"{color_style}>{label}</span></span>'
+    )
 
 def get_favorite_teams(
     settings,
@@ -1029,8 +1287,57 @@ def is_game_live(game):
 
     return status not in not_live_statuses
 
+def _status_clock_line(game):
+    clock = str(getattr(game, "clock", "") or "").strip()
+    quarter = getattr(game, "quarter", None)
+    period = getattr(game, "period", None)
+    inning = getattr(game, "inning", None)
+    inning_half = str(getattr(game, "inning_half", "") or "").strip()
+
+    if inning not in (None, "", 0):
+        half = inning_half[:3].title() if inning_half else ""
+        return " ".join(part for part in (half, str(inning)) if part)
+
+    number = quarter if quarter not in (None, "", 0) else period
+    if number not in (None, "", 0):
+        label = f"Q{number}"
+        if clock:
+            return f"{clock} {label}"
+        return label
+
+    if clock:
+        return clock
+    return "Live"
+
+
+def _pretty_game_status(status):
+    raw = str(status or "").strip()
+    key = raw.upper().replace(" ", "_")
+    labels = {
+        "STATUS_FINAL": "Final",
+        "FINAL": "Final",
+        "STATUS_FULL_TIME": "Final",
+        "STATUS_HALFTIME": "Halftime",
+        "HALFTIME": "Halftime",
+        "STATUS_END_PERIOD": "End of period",
+        "STATUS_END_HALF": "Halftime",
+        "STATUS_DELAYED": "Delayed",
+        "STATUS_POSTPONED": "Postponed",
+        "STATUS_CANCELED": "Canceled",
+        "STATUS_CANCELLED": "Canceled",
+        "STATUS_SUSPENDED": "Suspended",
+        "STATUS_PREVIEW": "Preview",
+        "PREVIEW": "Preview",
+        "STATUS_SCHEDULED": "Scheduled",
+        "SCHEDULED": "Scheduled",
+        "LIVE": "Live",
+    }
+    return labels.get(key, raw.replace("STATUS_", "").replace("_", " ").title())
+
+
 def get_display_status(game, league_key):
     status = getattr(game, "status", "")
+    status_key = str(status or "").strip().upper().replace(" ", "_")
 
     if league_key == "soccer":
         league_name = str(
@@ -1039,11 +1346,12 @@ def get_display_status(game, league_key):
             or "Soccer"
         )
 
-        if status in ("Scheduled", "STATUS_SCHEDULED"):
+        if status_key in ("SCHEDULED", "STATUS_SCHEDULED"):
             return league_name
 
-        if status:
-            return f"{status} · {league_name}"
+        pretty = _pretty_game_status(status)
+        if pretty:
+            return f"{pretty} · {league_name}"
 
         return league_name
 
@@ -1057,13 +1365,22 @@ def get_display_status(game, league_key):
             f"{sign}{change:.2f} ({sign}{percent:.1f}%)"
         )
 
-    if status == "STATUS_SCHEDULED":
+    if status_key in ("STATUS_SCHEDULED", "SCHEDULED"):
         if league_key in ("nfl", "cfb"):
             return f"Week {getattr(game, 'week', 1)}"
 
         return "Scheduled"
 
-    return status
+    if status_key in (
+        "STATUS_IN_PROGRESS",
+        "IN_PROGRESS",
+        "LIVE",
+        "STATUS_FIRST_HALF",
+        "STATUS_SECOND_HALF",
+    ):
+        return _status_clock_line(game)
+
+    return _pretty_game_status(status)
 
 
 def get_game_when_label(game):
@@ -1721,6 +2038,7 @@ def games():
             " · Favorite" if favorite_game else ""
         )
 
+        live_class = "is-live" if is_live else ""
         if league_key == "pga":
             matchup = escape(str(getattr(game, "name", "PGA")))
             leaders = []
@@ -1743,42 +2061,65 @@ def games():
             summary = ", ".join(leaders) or escape(
                 getattr(game, "when", "") or "This week"
             )
-            details = (
-                f"{summary} · {safe_status}{favorite_suffix}"
-            )
-            if safe_when and safe_when not in summary:
-                details = f"{details} · {safe_when}"
+            scoreboard = f"""
+                <div class="score-meta">
+                    <span class="score-league">{league_label}</span>
+                    <span class="score-status {live_class}">{safe_status}</span>
+                </div>
+                <div class="score-team">
+                    <span class="score-abbr">{matchup}</span>
+                </div>
+                <div class="score-when">{summary}{favorite_suffix}</div>
+            """
         else:
-            matchup = (
-                f"{escape(str(game.away))} @ "
-                f"{escape(str(game.home))}"
+            show_scores = is_live or "final" in str(display_status).lower()
+            away_score = (
+                escape(str(getattr(game, "away_score", 0)))
+                if show_scores
+                else ""
             )
-            away_score = escape(
-                str(getattr(game, "away_score", 0))
+            home_score = (
+                escape(str(getattr(game, "home_score", 0)))
+                if show_scores
+                else ""
             )
-            home_score = escape(
-                str(getattr(game, "home_score", 0))
+            when_line = safe_when or ""
+            if favorite_suffix:
+                when_line = (when_line + favorite_suffix).strip(" ·")
+            away_mark = web_team_mark(
+                league_key,
+                getattr(game, "away", ""),
+                settings,
+                getattr(game, "away_rank", None),
             )
-            details = (
-                f"{away_score} - {home_score} · "
-                f"{safe_status}{favorite_suffix}"
+            home_mark = web_team_mark(
+                league_key,
+                getattr(game, "home", ""),
+                settings,
+                getattr(game, "home_rank", None),
             )
-            if safe_when:
-                details = f"{details} · {safe_when}"
+            scoreboard = f"""
+                <div class="score-meta">
+                    <span class="score-league">{league_label}</span>
+                    <span class="score-status {live_class}">{safe_status}</span>
+                </div>
+                <div class="score-team">
+                    {away_mark}
+                    <span class="score-pts">{away_score}</span>
+                </div>
+                <div class="score-team">
+                    {home_mark}
+                    <span class="score-pts">{home_score}</span>
+                </div>
+                <div class="score-when">{when_line}</div>
+            """
 
         game_rows += f"""
         <div class="game-row-container" draggable="true" data-id="{safe_game_id}" data-league="{league_key}" data-top25="{"true" if is_top_25 else "false"}" data-live="{"true" if is_live else "false"}">
             <label class="game-row">
                 <input type="checkbox" name="game" value="{safe_game_id}" {checked}>
-                <div class="game-info">
-                    <div class="matchup">{matchup}</div>
-                    <div class="details">
-                        {details}
-                    </div>
-                </div>
-
-                <div class="league-badge">
-                    {league_label}
+                <div class="scoreboard">
+                    {scoreboard}
                 </div>
             </label>
         </div>
@@ -1804,28 +2145,29 @@ def games():
     <div class="page">
         {page_header("games")}
 
-        <form method="POST" action="/save_games">
-            <div class="card" id="games_card">
+        <form method="POST" action="/save_games" data-autosave="1">
+            <div class="card score-card" id="games_card">
                 <div class="hint" style="margin-bottom:12px;">
                     Only checked games scroll on the board.
                     New games stay off until you select them.
+                    Changes apply as soon as you tap a game.
                 </div>
                 <input
                     class="search-input"
                     type="text"
                     id="game_search"
-                    placeholder="Search games..."
+                    placeholder="Search games and teams"
                     oninput="filterGames()"
                 >
-
+                <div class="sport-pills" id="sport-pills"></div>
                 <div class="filter-row">
-                    <select id="league_filter" class="select-input" onchange="filterGames()">
-                        {league_option("selected", "Selected Games")}
-                        {league_option("all", "All Sports")}
+                    <select id="league_filter" class="select-input league-filter-select" onchange="filterGames()">
+                        {league_option("selected", "Selected")}
+                        {league_option("all", "All")}
                         {league_option("mlb", "MLB")}
                         {league_option("nfl", "NFL")}
                         {league_option("cfb", "CFB")}
-                        {league_option("top25", "Top 25 CFB")}
+                        {league_option("top25", "Top 25")}
                         {league_option("soccer", "Soccer")}
                         {league_option("nba", "NBA")}
                         {league_option("nhl", "NHL")}
@@ -1848,10 +2190,6 @@ def games():
 
                 {game_rows}
             </div>
-
-            <button class="save-button" type="submit">
-                Save Games
-            </button>
         </form>
 
         <form
@@ -1859,6 +2197,7 @@ def games():
             action="/save_cfb_conferences"
             id="cfb_panel"
             class="league-setup-card"
+            data-autosave="1"
             hidden
         >
             <div class="card">
@@ -1869,9 +2208,6 @@ def games():
                 </div>
                 {_cfb_conference_rows(settings)}
             </div>
-            <button class="save-button" type="submit">
-                Save Conferences
-            </button>
         </form>
 
         <form
@@ -1879,6 +2215,7 @@ def games():
             action="/save_soccer_leagues"
             id="soccer_panel"
             class="league-setup-card"
+            data-autosave="1"
             hidden
         >
             <div class="card">
@@ -1890,9 +2227,6 @@ def games():
                 </div>
                 {_soccer_league_rows(settings)}
             </div>
-            <button class="save-button" type="submit">
-                Save Leagues
-            </button>
         </form>
     </div>
 
@@ -1901,6 +2235,35 @@ def games():
             const filter = document.getElementById("league_filter");
             return filter ? filter.value : "all";
         }}
+
+        (function setupSportPills() {{
+            const select = document.getElementById("league_filter");
+            const host = document.getElementById("sport-pills");
+            if (!select || !host) {{
+                return;
+            }}
+            Array.from(select.options).forEach(function (option) {{
+                const pill = document.createElement("button");
+                pill.type = "button";
+                pill.className = "sport-pill";
+                pill.dataset.league = option.value;
+                pill.textContent = option.textContent;
+                if (option.selected) {{
+                    pill.classList.add("active");
+                }}
+                pill.addEventListener("click", function () {{
+                    select.value = option.value;
+                    host.querySelectorAll(".sport-pill").forEach(function (item) {{
+                        item.classList.toggle(
+                            "active",
+                            item.dataset.league === option.value
+                        );
+                    }});
+                    filterGames();
+                }});
+                host.appendChild(pill);
+            }});
+        }})();
 
         function filterGames() {{
             const searchInput = document.getElementById("game_search");
@@ -2008,6 +2371,12 @@ def games():
             }});
 
             filterGames();
+            const gamesForm = document.querySelector(
+                'form[action="/save_games"]'
+            );
+            if (window.autosaveForm && gamesForm) {{
+                window.autosaveForm(gamesForm, 0);
+            }}
         }}
 
         function deselectVisibleGames() {{
@@ -2028,6 +2397,12 @@ def games():
             }});
 
             filterGames();
+            const gamesForm = document.querySelector(
+                'form[action="/save_games"]'
+            );
+            if (window.autosaveForm && gamesForm) {{
+                window.autosaveForm(gamesForm, 0);
+            }}
         }}
 
         const container = document.getElementById("games_card");
@@ -2049,6 +2424,12 @@ def games():
 
             if (row) {{
                 row.classList.remove("dragging");
+            }}
+            const gamesForm = document.querySelector(
+                'form[action="/save_games"]'
+            );
+            if (window.autosaveForm && gamesForm) {{
+                window.autosaveForm(gamesForm, 0);
             }}
         }});
 
@@ -2164,7 +2545,7 @@ def stocks_page():
         {page_header("stocks")}
         {saved_message}
 
-        <form method="POST" action="/save_stocks">
+        <form method="POST" action="/save_stocks" data-autosave="1">
             <div class="card">
                 <div class="card-title">Watchlist</div>
                 <div class="hint" style="margin-bottom: 12px;">
@@ -2201,10 +2582,6 @@ def stocks_page():
                     {stock_watchlist_rows}
                 </div>
             </div>
-
-            <button class="save-button" type="submit">
-                Save Stocks
-            </button>
         </form>
     </div>
 </body>
@@ -2262,6 +2639,7 @@ def _focus_game_rows(
     selected_ids,
     input_name,
     badge,
+    settings,
 ):
     rows = ""
 
@@ -2278,8 +2656,6 @@ def _focus_game_rows(
             else ""
         )
         safe_id = escape(game_identifier, quote=True)
-        safe_away = escape(str(game.away))
-        safe_home = escape(str(game.home))
         safe_status = escape(
             str(get_display_status(game, league_key))
         )
@@ -2292,6 +2668,18 @@ def _focus_game_rows(
         safe_search = escape(
             _focus_search_blob(game, league_key),
             quote=True,
+        )
+        away_mark = web_team_mark(
+            league_key,
+            getattr(game, "away", ""),
+            settings,
+            getattr(game, "away_rank", None),
+        )
+        home_mark = web_team_mark(
+            league_key,
+            getattr(game, "home", ""),
+            settings,
+            getattr(game, "home_rank", None),
         )
 
         rows += f"""
@@ -2306,20 +2694,19 @@ def _focus_game_rows(
                 value="{safe_id}"
                 {checked}
             >
-
-            <div class="game-info">
-                <div class="matchup">
-                    {safe_away} @ {safe_home}
+            <div class="scoreboard">
+                <div class="score-meta">
+                    <span class="score-league">{badge}</span>
+                    <span class="score-status">{safe_status}</span>
                 </div>
-
-                <div class="details">
-                    {away_score} - {home_score}
-                    · {safe_status}
+                <div class="score-team">
+                    {away_mark}
+                    <span class="score-pts">{away_score}</span>
                 </div>
-            </div>
-
-            <div class="league-badge">
-                {badge}
+                <div class="score-team">
+                    {home_mark}
+                    <span class="score-pts">{home_score}</span>
+                </div>
             </div>
         </label>
         """
@@ -2398,6 +2785,7 @@ def focus_page():
         selected_nfl_ids,
         "focus_nfl_game",
         "NFL",
+        settings,
     )
 
     cfb_rows = _focus_game_rows(
@@ -2406,6 +2794,7 @@ def focus_page():
         selected_cfb_ids,
         "focus_cfb_game",
         "CFB",
+        settings,
     )
 
     mlb_rows = _focus_game_rows(
@@ -2414,6 +2803,7 @@ def focus_page():
         selected_mlb_ids,
         "focus_mlb_game",
         "MLB",
+        settings,
     )
 
     if not nfl_rows:
@@ -2466,6 +2856,7 @@ def focus_page():
         <form
             method="POST"
             action="/save_focus"
+            data-autosave="1"
         >
             <div class="card">
                 <div class="hint"
@@ -2628,13 +3019,6 @@ def focus_page():
             >
                 No matching games.
             </div>
-
-            <button
-                class="save-button"
-                type="submit"
-            >
-                Save Focus Mode
-            </button>
         </form>
     </div>
 
@@ -2842,7 +3226,7 @@ def save_focus():
         },
     })
 
-    return redirect("/focus")
+    return autosave_response("/focus")
 
 @app.route("/alerts", methods=["GET", "POST"])
 @login_required
@@ -3021,11 +3405,10 @@ def alerts_page():
             "alerts": updated_alerts,
         })
 
-        return redirect(
+        return autosave_response(
             url_for(
                 "alerts_page",
                 league=requested_league,
-                saved="1",
             )
         )
 
@@ -3120,15 +3503,7 @@ def alerts_page():
                     {team_checked}
                 >
 
-                <div
-                    class="team-color"
-                    style="
-                        background:
-                            rgb{definition.primary};
-                        border-color:
-                            rgb{definition.accent};
-                    "
-                ></div>
+                {web_team_mark(requested_league, abbreviation, settings)}
 
                 <div class="game-info">
                     <div class="matchup">
@@ -3490,7 +3865,7 @@ def alerts_page():
             {page_header("alerts")}
             {saved_message}
 
-            <form method="POST">
+            <form method="POST" data-autosave="1">
                 <div class="card">
                     <div class="card-title">
                         League
@@ -3824,16 +4199,6 @@ def alerts_page():
                         </div>
                     </div>
                 </div>
-
-                <button
-                    class="
-                        save-button
-                        alerts-save
-                    "
-                    type="submit"
-                >
-                    Save {league_label} Alerts
-                </button>
             </form>
         </div>
 
@@ -3844,6 +4209,12 @@ def alerts_page():
                 ).forEach(function (input) {{
                     input.checked = checked;
                 }});
+                const form = document.querySelector(
+                    "form[data-autosave]"
+                );
+                if (window.autosaveForm && form) {{
+                    window.autosaveForm(form, 0);
+                }}
             }}
 
             function filterAlertTeams() {{
@@ -3938,7 +4309,7 @@ def players_page():
             "alerts": updated_alerts,
         })
 
-        return redirect("/players?saved=1")
+        return autosave_response("/players")
 
     def checked(name: str, default: bool) -> str:
         return (
@@ -4222,7 +4593,7 @@ def players_page():
             {page_header("players")}
             {saved_message}
 
-            <form method="POST">
+            <form method="POST" data-autosave="1">
                 <div class="card">
                     <div class="card-title">
                         Watch
@@ -4366,13 +4737,6 @@ def players_page():
                         </div>
                     </div>
                 </div>
-
-                <button
-                    class="save-button alerts-save"
-                    type="submit"
-                >
-                    Save Player Alerts
-                </button>
             </form>
 
             <form method="POST" action="/players/preview">
@@ -4481,6 +4845,9 @@ def players_page():
                 list.appendChild(row);
                 refreshEmpty();
                 syncFantasyButtons();
+                if (window.autosaveForm && list.closest("form")) {{
+                    window.autosaveForm(list.closest("form"), 0);
+                }}
                 return true;
             }}
 
@@ -4495,6 +4862,9 @@ def players_page():
 
                 refreshEmpty();
                 syncFantasyButtons();
+                if (window.autosaveForm && list.closest("form")) {{
+                    window.autosaveForm(list.closest("form"), 0);
+                }}
             }}
 
             function hideResults() {{
@@ -4826,10 +5196,13 @@ def fantasy_page():
                         }
                     })
 
-                    return redirect("/fantasy?saved=1")
+                    return autosave_response("/fantasy")
 
             except Exception as exc:
                 error = f"Unable to connect to Sleeper: {exc}"
+
+        if is_autosave_request() and error:
+            return jsonify({"ok": False, "error": error}), 400
 
     settings = get_settings()
     fantasy = settings.get("fantasy", {})
@@ -4927,7 +5300,7 @@ def fantasy_page():
             if error else ""
         }
 
-        <form method="POST">
+        <form method="POST" data-autosave="1">
             <div class="card">
                 <div class="card-title">Sleeper Account</div>
 
@@ -4969,10 +5342,6 @@ def fantasy_page():
                 <div class="card-title">Leagues</div>
                 {league_rows}
             </div>
-
-            <button class="save-button" type="submit">
-                Save Fantasy Settings
-            </button>
         </form>
     </div>
 </body>
@@ -5298,24 +5667,13 @@ def logos_page():
             id="logo-save-form"
             method="POST"
             action="/save_logos"
+            data-autosave="1"
         >
             <input
                 type="hidden"
                 name="league"
                 value="{safe_selected_league}"
             >
-            {
-                '''
-                <button
-                    class="save-button"
-                    type="submit"
-                >
-                    Save Logos
-                </button>
-                '''
-                if selected_league
-                else ""
-            }
         </form>
     </div>
 
@@ -5693,7 +6051,9 @@ def save_logos():
         "logo_variants": logo_variants,
     })
 
-    return _logo_redirect(league, saved="1")
+    return autosave_response(
+        url_for("logos_page", league=league)
+    )
 
 
 @app.route(
@@ -5917,7 +6277,7 @@ def settings_page():
     <div class="page">
         {page_header("settings")}
 
-        <form method="POST" action="/save_settings">
+        <form method="POST" action="/save_settings" data-autosave="1">
             <div class="card">
                 <div class="card-title">Display</div>
 
@@ -6132,10 +6492,6 @@ def settings_page():
             </div>
 
             {developer_html}
-
-            <button class="save-button" type="submit">
-                Save Settings
-            </button>
         </form>
 
         {profiles_html}
@@ -6996,7 +7352,7 @@ def favorites_page():
                 >
 
                 <span>
-                    {escape(normalized_team)}
+                    {web_team_mark(league_key, normalized_team, settings)}
                 </span>
             </label>
             """
@@ -7094,6 +7450,7 @@ def favorites_page():
         <form
             method="POST"
             action="/save_favorites"
+            data-autosave="1"
         >
 
             <div class="card">
@@ -7123,13 +7480,6 @@ def favorites_page():
 
             </div>
 
-            <button
-                class="save-button"
-                type="submit"
-            >
-                Save Favorites
-            </button>
-
         </form>
 
     </div>
@@ -7155,6 +7505,12 @@ def favorites_page():
 
                     }}
                 );
+            var form = document.querySelector(
+                'form[action="/save_favorites"]'
+            );
+            if (window.autosaveForm && form) {{
+                window.autosaveForm(form, 0);
+            }}
 
         }}
 
@@ -7228,9 +7584,7 @@ def save_favorites():
             favorites,
     })
 
-    return redirect(
-        "/favorites"
-    )
+    return autosave_response("/favorites")
 
 @app.route("/save_games", methods=["POST"])
 @login_required
@@ -7280,7 +7634,7 @@ def save_games():
         "game_order": visible_games + hidden_sports + stock_order,
     })
 
-    return redirect("/games")
+    return autosave_response("/games")
 
 
 @app.route("/save_cfb_conferences", methods=["POST"])
@@ -7293,7 +7647,7 @@ def save_cfb_conferences():
             ),
         },
     })
-    return redirect("/games?league=cfb")
+    return autosave_response("/games?league=cfb")
 
 
 @app.route("/save_soccer_leagues", methods=["POST"])
@@ -7306,7 +7660,7 @@ def save_soccer_leagues():
             ),
         },
     })
-    return redirect("/games?league=soccer")
+    return autosave_response("/games?league=soccer")
 
 
 @app.route("/save_stocks", methods=["POST"])
@@ -7362,7 +7716,7 @@ def save_stocks():
         "game_order": kept_order + stock_ids,
     })
 
-    return redirect("/stocks?saved=1")
+    return autosave_response("/stocks")
 
 
 @app.route("/save_settings", methods=["POST"])
@@ -7396,7 +7750,7 @@ def save_settings():
 
     update_settings(payload)
 
-    return redirect("/settings")
+    return autosave_response("/settings")
 
 
 @app.route("/api/stocks/search")
