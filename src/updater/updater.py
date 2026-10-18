@@ -24,6 +24,7 @@ from updater.config import (
     PREVIOUS_VENV_LINK,
     RELEASES_DIR,
     REPOSITORY_DIR,
+    RGB_MATRIX_DIR,
     SERVICE_NAME,
     SYSTEM_PYTHON,
     VENVS_DIR,
@@ -631,19 +632,24 @@ def venv_runtime_is_healthy(python_path: Path) -> bool:
     return check.returncode == 0
 
 
-def copy_rgbmatrix_binding(
-    source_python: Path,
-    target_python: Path,
-) -> None:
-    """
-    Copy the working local rgbmatrix binding into a new release venv.
-
-    The hzeller binding is often installed outside normal PyPI handling,
-    so it may not be visible inside a newly created virtual environment.
-    """
-    source_result = run_command(
+def _site_packages(python_path: Path) -> Path:
+    result = run_command(
         [
-            str(source_python),
+            str(python_path),
+            "-c",
+            (
+                "import site; "
+                "print(site.getsitepackages()[0])"
+            ),
+        ]
+    )
+    return Path(result.stdout.strip())
+
+
+def _rgbmatrix_package(python_path: Path) -> Path:
+    result = run_command(
+        [
+            str(python_path),
             "-c",
             (
                 "import pathlib, rgbmatrix; "
@@ -652,42 +658,75 @@ def copy_rgbmatrix_binding(
             ),
         ]
     )
+    return Path(result.stdout.strip())
 
-    source_package = Path(
-        source_result.stdout.strip()
-    )
 
-    target_result = run_command(
+def copy_directory_verified(source: Path, target: Path) -> None:
+    """Copy a package directory and require every file to keep its size."""
+    if target.exists():
+        shutil.rmtree(target)
+
+    for path in source.rglob("*"):
+        relative = path.relative_to(source)
+        if "__pycache__" in relative.parts:
+            continue
+        destination = target / relative
+        if path.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(path, destination, follow_symlinks=True)
+        if destination.stat().st_size != path.stat().st_size:
+            raise RuntimeError(
+                f"Incomplete copy of {relative}: "
+                f"{destination.stat().st_size} bytes, "
+                f"expected {path.stat().st_size}."
+            )
+
+
+def pip_install(python_path: Path, *arguments: str) -> None:
+    run_command(
         [
-            str(target_python),
-            "-c",
-            (
-                "import site; "
-                "print(site.getsitepackages()[0])"
-            ),
+            str(python_path),
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "--no-cache-dir",
+            *arguments,
         ]
     )
 
-    target_site_packages = Path(
-        target_result.stdout.strip()
-    )
 
-    target_package = (
-        target_site_packages / "rgbmatrix"
-    )
+def install_rgbmatrix_binding(
+    python_path: Path,
+    source_python: Path,
+) -> None:
+    """
+    Install the hzeller LED binding into a new venv.
 
-    if target_package.exists():
-        shutil.rmtree(target_package)
+    Prefer a size-checked copy of a working local build, then fall back
+    to pip installing the packaged tree under /opt/rpi-rgb-led-matrix.
+    """
+    if rgbmatrix_binding_is_healthy(source_python):
+        copy_directory_verified(
+            _rgbmatrix_package(source_python),
+            _site_packages(python_path) / "rgbmatrix",
+        )
+        if rgbmatrix_binding_is_healthy(python_path):
+            return
 
-    shutil.copytree(
-        source_package,
-        target_package,
-    )
+    if RGB_MATRIX_DIR.is_dir():
+        log(
+            "Building the RGB matrix Python binding "
+            f"from {RGB_MATRIX_DIR}."
+        )
+        pip_install(python_path, str(RGB_MATRIX_DIR))
 
-    if not rgbmatrix_binding_is_healthy(target_python):
-        raise RuntimeError(
-            "Copied rgbmatrix binding is missing RGBMatrix. "
-            "The LED library did not install correctly."
+    if not rgbmatrix_binding_is_healthy(python_path):
+        raise UpdateError(
+            "The RGB matrix Python binding "
+            "did not install completely."
         )
 
 
@@ -761,10 +800,6 @@ def create_release_venv(
         step="Installing dependencies",
     )
 
-    pip_path = (
-        venv_path / "bin" / "pip"
-    )
-
     write_status(
         "installing",
         "Installing GameLine Pro dependencies.",
@@ -782,26 +817,17 @@ def create_release_venv(
         f"{version}."
     )
 
-    run_command(
-        [
-            str(pip_path),
-            "install",
-            "--disable-pip-version-check",
-            "--upgrade",
-            "pip",
-            "setuptools",
-            "wheel",
-        ]
+    pip_install(
+        python_path,
+        "--upgrade",
+        "pip",
+        "setuptools",
+        "wheel",
     )
-
-    run_command(
-        [
-            str(pip_path),
-            "install",
-            "--disable-pip-version-check",
-            "-r",
-            str(requirements_path),
-        ]
+    pip_install(
+        python_path,
+        "-r",
+        str(requirements_path),
     )
 
     current_python = (
@@ -818,14 +844,19 @@ def create_release_venv(
         step="Installing dependencies",
     )
 
-    log(
-        "Copying RGB matrix Python binding."
-    )
-
-    copy_rgbmatrix_binding(
-        current_python,
+    log("Installing the RGB matrix Python binding.")
+    install_rgbmatrix_binding(
         python_path,
+        current_python,
     )
+    os.sync()
+
+    if not venv_runtime_is_healthy(python_path):
+        shutil.rmtree(venv_path, ignore_errors=True)
+        raise UpdateError(
+            f"Python environment for {version} "
+            "did not install completely."
+        )
 
     write_status(
         "installing",
@@ -834,12 +865,6 @@ def create_release_venv(
         progress=78,
         step="Installing dependencies",
     )
-
-    if not venv_runtime_is_healthy(python_path):
-        log(
-            f"Virtual environment for {version} "
-            "is incomplete after install."
-        )
 
     return venv_path
 
@@ -874,6 +899,15 @@ def replace_symlink(
             )
         except OSError:
             pass
+
+
+def stop_scorecast() -> None:
+    log("Stopping GameLine Pro for environment install.")
+    run_command([
+        "/usr/bin/systemctl",
+        "stop",
+        SERVICE_NAME,
+    ])
 
 
 def restart_scorecast() -> None:
@@ -976,29 +1010,22 @@ def install_update(
         version,
     )
 
-    venv_path = create_release_venv(
-        release_path,
-        version,
-    )
+    try:
+        stop_scorecast()
+        venv_path = create_release_venv(
+            release_path,
+            version,
+        )
+    except (UpdateError, ValidationError) as error:
+        restart_scorecast()
+        raise UpdateError(
+            f"Python environment for {version} "
+            f"failed to install: {error}"
+        ) from error
+
     python_path = (
         venv_path / "bin" / "python"
     )
-
-    if not venv_runtime_is_healthy(python_path):
-        log(
-            "New virtual environment is damaged; "
-            "keeping the working environment."
-        )
-        if venv_path != old_venv and venv_path.exists():
-            shutil.rmtree(venv_path)
-        venv_path = old_venv
-        python_path = venv_path / "bin" / "python"
-        if not venv_runtime_is_healthy(python_path):
-            raise UpdateError(
-                "The working Python environment "
-                "is also damaged."
-            )
-
     build_panel_shift(release_path)
 
     write_status(

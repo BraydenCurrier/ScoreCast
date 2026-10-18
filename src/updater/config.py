@@ -48,6 +48,13 @@ SYSTEM_PYTHON = Path(
     )
 )
 
+RGB_MATRIX_DIR = Path(
+    os.getenv(
+        "SCORECAST_RGB_MATRIX_DIR",
+        "/opt/rpi-rgb-led-matrix",
+    )
+)
+
 STARTUP_TIMEOUT_SECONDS = int(
     os.getenv(
         "SCORECAST_UPDATE_STARTUP_TIMEOUT",
