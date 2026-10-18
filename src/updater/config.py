@@ -51,7 +51,7 @@ SYSTEM_PYTHON = Path(
 STARTUP_TIMEOUT_SECONDS = int(
     os.getenv(
         "SCORECAST_UPDATE_STARTUP_TIMEOUT",
-        "30",
+        "45",
     )
 )
 
