@@ -54,6 +54,7 @@ jobs:
           pi-gen-version: arm64
           release: trixie
           stage-list: stage0 stage1 stage2 ./image/stage-scorecast
+          export-last-stage-only: true
           compression: xz
           hostname: scorecast
           enable-ssh: 0
