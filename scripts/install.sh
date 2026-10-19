@@ -695,8 +695,14 @@ TimeoutStartSec=15min
 EOF
     fi
 
-    systemctl daemon-reload
-    systemctl enable "${SERVICE_NAME}.service"
+    if [[ "${IMAGE_BUILD}" == "1" ]]; then
+        log "Enabling ScoreCast for first boot."
+        systemctl --root=/ enable "${SERVICE_NAME}.service"
+    else
+        systemctl daemon-reload
+        systemctl enable "${SERVICE_NAME}.service"
+    fi
+
 }
 
 initialize_status_file() {
