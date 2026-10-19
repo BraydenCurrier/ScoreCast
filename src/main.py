@@ -107,6 +107,9 @@ from bets.tracker import (
     ticker_tickets,
 )
 from web.app import app, set_latest_games
+from setup.runtime import start_setup_if_needed
+from setup.display import render_setup_display
+from setup.state import setup_holds_display
 
 
 DEFAULT_FPS = 60
@@ -1129,14 +1132,26 @@ class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
 
 
 def run_web_server():
-    server = make_server(
-        "0.0.0.0",
-        8080,
-        app,
-        server_class=ThreadingWSGIServer,
-    )
-    print("Web app running on port 8080")
-    server.serve_forever()
+    def serve(port):
+        try:
+            server = make_server(
+                "0.0.0.0",
+                port,
+                app,
+                server_class=ThreadingWSGIServer,
+            )
+            print(f"Web app running on port {port}")
+            server.serve_forever()
+        except OSError as error:
+            print(f"Web app could not bind port {port}: {error}")
+
+    threading.Thread(
+        target=serve,
+        args=(80,),
+        daemon=True,
+        name="gameline-http-80",
+    ).start()
+    serve(8080)
 
 
 def load_initial_games():
@@ -1217,6 +1232,8 @@ if __name__ == "__main__":
             )
         )
 
+    start_setup_if_needed()
+
     threading.Thread(
         target=run_web_server,
         daemon=True
@@ -1231,18 +1248,21 @@ if __name__ == "__main__":
         name="possession-watcher",
     ).start()
 
-    refresh_fantasy_avatars_on_startup()
-    try:
-        init_bet_store()
-        refresh_open_bets()
-    except Exception as error:
-        print("Bet tracker init deferred:", error)
+    if setup_holds_display():
+        publish_games([])
+    else:
+        refresh_fantasy_avatars_on_startup()
+        try:
+            init_bet_store()
+            refresh_open_bets()
+        except Exception as error:
+            print("Bet tracker init deferred:", error)
 
-    publish_games(load_initial_games())
-    try:
-        refresh_open_bets()
-    except Exception as error:
-        print("Bet refresh deferred:", error)
+        publish_games(load_initial_games())
+        try:
+            refresh_open_bets()
+        except Exception as error:
+            print("Bet refresh deferred:", error)
 
     current_game = 0
     scroll_x = 0.0
@@ -1281,7 +1301,8 @@ if __name__ == "__main__":
     focus_last_switch = time.monotonic()
     focus_previous_ids = ()
 
-    mark_sports_fetched(SPORT_FETCHERS, time.monotonic())
+    if not setup_holds_display():
+        mark_sports_fetched(SPORT_FETCHERS, time.monotonic())
     _bets_fetched_at = time.monotonic()
     last_settings_poll = 0.0
     last_update_poll = 0.0
@@ -1391,6 +1412,20 @@ if __name__ == "__main__":
 
         scroll_speed = float(settings.get("scroll_speed", 30.0))
         brightness = int(settings.get("brightness", 50))
+
+        if setup_holds_display():
+            note_external_frame()
+            if brightness != last_brightness:
+                matrix.brightness = brightness
+                last_brightness = brightness
+            present_frame(
+                render_setup_display(DISPLAY_WIDTH, MATRIX_HEIGHT)
+            )
+            frame_elapsed = time.monotonic() - frame_started_at
+            sleep_time = frame_delay - frame_elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            continue
 
         # --------------------------------------------------
         # Display software power / low-energy sleep mode

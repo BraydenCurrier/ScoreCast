@@ -157,6 +157,13 @@ def ensure_settings_directory() -> None:
     )
 
 
+def clear_settings_cache() -> None:
+    global _cached_settings, _cached_mtime_ns
+    with _settings_lock:
+        _cached_settings = None
+        _cached_mtime_ns = None
+
+
 def deep_merge(
     base: dict[str, Any],
     override: dict[str, Any],

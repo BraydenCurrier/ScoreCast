@@ -154,6 +154,13 @@ def list_users() -> list[dict[str, Any]]:
         return [_public_user(user) for user in store["users"]]
 
 
+def clear_users_cache() -> None:
+    global _cached_store, _cached_mtime_ns
+    with _users_lock:
+        _cached_store = None
+        _cached_mtime_ns = None
+
+
 def has_users() -> bool:
     with _users_lock:
         return bool(_get_store()["users"])

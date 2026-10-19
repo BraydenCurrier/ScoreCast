@@ -940,6 +940,19 @@ input[type=range] {
     cursor: not-allowed;
 }
 
+.quiet-button-danger {
+    border-color: rgba(255, 141, 134, 0.35);
+    color: var(--danger);
+}
+
+.factory-reset-row {
+    align-items: flex-start;
+}
+
+.factory-reset-option {
+    margin: 12px 0 0;
+}
+
 .ghost-button {
     width: 100%;
     margin-top: 4px;
@@ -1000,6 +1013,50 @@ input[type=password],
 
 .login-card {
     margin-top: 22px;
+}
+
+.wifi-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0 0 16px;
+}
+
+.wifi-choice {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg-inset);
+}
+
+.wifi-name {
+    display: block;
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.wifi-meta {
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 2px;
+}
+
+.setup-step-title {
+    font-family: var(--font-display);
+    font-size: 15px;
+    margin: 18px 0 8px;
+}
+
+.setup-steps {
+    margin: 0 0 8px;
+    padding-left: 20px;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.55;
 }
 
 .auth-intro {
@@ -1876,6 +1933,25 @@ body.logo-sheet-open {
 
 .score-meta {
     margin-bottom: 8px;
+}
+
+.score-league-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.score-star {
+    display: inline-flex;
+    color: var(--accent-2);
+    flex: 0 0 auto;
+}
+
+.score-star svg {
+    width: 12px;
+    height: 12px;
+    fill: currentColor;
 }
 
 .score-league {
