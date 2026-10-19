@@ -19,8 +19,8 @@ jobs:
     steps:
       - name: Checkout ScoreCast
         uses: actions/checkout@v4
-      
-      - name: Prepare ScoreCast image version
+
+      - name: Prepare ScoreCast image
         shell: bash
         run: |
           set -euo pipefail
@@ -30,27 +30,33 @@ jobs:
           else
             VERSION="$GITHUB_SHA"
           fi
-          
-          echo "Building ScoreCast from: $VERSION"
 
-          echo "Building ScoreCast image for: $VERSION"
+          echo "Building ScoreCast version: $VERSION"
 
-          # Store the version for the custom pi-gen stage.
-          mkdir -p image/stage-scorecast/00-install/files
+          FILES_DIR="image/stage-scorecast/00-install/files"
+          mkdir -p "$FILES_DIR"
+
           printf '%s\n' "$VERSION" \
-            > image/stage-scorecast/00-install/files/scorecast-image-version
+            > "$FILES_DIR/scorecast-image-version"
 
-          # Make the custom stage scripts executable.
-          chmod +x image/stage-scorecast/prerun.sh
-          chmod +x image/stage-scorecast/00-install/00-run-chroot.sh
-          chmod +x image/stage-scorecast/00-install/00-run.sh
+          cp scripts/install.sh \
+            "$FILES_DIR/scorecast-image-install.sh"
 
+          chmod +x \
+            image/stage-scorecast/prerun.sh \
+            image/stage-scorecast/00-install/00-run.sh \
+            image/stage-scorecast/00-install/00-run-chroot.sh
+
+          bash -n scripts/install.sh
+          bash -n image/stage-scorecast/prerun.sh
+          bash -n image/stage-scorecast/00-install/00-run.sh
+          bash -n image/stage-scorecast/00-install/00-run-chroot.sh
 
       - name: Build Raspberry Pi OS image
         id: build
         uses: usimd/pi-gen-action@v1
         with:
-          image-name: ScoreCast-${{ github.ref_name }}-pi4
+          image-name: ScoreCast-${{ github.run_number }}-pi4
           pi-gen-version: arm64
           release: trixie
           stage-list: stage0 stage1 stage2 ./image/stage-scorecast
@@ -62,6 +68,7 @@ jobs:
           enable-ssh: 0
           enable-cloud-init: 0
           increase-runner-disk-size: true
+          verbose-output: true
 
       - name: Upload image for testing
         uses: actions/upload-artifact@v4
@@ -69,14 +76,22 @@ jobs:
           name: ScoreCast-Pi4-Image
           path: ${{ steps.build.outputs.image-path }}
           retention-days: 7
+          if-no-files-found: error
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
           IMAGE_PATH: ${{ steps.build.outputs.image-path }}
+        shell: bash
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            "$IMAGE_PATH" \
-            --title "ScoreCast $GITHUB_REF_NAME" \
-            --generate-notes
+          set -euo pipefail
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$IMAGE_PATH" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              "$IMAGE_PATH" \
+              --title "ScoreCast $GITHUB_REF_NAME" \
+              --generate-notes
+          fi
