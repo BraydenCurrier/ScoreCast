@@ -57,6 +57,8 @@ jobs:
           export-last-stage-only: true
           compression: xz
           hostname: scorecast
+          username: pi
+          disable-first-boot-user-rename: 0
           enable-ssh: 0
           enable-cloud-init: 0
           increase-runner-disk-size: true
