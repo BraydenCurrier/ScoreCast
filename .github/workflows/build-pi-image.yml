@@ -19,6 +19,30 @@ jobs:
     steps:
       - name: Checkout ScoreCast
         uses: actions/checkout@v4
+      
+      - name: Prepare ScoreCast image version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME}"
+
+          # Manual builds use a test version.
+          if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
+            VERSION="test-${GITHUB_SHA:0:7}"
+          fi
+
+          echo "Building ScoreCast image for: $VERSION"
+
+          # Store the version for the custom pi-gen stage.
+          mkdir -p image/stage-scorecast/00-install/files
+          printf '%s\n' "$VERSION" \
+            > image/stage-scorecast/00-install/files/scorecast-image-version
+
+          # Make the custom stage scripts executable.
+          chmod +x image/stage-scorecast/prerun.sh
+          chmod +x image/stage-scorecast/00-install/00-run-chroot.sh
+
 
       - name: Build Raspberry Pi OS image
         id: build
