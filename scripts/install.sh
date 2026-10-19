@@ -70,6 +70,9 @@ APT_PACKAGES=(
     libfribidi-dev
     libxcb1-dev
     libssl-dev
+    avahi-daemon
+    avahi-utils
+    network-manager
 )
 log() {
     printf '\n[GameLine installer] %s\n' "$*"
@@ -622,8 +625,8 @@ install_systemd_services() {
         cat > "${MAIN_SERVICE_FILE}" <<EOF
 [Unit]
 Description=GameLine Pro LED Sports Ticker
-After=network-online.target
-Wants=network-online.target
+After=NetworkManager.service
+Wants=NetworkManager.service
 
 [Service]
 Type=simple

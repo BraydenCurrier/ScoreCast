@@ -12,7 +12,6 @@ from common.game_ids import selected_sports_ids
 from common.settings import get_developer_settings, get_settings, update_settings
 from common.system_stats import collect_system_stats
 from common.users import (
-    BOOTSTRAP_PASSWORD,
     UserError,
     UserStoreError,
     authenticate,
@@ -235,9 +234,7 @@ def login_required(f):
             return redirect("/login")
 
         if not profiles_exist:
-            if session.get("setup_pending"):
-                return redirect("/setup")
-            return redirect("/login")
+            return redirect("/setup")
 
         user = current_user()
         if user is None:
@@ -633,7 +630,7 @@ def page_styles():
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/app.css?v=25">
+    <link rel="stylesheet" href="/static/app.css?v=28">
     <script>
     (function () {
       if (navigator.serviceWorker) {
@@ -1260,6 +1257,19 @@ def is_favorite_game(
         or home in favorites
     )
 
+
+def favorite_star_html(is_favorite):
+    if not is_favorite:
+        return ""
+    return """
+        <span class="score-star" title="Favorite" aria-label="Favorite">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3.2l2.5 6.3 6.8.6-5.2 4.5 1.6 6.6L12 17.8 6.3 21.2l1.6-6.6L2.7 10.1l6.8-.6z"></path>
+            </svg>
+        </span>
+    """
+
+
 def get_favorite_team_options(league_key):
     try:
         return get_teams_with_logos(league_key)
@@ -1440,59 +1450,30 @@ def login():
         """
         return render_auth_page("GameLine Pro Login", body), 500
 
-    if profiles_exist:
-        user = current_user()
-        if user is not None:
-            return redirect("/games")
-    elif session.get("setup_pending"):
+    if not profiles_exist:
         return redirect("/setup")
 
+    user = current_user()
+    if user is not None:
+        return redirect("/games")
+
     error = ""
-    needs_setup = not profiles_exist
 
     if request.method == "POST":
-        if needs_setup:
-            if request.form.get("password") == BOOTSTRAP_PASSWORD:
-                session.clear()
-                session.permanent = True
-                session["setup_pending"] = True
-                return redirect("/setup")
+        user = authenticate(
+            request.form.get("username", ""),
+            request.form.get("password", ""),
+        )
 
-            error = "Invalid password"
-        else:
-            user = authenticate(
-                request.form.get("username", ""),
-                request.form.get("password", ""),
-            )
+        if user is not None:
+            establish_session(user)
+            return redirect("/games")
 
-            if user is not None:
-                establish_session(user)
-                return redirect("/games")
-
-            error = "Invalid username or password"
+        error = "Invalid username or password"
 
     error_html = f"<div class='error'>{escape(error)}</div>" if error else ""
 
-    if needs_setup:
-        form_fields = """
-            <p class="auth-hint">
-                This display has no profiles yet. Enter the setup password
-                <strong>ticker123</strong> to create the root account.
-            </p>
-            <label class="field-label" for="setup_password">Setup password</label>
-            <input
-                class="auth-input"
-                id="setup_password"
-                type="password"
-                name="password"
-                placeholder="••••••••"
-                autofocus
-            >
-        """
-        button_label = "Continue"
-        subtitle = "Create the first profile"
-    else:
-        form_fields = """
+    form_fields = """
             <label class="field-label" for="login_username">Username</label>
             <input
                 class="auth-input"
@@ -1513,8 +1494,7 @@ def login():
                 autocomplete="current-password"
             >
         """
-        button_label = "Sign in"
-        subtitle = "Sign in to this display"
+    button_label = "Sign in"
 
     body = f"""
         <div class="auth-intro">
@@ -1538,90 +1518,6 @@ def login():
     """
 
     return render_auth_page("GameLine Pro Login", body)
-
-
-@app.route("/setup", methods=["GET", "POST"])
-def setup_root_profile():
-    if has_users():
-        return redirect("/login")
-
-    if not session.get("setup_pending"):
-        return redirect("/login")
-
-    error = ""
-
-    if request.method == "POST":
-        username = request.form.get("username", "")
-        password = request.form.get("password", "")
-        confirm_password = request.form.get("confirm_password", "")
-
-        if password != confirm_password:
-            error = "Passwords do not match."
-        else:
-            try:
-                user = create_user(username, password, role="root")
-            except UserError as exc:
-                error = str(exc)
-            else:
-                establish_session(user)
-                return redirect("/games")
-
-    error_html = f"<div class='error'>{escape(error)}</div>" if error else ""
-
-    body = f"""
-        <div class="auth-intro">
-            <div class="brand-lockup">
-                <div class="brand-mark" aria-hidden="true">GL</div>
-                <div>
-                    <div class="brand-name">GameLine Pro</div>
-                    <div class="brand-tag">Create the root profile</div>
-                </div>
-            </div>
-        </div>
-        <div class="card login-card">
-            <p class="auth-hint">
-                This first account can add other people later.
-                The setup password will no longer work after this.
-            </p>
-            {error_html}
-            <form method="POST">
-                <label class="field-label" for="root_username">Username</label>
-                <input
-                    class="auth-input"
-                    id="root_username"
-                    type="text"
-                    name="username"
-                    placeholder="Username"
-                    autocomplete="username"
-                    autofocus
-                    value="{escape(request.form.get('username', ''), quote=True)}"
-                >
-                <label class="field-label" for="root_password">Password</label>
-                <input
-                    class="auth-input"
-                    id="root_password"
-                    type="password"
-                    name="password"
-                    placeholder="At least 8 characters"
-                    autocomplete="new-password"
-                >
-                <label class="field-label" for="root_password_confirm">Confirm password</label>
-                <input
-                    class="auth-input"
-                    id="root_password_confirm"
-                    type="password"
-                    name="confirm_password"
-                    placeholder="Re-enter password"
-                    autocomplete="new-password"
-                >
-                <button class="save-button" type="submit">
-                    Create profile
-                </button>
-            </form>
-        </div>
-    """
-
-    return render_auth_page("Create root profile", body)
 
 
 @app.route("/logout")
@@ -1784,6 +1680,51 @@ def restart_scorecast():
     return jsonify({
         "ok": True,
         "message": "GameLine Pro is restarting.",
+    })
+
+
+@app.route("/system/factory-reset", methods=["POST"])
+@login_required
+def factory_reset_scorecast():
+    import threading
+    import time
+
+    from setup.factory_reset import factory_reset
+
+    user = current_user()
+    if not user or user["role"] != "root":
+        return jsonify({"ok": False, "message": "Root only."}), 403
+
+    forget_wifi = False
+    if request.is_json:
+        forget_wifi = bool((request.get_json(silent=True) or {}).get("forget_wifi"))
+    else:
+        forget_wifi = request.form.get("forget_wifi") == "1"
+
+    factory_reset(forget_wifi=forget_wifi)
+
+    def restart_service():
+        time.sleep(1.0)
+        subprocess.run(
+            [
+                "/usr/bin/systemctl",
+                "restart",
+                "scorecast.service",
+            ],
+            check=False,
+            timeout=30,
+        )
+
+    threading.Thread(
+        target=restart_service,
+        daemon=True,
+        name="gameline-factory-reset",
+    ).start()
+
+    return jsonify({
+        "ok": True,
+        "forget_wifi": forget_wifi,
+        "message": "Factory reset started. Watch the board for setup.",
     })
 
 
@@ -1975,6 +1916,7 @@ def games():
     selected_ids = selected_sports_ids(settings)
     league_filters = {
         "selected",
+        "favorites",
         "all",
         "mlb",
         "nfl",
@@ -1997,8 +1939,17 @@ def games():
         )
 
     game_rows = ""
-
+    display_games = []
     for game in latest_games:
+        league_key, _ = get_game_league(game)
+        if league_key == "stocks":
+            continue
+        display_games.append(game)
+    display_games.sort(
+        key=lambda item: 0 if is_favorite_game(item, settings) else 1
+    )
+
+    for game in display_games:
         game_id = get_game_id(game)
 
         favorite_game = (
@@ -2016,9 +1967,6 @@ def games():
 
         league_key, league_label = get_game_league(game)
 
-        if league_key == "stocks":
-            continue
-
         display_status = get_display_status(game, league_key)
         when_label = get_game_when_label(game)
         is_live = is_game_live(game)
@@ -2034,9 +1982,7 @@ def games():
         safe_game_id = escape(game_id, quote=True)
         safe_status = escape(str(display_status))
         safe_when = escape(when_label) if when_label else ""
-        favorite_suffix = (
-            " · Favorite" if favorite_game else ""
-        )
+        star_html = favorite_star_html(favorite_game)
 
         live_class = "is-live" if is_live else ""
         if league_key == "pga":
@@ -2063,13 +2009,16 @@ def games():
             )
             scoreboard = f"""
                 <div class="score-meta">
-                    <span class="score-league">{league_label}</span>
+                    <span class="score-league-wrap">
+                        <span class="score-league">{league_label}</span>
+                        {star_html}
+                    </span>
                     <span class="score-status {live_class}">{safe_status}</span>
                 </div>
                 <div class="score-team">
                     <span class="score-abbr">{matchup}</span>
                 </div>
-                <div class="score-when">{summary}{favorite_suffix}</div>
+                <div class="score-when">{summary}</div>
             """
         else:
             show_scores = is_live or "final" in str(display_status).lower()
@@ -2084,8 +2033,6 @@ def games():
                 else ""
             )
             when_line = safe_when or ""
-            if favorite_suffix:
-                when_line = (when_line + favorite_suffix).strip(" ·")
             away_mark = web_team_mark(
                 league_key,
                 getattr(game, "away", ""),
@@ -2100,7 +2047,10 @@ def games():
             )
             scoreboard = f"""
                 <div class="score-meta">
-                    <span class="score-league">{league_label}</span>
+                    <span class="score-league-wrap">
+                        <span class="score-league">{league_label}</span>
+                        {star_html}
+                    </span>
                     <span class="score-status {live_class}">{safe_status}</span>
                 </div>
                 <div class="score-team">
@@ -2115,7 +2065,7 @@ def games():
             """
 
         game_rows += f"""
-        <div class="game-row-container" draggable="true" data-id="{safe_game_id}" data-league="{league_key}" data-top25="{"true" if is_top_25 else "false"}" data-live="{"true" if is_live else "false"}">
+        <div class="game-row-container" draggable="true" data-id="{safe_game_id}" data-league="{league_key}" data-top25="{"true" if is_top_25 else "false"}" data-live="{"true" if is_live else "false"}" data-favorite="{"true" if favorite_game else "false"}">
             <label class="game-row">
                 <input type="checkbox" name="game" value="{safe_game_id}" {checked}>
                 <div class="scoreboard">
@@ -2163,6 +2113,7 @@ def games():
                 <div class="filter-row">
                     <select id="league_filter" class="select-input league-filter-select" onchange="filterGames()">
                         {league_option("selected", "Selected")}
+                        {league_option("favorites", "Favorites")}
                         {league_option("all", "All")}
                         {league_option("mlb", "MLB")}
                         {league_option("nfl", "NFL")}
@@ -2189,6 +2140,10 @@ def games():
                 </div>
 
                 {game_rows}
+                <div class="empty" id="favorites_empty" hidden>
+                    No games for your favorite teams yet.
+                    Add teams in More → Favorites.
+                </div>
             </div>
         </form>
 
@@ -2281,6 +2236,8 @@ def games():
                 ? liveCheckbox.checked
                 : false;
 
+            let visibleCount = 0;
+
             document.querySelectorAll(".game-row-container").forEach(function(row) {{
                 const text = row.innerText.toLowerCase();
                 const rowLeague = row.dataset.league;
@@ -2302,6 +2259,8 @@ def games():
                     matchesFilter = true;
                 }} else if (selectedFilter === "selected") {{
                     matchesFilter = isSelected;
+                }} else if (selectedFilter === "favorites") {{
+                    matchesFilter = row.dataset.favorite === "true";
                 }} else if (selectedFilter === "top25") {{
                     matchesFilter = (
                         rowLeague === "cfb"
@@ -2316,12 +2275,26 @@ def games():
                     || rowIsLive
                 );
 
-                row.style.display = (
+                const showRow = (
                     matchesSearch
                     && matchesFilter
                     && matchesLive
-                ) ? "" : "none";
+                );
+                row.style.display = showRow ? "" : "none";
+                if (showRow) {{
+                    visibleCount += 1;
+                }}
             }});
+
+            const favoritesEmpty = document.getElementById(
+                "favorites_empty"
+            );
+            if (favoritesEmpty) {{
+                favoritesEmpty.hidden = !(
+                    selectedFilter === "favorites"
+                    && visibleCount === 0
+                );
+            }}
 
             syncLeaguePanels();
         }}
@@ -2642,13 +2615,16 @@ def _focus_game_rows(
     settings,
 ):
     rows = ""
+    league_games = [
+        game
+        for game in games
+        if get_game_league(game)[0] == league_key
+    ]
+    league_games.sort(
+        key=lambda item: 0 if is_favorite_game(item, settings) else 1
+    )
 
-    for game in games:
-        key, _ = get_game_league(game)
-
-        if key != league_key:
-            continue
-
+    for game in league_games:
         game_identifier = get_game_id(game)
         checked = (
             "checked"
@@ -2681,6 +2657,9 @@ def _focus_game_rows(
             settings,
             getattr(game, "home_rank", None),
         )
+        star_html = favorite_star_html(
+            is_favorite_game(game, settings)
+        )
 
         rows += f"""
         <label
@@ -2696,7 +2675,10 @@ def _focus_game_rows(
             >
             <div class="scoreboard">
                 <div class="score-meta">
-                    <span class="score-league">{badge}</span>
+                    <span class="score-league-wrap">
+                        <span class="score-league">{badge}</span>
+                        {star_html}
+                    </span>
                     <span class="score-status">{safe_status}</span>
                 </div>
                 <div class="score-team">
@@ -6250,6 +6232,45 @@ def settings_page():
                         Reboot
                     </button>
                 </div>
+
+                <div class="settings-row factory-reset-row">
+                    <div class="settings-row-copy">
+                        <div class="settings-row-title">Factory reset</div>
+                        <div class="hint">
+                            Wipe this display back to first boot: profiles,
+                            settings, bets, favorites, and custom logos.
+                            Software and updates stay. After restart, scan
+                            the QR on the board.
+                        </div>
+                        <label class="dev-option factory-reset-option">
+                            <input
+                                type="checkbox"
+                                id="factory_reset_forget_wifi"
+                            >
+                            <div>
+                                <div class="settings-row-title">Forget Wi-Fi</div>
+                                <div class="hint">
+                                    Also drop saved networks and start the
+                                    setup hotspot. Use this to test a boxed
+                                    unit. Leave off if you only want a fresh
+                                    account on the current network.
+                                </div>
+                            </div>
+                        </label>
+                        <div
+                            id="factory_reset_status"
+                            class="hint"
+                        ></div>
+                    </div>
+                    <button
+                        type="button"
+                        id="factory_reset_button"
+                        class="quiet-button quiet-button-danger"
+                        onclick="factoryResetGameLine()"
+                    >
+                        Reset
+                    </button>
+                </div>
             </div>
         """
     saved_message = ""
@@ -7198,6 +7219,60 @@ def settings_page():
             }}
         }}
 
+        async function factoryResetGameLine() {{
+            const forgetWifi = Boolean(
+                document.getElementById("factory_reset_forget_wifi")
+                && document.getElementById("factory_reset_forget_wifi").checked
+            );
+            const confirmed = window.confirm(
+                forgetWifi
+                    ? "Factory reset GameLine and forget Wi-Fi? Profiles, bets, settings, and custom logos will be deleted. The board will start the setup hotspot."
+                    : "Factory reset GameLine? Profiles, bets, settings, and custom logos will be deleted. The board will go back to first-run setup."
+            );
+            if (!confirmed) {{
+                return;
+            }}
+            const again = window.confirm(
+                "This cannot be undone. Reset this display now?"
+            );
+            if (!again) {{
+                return;
+            }}
+
+            const button = document.getElementById("factory_reset_button");
+            const status = document.getElementById("factory_reset_status");
+            if (button) {{
+                button.disabled = true;
+                button.textContent = "Resetting…";
+            }}
+            if (status) {{
+                status.textContent = "Wiping this display. Watch the board for the setup QR.";
+            }}
+
+            try {{
+                const response = await fetch("/system/factory-reset", {{
+                    method: "POST",
+                    cache: "no-store",
+                    headers: {{
+                        "Content-Type": "application/json",
+                        "Accept": "application/json"
+                    }},
+                    body: JSON.stringify({{ forget_wifi: forgetWifi }})
+                }});
+                if (!response.ok) {{
+                    throw new Error("Factory reset failed");
+                }}
+            }} catch (error) {{
+                if (status) {{
+                    status.textContent = "Unable to factory reset.";
+                }}
+                if (button) {{
+                    button.disabled = false;
+                    button.textContent = "Reset";
+                }}
+            }}
+        }}
+
         async function rebootRaspberryPi() {{
             const confirmed = window.confirm(
                 "Reboot the Raspberry Pi? "
@@ -7902,6 +7977,7 @@ def api_start_update():
 
 from bets.web import register_bet_routes
 from bets.store import init_store as init_bet_store
+from setup.web import register_setup_routes
 
 try:
     init_bet_store()
@@ -7914,4 +7990,10 @@ register_bet_routes(
     current_user=current_user,
     page_header=page_header,
     page_styles=page_styles,
+)
+
+register_setup_routes(
+    app,
+    render_auth_page=render_auth_page,
+    establish_session=establish_session,
 )
