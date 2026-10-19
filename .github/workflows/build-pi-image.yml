@@ -43,6 +43,7 @@ jobs:
           # Make the custom stage scripts executable.
           chmod +x image/stage-scorecast/prerun.sh
           chmod +x image/stage-scorecast/00-install/00-run-chroot.sh
+          chmod +x image/stage-scorecast/00-install/00-run.sh
 
 
       - name: Build Raspberry Pi OS image
