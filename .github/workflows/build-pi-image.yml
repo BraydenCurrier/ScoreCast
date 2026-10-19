@@ -58,7 +58,7 @@ jobs:
           hostname: scorecast
           enable-ssh: 0
           password: ''
-          enable-cloud-init: 1
+          enable-cloud-init: 0
           increase-runner-disk-size: true
 
       - name: Upload image for testing
