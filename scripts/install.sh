@@ -25,7 +25,6 @@ UPDATE_SERVICE_NAME="${SCORECAST_UPDATE_SERVICE_NAME:-scorecast-update}"
 RGB_MATRIX_DIR="${SCORECAST_RGB_MATRIX_DIR:-/opt/rpi-rgb-led-matrix}"
 REQUESTED_TAG="${SCORECAST_VERSION:-}"
 
-
 # Image build mode
 # Set to 1 when installing into a Raspberry Pi image.
 IMAGE_BUILD="${SCORECAST_IMAGE_BUILD:-0}"
@@ -177,6 +176,7 @@ EOF
     log "Built-in Raspberry Pi audio has been disabled."
 }
 
+
 ensure_isolcpus() {
     local cmdline
 
@@ -188,15 +188,18 @@ ensure_isolcpus() {
         die "Unable to locate cmdline.txt"
     fi
 
-    if grep -qw "isolcpus=3" /proc/cmdline; then
-        log "isolcpus=3 is already enabled."
+    # Check the target Raspberry Pi boot configuration,
+    # not the running build computer.
+    if grep -Eq '(^|[[:space:]])isolcpus=3([[:space:]]|$)' "$cmdline"; then
+        log "isolcpus=3 is already configured."
         return
     fi
 
-    log "Enabling isolcpus=3 for improved LED matrix performance."
+    log "Enabling isolcpus=3 for the RGB matrix."
 
     cp -a "$cmdline" "${cmdline}.scorecast-backup"
 
+    # Raspberry Pi cmdline.txt must stay on one line.
     sed -i '1 s/$/ isolcpus=3/' "$cmdline"
 }
 
