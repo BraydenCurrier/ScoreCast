@@ -1,51 +1,27 @@
 
 #!/bin/bash -e
+set -euo pipefail
 
-# ScoreCast Raspberry Pi Image Installer
-# Runs inside the Raspberry Pi OS image during build.
+VERSION_FILE="/etc/scorecast-image-version"
+INSTALLER="/tmp/scorecast-image-install.sh"
 
-echo "======================================"
-echo " Installing ScoreCast into Pi OS"
-echo "======================================"
+if [[ ! -s "${VERSION_FILE}" ]]; then
+    echo "ERROR: Missing ScoreCast version." >&2
+    exit 1
+fi
 
-# Get the ScoreCast version selected by
-# the GitHub Actions build.
-SCORECAST_VERSION="$(
-    cat /etc/scorecast-image-version
-)"
+if [[ ! -f "${INSTALLER}" ]]; then
+    echo "ERROR: Missing ScoreCast installer." >&2
+    exit 1
+fi
 
-echo "Installing ScoreCast ${SCORECAST_VERSION}"
-
-
-# Download ScoreCast and check out the requested
-# release tag or exact commit.
-
-REPO_URL="https://github.com/BraydenCurrier/ScoreCast.git"
-SOURCE_DIR="/tmp/scorecast-source"
-
-rm -rf "${SOURCE_DIR}"
-
-git clone "${REPO_URL}" "${SOURCE_DIR}"
-
-cd "${SOURCE_DIR}"
-
-# Check that the requested version exists.
-git rev-parse --verify "${SCORECAST_VERSION}^{commit}"
-
-# Switch to the requested tag or commit.
-git checkout --detach "${SCORECAST_VERSION}"
-
-echo "Checked out ScoreCast version:"
-git rev-parse HEAD
-
-
-# Run ScoreCast's installer in image-build mode.
-export SCORECAST_VERSION
+export SCORECAST_VERSION="$(cat "${VERSION_FILE}")"
 export SCORECAST_IMAGE_BUILD=1
 
-bash /tmp/scorecast-source/scripts/install.sh
+echo "Installing ScoreCast: ${SCORECAST_VERSION}"
 
-# Remove temporary installation files.
-rm -rf /tmp/scorecast-source
+bash "${INSTALLER}"
+
+rm -f "${INSTALLER}"
 
 echo "ScoreCast installation complete."
