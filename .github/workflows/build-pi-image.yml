@@ -25,12 +25,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          VERSION="${GITHUB_REF_NAME}"
-
-          # Manual builds use a test version.
-          if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
-            VERSION="test-${GITHUB_SHA:0:7}"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="$GITHUB_REF_NAME"
+          else
+            VERSION="$GITHUB_SHA"
           fi
+          
+          echo "Building ScoreCast from: $VERSION"
 
           echo "Building ScoreCast image for: $VERSION"
 
