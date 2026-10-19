@@ -67,7 +67,7 @@ jobs:
           disable-first-boot-user-rename: 0
           enable-ssh: 0
           enable-cloud-init: 0
-          increase-runner-disk-size: true
+          increase-runner-disk-size: false
           verbose-output: true
 
       - name: Upload image for testing
