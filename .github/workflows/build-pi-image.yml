@@ -58,7 +58,6 @@ jobs:
           compression: xz
           hostname: scorecast
           enable-ssh: 0
-          password: ''
           enable-cloud-init: 0
           increase-runner-disk-size: true
 
