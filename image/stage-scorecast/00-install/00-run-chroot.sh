@@ -16,12 +16,28 @@ SCORECAST_VERSION="$(
 
 echo "Installing ScoreCast ${SCORECAST_VERSION}"
 
-# Download the exact version of ScoreCast.
-git clone \
-    --branch "${SCORECAST_VERSION}" \
-    --depth 1 \
-    https://github.com/BraydenCurrier/ScoreCast.git \
-    /tmp/scorecast-source
+
+# Download ScoreCast and check out the requested
+# release tag or exact commit.
+
+REPO_URL="https://github.com/BraydenCurrier/ScoreCast.git"
+SOURCE_DIR="/tmp/scorecast-source"
+
+rm -rf "${SOURCE_DIR}"
+
+git clone "${REPO_URL}" "${SOURCE_DIR}"
+
+cd "${SOURCE_DIR}"
+
+# Check that the requested version exists.
+git rev-parse --verify "${SCORECAST_VERSION}^{commit}"
+
+# Switch to the requested tag or commit.
+git checkout --detach "${SCORECAST_VERSION}"
+
+echo "Checked out ScoreCast version:"
+git rev-parse HEAD
+
 
 # Run ScoreCast's installer in image-build mode.
 export SCORECAST_VERSION
