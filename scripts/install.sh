@@ -25,6 +25,12 @@ UPDATE_SERVICE_NAME="${SCORECAST_UPDATE_SERVICE_NAME:-scorecast-update}"
 RGB_MATRIX_DIR="${SCORECAST_RGB_MATRIX_DIR:-/opt/rpi-rgb-led-matrix}"
 REQUESTED_TAG="${SCORECAST_VERSION:-}"
 
+
+# Image build mode
+# Set to 1 when installing into a Raspberry Pi image.
+IMAGE_BUILD="${SCORECAST_IMAGE_BUILD:-0}"
+
+
 REPO_DIR="${INSTALL_DIR}/repo.git"
 RELEASES_DIR="${INSTALL_DIR}/releases"
 VENVS_DIR="${INSTALL_DIR}/venvs"
@@ -798,10 +804,25 @@ main() {
     build_panel_shift
     validate_release
     activate_release
+    
     install_systemd_services
     initialize_status_file
-    start_and_verify
-    print_summary
+
+    if [[ "${IMAGE_BUILD}" == "1" ]]; then
+        log "Image build mode detected."
+
+        # Configure Raspberry Pi boot settings now,
+        # without starting hardware-dependent services.
+        disable_builtin_audio
+        ensure_isolcpus
+
+        log "ScoreCast is installed in the image."
+        log "The service will start when the Pi boots."
+    else
+        start_and_verify
+        print_summary
+    fi
+
 }
 
 main "$@"
