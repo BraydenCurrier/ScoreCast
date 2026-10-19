@@ -426,11 +426,18 @@ version_key() {
 
 select_release_tag() {
     if [[ -n "${REQUESTED_TAG}" ]]; then
-        if ! git --git-dir="${REPO_DIR}" rev-parse --verify --quiet "${REQUESTED_TAG}^{commit}" >/dev/null; then
-            die "Requested release tag does not exist: ${REQUESTED_TAG}"
+        if ! git --git-dir="${REPO_DIR}" \
+            rev-parse --verify --quiet \
+            "${REQUESTED_TAG}^{commit}" >/dev/null; then
+            die "Requested ScoreCast tag or commit does not exist: ${REQUESTED_TAG}"
         fi
-
-        RELEASE_TAG="${REQUESTED_TAG}"
+    
+        RELEASE_TAG="$(
+            git --git-dir="${REPO_DIR}" \
+                rev-parse "${REQUESTED_TAG}^{commit}"
+        )"
+    
+        log "Selected ScoreCast commit: ${RELEASE_TAG}"
         return
     fi
 
