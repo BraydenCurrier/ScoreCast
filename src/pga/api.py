@@ -8,12 +8,12 @@ import time
 import unicodedata
 from datetime import date, datetime, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import requests
 
 from common.espn_scoreboard import safe_int
 from common.http import failure_text, get_body
+from common.timezone import get_local_timezone
 
 from pga.models import GolfPlayer, GolfTournament
 
@@ -38,7 +38,6 @@ CALENDAR_TTL_SECONDS = 6 * 60 * 60
 
 HTTP_TIMEOUT = (3.05, 10)
 LEADER_COUNT = 24
-DISPLAY_TZ = ZoneInfo("America/Chicago")
 
 SKIP_STATUSES = {
     "STATUS_CUT",
@@ -128,7 +127,7 @@ def tournament_from_event(event: dict) -> GolfTournament | None:
         item for item in competitors if isinstance(item, dict)
     ]
     event_over = _event_is_over(event)
-    today = datetime.now().astimezone(DISPLAY_TZ).date()
+    today = datetime.now(get_local_timezone()).date()
     if not event_over and _tournament_status(event) == "Scheduled":
         ordered.sort(key=lambda item: (_tee_sort_value(item), _sort_key(item)))
     else:
@@ -205,7 +204,7 @@ def player_from_competitor(
     if not isinstance(linescores, list):
         linescores = []
     score, score_value = _to_par(competitor)
-    today = today or datetime.now().astimezone(DISPLAY_TZ).date()
+    today = today or datetime.now(get_local_timezone()).date()
     if _awaiting_tee(status, type_name, type_info, linescores, today, event_over):
         return GolfPlayer(
             name=name,
@@ -349,7 +348,7 @@ def _event_for_this_week(event: dict) -> dict:
         ((event.get("status") or {}).get("type") or {}).get("state") or ""
     )
     end = _event_day(event.get("endDate"))
-    today = datetime.now().astimezone().date()
+    today = datetime.now(get_local_timezone()).date()
     next_id = next_event_id(
         _season_calendar(today),
         str(event.get("id") or ""),
@@ -594,14 +593,14 @@ def _tee_day(value) -> date | None:
     parsed = _parse_tee(value)
     if parsed is None:
         return None
-    return parsed.astimezone(DISPLAY_TZ).date()
+    return parsed.astimezone(get_local_timezone()).date()
 
 
 def _format_tee(value: str) -> str:
     parsed = _parse_tee(value)
     if parsed is None:
         return ""
-    local = parsed.astimezone(DISPLAY_TZ)
+    local = parsed.astimezone(get_local_timezone())
     hour = local.hour % 12 or 12
     suffix = "A" if local.hour < 12 else "P"
     return f"{hour}:{local.minute:02d}{suffix}"
@@ -642,11 +641,11 @@ def _round_day(linescores, period: int, status: dict) -> date | None:
             continue
         parsed = _parse_tee(item.get("teeTime"))
         if parsed is not None:
-            return parsed.astimezone(DISPLAY_TZ).date()
+            return parsed.astimezone(get_local_timezone()).date()
     parsed = _parse_tee(status.get("teeTime"))
     if parsed is None:
         return None
-    return parsed.astimezone(DISPLAY_TZ).date()
+    return parsed.astimezone(get_local_timezone()).date()
 
 
 def _scored_periods(linescores) -> set[int]:

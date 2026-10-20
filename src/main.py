@@ -17,6 +17,7 @@ from common.matrix import PANEL_REFRESH_HZ, create_matrix
 from common.game_ids import game_id as shared_game_id
 from common.game_ids import game_is_shown
 from common.settings import get_developer_settings, get_settings
+from common.timezone import ensure_network_timezone, start_timezone_refresh, timezone_status
 from common.splash import render_idle_splash
 from common.ticker_scroll import (
     build_strip,
@@ -1248,9 +1249,17 @@ if __name__ == "__main__":
         name="possession-watcher",
     ).start()
 
+    start_timezone_refresh()
+
     if setup_holds_display():
         publish_games([])
     else:
+        ensure_network_timezone(block=True, timeout=4)
+        zone_status = timezone_status()
+        print(
+            "Display timezone: "
+            f"{zone_status['effective']} ({zone_status['source']})"
+        )
         refresh_fantasy_avatars_on_startup()
         try:
             init_bet_store()

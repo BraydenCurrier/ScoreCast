@@ -17,6 +17,7 @@ SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 
 
 DEFAULT_SETTINGS = {
+    "timezone": "auto",
     "scroll_speed": 30.0,
     "brightness": 70,
     "refresh_interval": 30,
