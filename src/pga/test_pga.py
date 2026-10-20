@@ -1,9 +1,9 @@
 import unittest
+from datetime import date
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageDraw
-
-from datetime import date
 
 from pga.api import (
     logo_from_schedule,
@@ -35,6 +35,18 @@ def _competitor(name, score, value, status, linescores):
 
 
 class PgaLeaderboardTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._timezone = patch(
+            "pga.api.get_local_timezone",
+            return_value=ZoneInfo("America/Chicago"),
+        )
+        cls._timezone.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._timezone.stop()
+
     def test_finished_round_shows_the_round_score(self):
         player = player_from_competitor(_competitor(
             "Brennan",

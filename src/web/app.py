@@ -10,6 +10,12 @@ from flask import Flask, abort, request, redirect, send_file, session, jsonify, 
 from common.game_ids import game_id as shared_game_id
 from common.game_ids import selected_sports_ids
 from common.settings import get_developer_settings, get_settings, update_settings
+from common.timezone import (
+    ensure_network_timezone,
+    normalize_timezone_setting,
+    timezone_choice_groups,
+    timezone_status,
+)
 from common.system_stats import collect_system_stats
 from common.users import (
     UserError,
@@ -630,7 +636,7 @@ def page_styles():
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/app.css?v=28">
+    <link rel="stylesheet" href="/static/app.css?v=29">
     <script>
     (function () {
       if (navigator.serviceWorker) {
@@ -1302,11 +1308,22 @@ def _status_clock_line(game):
     quarter = getattr(game, "quarter", None)
     period = getattr(game, "period", None)
     inning = getattr(game, "inning", None)
-    inning_half = str(getattr(game, "inning_half", "") or "").strip()
 
     if inning not in (None, "", 0):
-        half = inning_half[:3].title() if inning_half else ""
-        return " ".join(part for part in (half, str(inning)) if part)
+        if hasattr(game, "top_inning"):
+            half = "T" if game.top_inning else "B"
+            return f"{half}{inning}"
+
+        inning_half = str(
+            getattr(game, "inning_half", "") or ""
+        ).strip().lower()
+        if inning_half.startswith("top"):
+            return f"T{inning}"
+        if inning_half.startswith("bot"):
+            return f"B{inning}"
+        if inning_half:
+            return f"{inning_half[:3].title()} {inning}"
+        return str(inning)
 
     number = quarter if quarter not in (None, "", 0) else period
     if number not in (None, "", 0):
@@ -6136,6 +6153,12 @@ def settings_page():
     brightness = settings.get("brightness", 50)
     refresh_interval = settings.get("refresh_interval", 120)
     fps = settings.get("fps", 60)
+    timezone_setting = normalize_timezone_setting(
+        settings.get("timezone", "auto")
+    )
+    if timezone_setting == "auto":
+        ensure_network_timezone(block=True, timeout=4)
+    timezone_detail = timezone_status()["detail"]
 
     user = current_user()
     is_root = bool(user and user["role"] == "root")
@@ -6383,6 +6406,29 @@ def settings_page():
 
                     <div class="hint">
                         Refresh interval is in seconds.
+                    </div>
+                </div>
+
+                <div class="control">
+                    <div class="control-top">
+                        <label for="timezone">Timezone</label>
+                    </div>
+
+                    <select
+                        id="timezone"
+                        name="timezone"
+                        class="select-input"
+                    >
+                        {_timezone_options_html(timezone_setting)}
+                    </select>
+
+                    <div class="hint" id="timezone_hint">
+                        {escape(timezone_detail)}
+                    </div>
+                    <div class="hint">
+                        Automatic uses this network's location.
+                        A saved timezone overrides that.
+                        The Pi system timezone is not used.
                     </div>
                 </div>
             </div>
@@ -7120,6 +7166,27 @@ def settings_page():
         bindNumberToSlider("refresh_interval_number", "refresh_interval");
         bindNumberToSlider("fps_number", "fps");
 
+        const timezoneSelect = document.getElementById("timezone");
+        const timezoneHint = document.getElementById("timezone_hint");
+        if (timezoneSelect && timezoneHint) {{
+            timezoneSelect.addEventListener("change", function () {{
+                window.setTimeout(function () {{
+                    fetch("/api/timezone", {{
+                        credentials: "same-origin",
+                    }}).then(function (response) {{
+                        if (!response.ok) {{
+                            return null;
+                        }}
+                        return response.json();
+                    }}).then(function (status) {{
+                        if (status && status.detail) {{
+                            timezoneHint.textContent = status.detail;
+                        }}
+                    }}).catch(function () {{}});
+                }}, 700);
+            }});
+        }}
+
         function setStatTone(id, value, warnAt, hotAt) {{
             const card = document.getElementById(id);
             if (!card) {{
@@ -7812,6 +7879,11 @@ def save_settings():
         ),
     }
 
+    if "timezone" in request.form:
+        payload["timezone"] = normalize_timezone_setting(
+            request.form.get("timezone")
+        )
+
     user = current_user()
     if user and user["role"] == "root":
         payload["developer"] = {
@@ -7826,6 +7898,41 @@ def save_settings():
     update_settings(payload)
 
     return autosave_response("/settings")
+
+
+@app.route("/api/timezone")
+@login_required
+def api_timezone():
+    ensure_network_timezone(block=True, timeout=4)
+    return jsonify(timezone_status())
+
+
+def _timezone_options_html(selected):
+    parts = []
+    auto_selected = " selected" if selected == "auto" else ""
+    parts.append(
+        f'<option value="auto"{auto_selected}>Automatic (network)</option>'
+    )
+    known = {"auto"}
+    for group, choices in timezone_choice_groups():
+        parts.append(f'<optgroup label="{escape(group)}">')
+        for value, label in choices:
+            known.add(value)
+            picked = " selected" if value == selected else ""
+            parts.append(
+                f'<option value="{escape(value)}"{picked}>'
+                f"{escape(label)}</option>"
+            )
+        parts.append("</optgroup>")
+    if selected not in known:
+        parts.insert(
+            1,
+            (
+                f'<option value="{escape(selected)}" selected>'
+                f"{escape(selected)}</option>"
+            ),
+        )
+    return "\n".join(parts)
 
 
 @app.route("/api/stocks/search")

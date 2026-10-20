@@ -581,6 +581,11 @@ textarea {
     accent-color: var(--accent);
 }
 
+.control .select-input {
+    width: 100%;
+    display: block;
+}
+
 .select-input {
     flex: 1;
     min-width: 0;
