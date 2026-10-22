@@ -715,6 +715,16 @@ def get_visible_games(all_games, settings):
         if game_is_shown(game, settings)
     ]
 
+
+def idle_board_games(_settings=None):
+    """Fetched games the standby line may cycle.
+
+    Unchecked games are saved as hidden so they stay off the ticker.
+    The line under the clock is where those live games still show.
+    """
+    with _games_lock:
+        return list(_games)
+
 def render_error_card(game, error):
     card_width = get_game_width(game)
 
@@ -909,7 +919,6 @@ def combine_sports_results(
     sports_results,
     sports_errors=None,
     previous_games=None,
-    use_test_fallback=False,
     fetched_sports=None,
 ):
     combined_games = []
@@ -950,24 +959,15 @@ def combine_sports_results(
                 )
                 combined_games.extend(previous)
 
-            elif use_test_fallback:
-                combined_games.extend(
-                    TEST_GAMES_BY_SPORT[sport]
-                )
-
             continue
 
-        # Successful request.
+        # A real response with no games is an off day. Leave it blank
+        # instead of scrolling the built-in sample matchups.
         if games:
             combined_games.extend(games)
 
-        elif use_test_fallback:
-            # Only use test data during startup.
-            combined_games.extend(
-                TEST_GAMES_BY_SPORT[sport]
-            )
-
     return combined_games
+
 
 def sample_games():
     games = []
@@ -986,7 +986,6 @@ def build_refresh_payload(settings, previous_games, due_sports=None):
         sports_results,
         sports_errors=sports_errors,
         previous_games=previous_games,
-        use_test_fallback=False,
         fetched_sports=fetched_sports,
     )
     ordered_games = apply_saved_order(combined_games, settings)
@@ -1165,7 +1164,6 @@ def load_initial_games():
         sports_results,
         sports_errors=sports_errors,
         previous_games=[],
-        use_test_fallback=True,
     )
 
 if __name__ == "__main__":
@@ -1701,6 +1699,7 @@ if __name__ == "__main__":
                 render_idle_splash(
                     DISPLAY_WIDTH,
                     MATRIX_HEIGHT,
+                    games=idle_board_games(settings),
                 )
             )
 

@@ -1,8 +1,11 @@
+import gzip
 import subprocess
+import threading
+import time
 from datetime import timedelta
 from pathlib import Path
 
-from functools import wraps
+from functools import lru_cache, wraps
 from html import escape
 
 from flask import Flask, abort, request, redirect, send_file, session, jsonify, url_for
@@ -34,6 +37,7 @@ from common.logo_store import (
     delete_custom_logo,
     get_custom_variants_by_team,
     get_logo_variant_path,
+    get_logo_variants,
     get_selected_logo_variant,
     get_team_logo_catalog,
     get_teams_with_logos,
@@ -81,7 +85,91 @@ from updater.status import (
     write_status,
 )
 
+class _GzipMiddleware:
+    """Compress text responses so phones pull less over the Pi's Wi-Fi."""
+
+    def __init__(self, wsgi_app, minimum=1024):
+        self.wsgi_app = wsgi_app
+        self.minimum = minimum
+
+    def __call__(self, environ, start_response):
+        accept = environ.get("HTTP_ACCEPT_ENCODING", "")
+        if "gzip" not in accept.lower():
+            return self.wsgi_app(environ, start_response)
+
+        captured = {}
+
+        def _start(status, headers, exc_info=None):
+            captured["status"] = status
+            captured["headers"] = list(headers)
+            captured["exc_info"] = exc_info
+
+        result = self.wsgi_app(environ, _start)
+        chunks = []
+        try:
+            for chunk in result:
+                if chunk:
+                    chunks.append(chunk)
+        finally:
+            close = getattr(result, "close", None)
+            if close is not None:
+                close()
+
+        status = captured.get("status", "500 Internal Server Error")
+        headers = captured.get("headers", [])
+        body = b"".join(chunks)
+        if (
+            not status.startswith("200")
+            or len(body) < self.minimum
+            or not _should_gzip(headers)
+        ):
+            start_response(status, headers, captured.get("exc_info"))
+            return [body]
+
+        gzipped = gzip.compress(body, compresslevel=5)
+        if len(gzipped) >= len(body):
+            start_response(status, headers, captured.get("exc_info"))
+            return [body]
+
+        rewritten = []
+        vary = None
+        for key, value in headers:
+            lower = key.lower()
+            if lower == "content-length":
+                continue
+            if lower == "vary":
+                vary = value if vary is None else f"{vary}, {value}"
+                continue
+            rewritten.append((key, value))
+        if not vary:
+            vary = "Accept-Encoding"
+        elif "accept-encoding" not in vary.lower():
+            vary = f"{vary}, Accept-Encoding"
+        rewritten.append(("Content-Encoding", "gzip"))
+        rewritten.append(("Content-Length", str(len(gzipped))))
+        rewritten.append(("Vary", vary))
+        start_response(status, rewritten, captured.get("exc_info"))
+        return [gzipped]
+
+
+def _should_gzip(headers) -> bool:
+    content_type = ""
+    for key, value in headers:
+        lower = key.lower()
+        if lower == "content-encoding":
+            return False
+        if lower == "content-type":
+            content_type = value.lower()
+    return (
+        content_type.startswith("text/")
+        or "javascript" in content_type
+        or "json" in content_type
+        or content_type.startswith("image/svg")
+    )
+
+
 app = Flask(__name__)
+app.wsgi_app = _GzipMiddleware(app.wsgi_app)
 app.secret_key = get_or_create_web_secret()
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
@@ -147,8 +235,31 @@ ACTIVE_UPDATE_STATES = {
     "rolling_back",
 }
 
+_service_state_lock = threading.Lock()
+_service_state_cache = {"value": "", "at": 0.0}
+
+
 def update_service_state() -> str:
     """Return the systemd ActiveState, or "unknown" if it cannot be read."""
+    now = time.monotonic()
+    with _service_state_lock:
+        cached_value = _service_state_cache["value"]
+        cached_at = float(_service_state_cache["at"])
+
+    if cached_value:
+        busy = cached_value in {"active", "activating", "deactivating"}
+        ttl = 1.5 if busy else 12.0
+        if now - cached_at < ttl:
+            return cached_value
+
+    state = _read_update_service_state()
+    with _service_state_lock:
+        _service_state_cache["value"] = state
+        _service_state_cache["at"] = time.monotonic()
+    return state
+
+
+def _read_update_service_state() -> str:
     try:
         result = subprocess.run(
             [
@@ -341,6 +452,7 @@ def page_header(active_page="games"):
     )
 
     return f"""
+    {_BOOT_SPLASH_HTML}
     <a
         id="update-banner"
         class="update-banner"
@@ -522,17 +634,19 @@ def page_header(active_page="games"):
         revealSoftwareUpdate();
       }}
 
-      fetch("/api/update/status", {{
-        method: "GET",
-        cache: "no-store"
-      }}).then(function (response) {{
-        if (!response.ok) {{
-          throw new Error("status");
-        }}
-        return response.json();
-      }}).then(function (status) {{
-        window.applyUpdateBanner(status);
-      }}).catch(function () {{}});
+      window.setTimeout(function () {{
+        fetch("/api/update/status", {{
+          method: "GET",
+          cache: "no-store"
+        }}).then(function (response) {{
+          if (!response.ok) {{
+            throw new Error("status");
+          }}
+          return response.json();
+        }}).then(function (status) {{
+          window.applyUpdateBanner(status);
+        }}).catch(function () {{}});
+      }}, 1600);
     }})();
     </script>
     """
@@ -631,12 +745,200 @@ def page_head(title: str) -> str:
     </head>
     """
 
+_BOOT_SPLASH_HTML = """
+    <div id="boot-splash" class="boot-splash" role="status" aria-live="polite" aria-label="Loading GameLine">
+        <div class="boot-splash-mark">
+            <span class="boot-splash-rule"></span>
+            <span class="boot-splash-word">GAMELINE</span>
+            <span class="boot-splash-rule"></span>
+        </div>
+        <div class="boot-splash-bar" aria-hidden="true"><span></span></div>
+    </div>
+"""
+
+_APPLE_STARTUP_IMAGES = (
+    (
+        "iphone-se-640x1136.png",
+        "(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2)",
+    ),
+    (
+        "iphone-8-750x1334.png",
+        "(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2)",
+    ),
+    (
+        "iphone-8-plus-1242x2208.png",
+        "(device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3)",
+    ),
+    (
+        "iphone-x-1125x2436.png",
+        "(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3)",
+    ),
+    (
+        "iphone-11-828x1792.png",
+        "(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2)",
+    ),
+    (
+        "iphone-11-pro-max-1242x2688.png",
+        "(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3)",
+    ),
+    (
+        "iphone-12-1170x2532.png",
+        "(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)",
+    ),
+    (
+        "iphone-12-pro-max-1284x2778.png",
+        "(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3)",
+    ),
+    (
+        "iphone-14-pro-1179x2556.png",
+        "(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3)",
+    ),
+    (
+        "iphone-14-pro-max-1290x2796.png",
+        "(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3)",
+    ),
+)
+
+
+def _apple_startup_links() -> str:
+    return "".join(
+        f"""
+        <link
+            rel="apple-touch-startup-image"
+            href="/static/splash/{filename}"
+            media="{media}"
+        >
+        """
+        for filename, media in _APPLE_STARTUP_IMAGES
+    )
+
+
 def page_styles():
-    return """
+    font_href = (
+        "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700"
+        "&family=Sora:wght@600;700;800&display=swap"
+    )
+    return f"""
+    <style>
+        html {{
+            background: #0B1120;
+        }}
+        .boot-splash {{
+            position: fixed;
+            inset: 0;
+            z-index: 80;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 28px;
+            background: #0B1120;
+            transition: opacity 0.32s ease;
+        }}
+        html.splash-skip .boot-splash {{
+            display: none !important;
+        }}
+        .boot-splash.is-done {{
+            opacity: 0;
+            pointer-events: none;
+        }}
+        .boot-splash-mark {{
+            display: flex;
+            flex-direction: column;
+            width: max-content;
+            min-width: 210px;
+        }}
+        .boot-splash-rule {{
+            display: block;
+            height: 2px;
+            background: #00D4FF;
+        }}
+        .boot-splash-word {{
+            margin: 12px 0;
+            text-align: center;
+            font-family: "Sora", Inter, system-ui, sans-serif;
+            font-size: 22px;
+            font-weight: 800;
+            letter-spacing: 0.22em;
+            color: #2563EB;
+            padding-left: 0.22em;
+        }}
+        .boot-splash-bar {{
+            width: 128px;
+            height: 2px;
+            overflow: hidden;
+            background: rgba(0, 212, 255, 0.18);
+        }}
+        .boot-splash-bar span {{
+            display: block;
+            width: 40%;
+            height: 100%;
+            background: #00D4FF;
+            animation: boot-splash-slide 1.05s ease-in-out infinite;
+        }}
+        @keyframes boot-splash-slide {{
+            0% {{ transform: translateX(-120%); }}
+            100% {{ transform: translateX(320%); }}
+        }}
+        @media (prefers-reduced-motion: reduce) {{
+            .boot-splash {{
+                transition: none;
+            }}
+            .boot-splash-bar span {{
+                animation: none;
+                width: 100%;
+            }}
+        }}
+    </style>
+    <noscript><style>#boot-splash {{ display: none !important; }}</style></noscript>
+    <script>
+    (function () {{
+      var root = document.documentElement;
+      try {{
+        if (sessionStorage.getItem("gameline-opened") === "1") {{
+          root.classList.add("splash-skip");
+        }}
+      }} catch (error) {{}}
+
+      if (root.classList.contains("splash-skip")) {{
+        document.addEventListener("DOMContentLoaded", function () {{
+          var splash = document.getElementById("boot-splash");
+          if (splash) splash.remove();
+        }});
+        return;
+      }}
+
+      var started = Date.now();
+      var closed = false;
+      function finish() {{
+        if (closed) return;
+        closed = true;
+        var wait = Math.max(0, 480 - (Date.now() - started));
+        window.setTimeout(function () {{
+          try {{
+            sessionStorage.setItem("gameline-opened", "1");
+          }} catch (error) {{}}
+          var splash = document.getElementById("boot-splash");
+          if (!splash) return;
+          splash.classList.add("is-done");
+          window.setTimeout(function () {{
+            splash.remove();
+          }}, 340);
+        }}, wait);
+      }}
+      window.addEventListener("load", finish);
+      window.setTimeout(finish, 6000);
+    }})();
+    </script>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    {_apple_startup_links()}
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/app.css?v=29">
+    <link rel="stylesheet" href="{font_href}" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="{font_href}"></noscript>
+    <link rel="stylesheet" href="/static/app.css?v=31">
+    """ + """
     <script>
     (function () {
       if (navigator.serviceWorker) {
@@ -694,6 +996,27 @@ def page_styles():
             "X-GameLine-Autosave": "1",
             "Accept": "application/json"
           }
+        }).then(function (response) {
+          return response.json().catch(function () {
+            return {};
+          }).then(function (payload) {
+            payload = payload || {};
+            var status = form.querySelector("[data-autosave-error]");
+            if (!response.ok || payload.ok === false) {
+              if (status) {
+                status.hidden = false;
+                status.textContent = payload.error || "Couldn't save that change.";
+              }
+              return;
+            }
+            if (status) {
+              status.hidden = true;
+              status.textContent = "";
+            }
+            if (payload.reload) {
+              window.location.reload();
+            }
+          });
         }).catch(function () {
           return null;
         }).finally(function () {
@@ -1121,6 +1444,15 @@ def _web_team_rgb(league_key, abbreviation):
 
 def _accent_from_logo(logo_path):
     try:
+        stamp = Path(logo_path).stat().st_mtime_ns
+    except OSError:
+        return None
+    return _accent_from_logo_cached(str(logo_path), stamp)
+
+
+@lru_cache(maxsize=256)
+def _accent_from_logo_cached(logo_path, _mtime_ns):
+    try:
         from PIL import Image
 
         image = Image.open(logo_path).convert("RGBA")
@@ -1145,7 +1477,7 @@ def _accent_from_logo(logo_path):
     return best
 
 
-def web_team_mark(league_key, abbreviation, settings, rank=None):
+def web_team_mark(league_key, abbreviation, settings, rank=None, accent=True):
     raw = str(abbreviation or "").strip()
     if not raw:
         return '<span class="score-team-main"><span class="score-abbr"></span></span>'
@@ -1159,14 +1491,18 @@ def web_team_mark(league_key, abbreviation, settings, rank=None):
     if league in _LOGO_MARK_LEAGUES:
         try:
             ident = normalize_identifier(raw)
-            variant = get_selected_logo_variant(settings, league, ident)
-            logo_path = get_logo_variant_path(league, ident, variant)
+            variants = get_logo_variants(league, ident)
         except ValueError:
             ident = ""
-            variant = "current"
-            logo_path = None
+            variants = []
 
-        if logo_path is not None:
+        if ident and variants:
+            variant = get_selected_logo_variant(
+                settings,
+                league,
+                ident,
+                available=variants,
+            )
             src = (
                 f"/logo-preview/{escape(league, quote=True)}"
                 f"/{escape(ident, quote=True)}"
@@ -1174,10 +1510,13 @@ def web_team_mark(league_key, abbreviation, settings, rank=None):
             )
             logo_html = (
                 f'<img class="score-logo" src="{src}" alt="" '
-                f'width="24" height="24">'
+                f'width="24" height="24" loading="lazy" '
+                f'decoding="async" draggable="false">'
             )
-            if rgb is None:
-                rgb = _accent_from_logo(logo_path)
+            if accent and rgb is None:
+                logo_path = get_logo_variant_path(league, ident, variant)
+                if logo_path is not None:
+                    rgb = _accent_from_logo(logo_path)
 
     if rgb is not None:
         color_style = (
@@ -1432,6 +1771,7 @@ def render_auth_page(title, body):
 <html>
 {page_head(title)}
 <body class="auth-body">
+    {_BOOT_SPLASH_HTML}
     <div class="page">
         {body}
     </div>
@@ -1955,34 +2295,36 @@ def games():
             f'<option value="{value}" {selected}>{label}</option>'
         )
 
-    game_rows = ""
+    game_row_parts = []
     display_games = []
+    favorite_cache = {}
+
+    def favorite_cached(game):
+        key = id(game)
+        if key not in favorite_cache:
+            favorite_cache[key] = is_favorite_game(game, settings)
+        return favorite_cache[key]
+
     for game in latest_games:
-        league_key, _ = get_game_league(game)
+        league_key, league_label = get_game_league(game)
         if league_key == "stocks":
             continue
-        display_games.append(game)
-    display_games.sort(
-        key=lambda item: 0 if is_favorite_game(item, settings) else 1
-    )
+        display_games.append((
+            game,
+            league_key,
+            league_label,
+            favorite_cached(game),
+        ))
+    display_games.sort(key=lambda item: 0 if item[3] else 1)
 
-    for game in display_games:
+    for game, league_key, league_label, favorite_game in display_games:
         game_id = get_game_id(game)
-
-        favorite_game = (
-            is_favorite_game(
-                game,
-                settings
-            )
-        )
 
         checked = (
             "checked"
             if game_id in selected_ids
             else ""
         )
-
-        league_key, league_label = get_game_league(game)
 
         display_status = get_display_status(game, league_key)
         when_label = get_game_when_label(game)
@@ -2081,8 +2423,43 @@ def games():
                 <div class="score-when">{when_line}</div>
             """
 
-        game_rows += f"""
-        <div class="game-row-container" draggable="true" data-id="{safe_game_id}" data-league="{league_key}" data-top25="{"true" if is_top_25 else "false"}" data-live="{"true" if is_live else "false"}" data-favorite="{"true" if favorite_game else "false"}">
+        search_bits = [
+            league_key,
+            league_label,
+            getattr(game, "away", ""),
+            getattr(game, "home", ""),
+            getattr(game, "name", ""),
+            display_status,
+            when_label,
+            getattr(game, "away_score", ""),
+            getattr(game, "home_score", ""),
+        ]
+        if league_key == "pga":
+            for player in list(getattr(game, "players", ()) or ())[:6]:
+                search_bits.append(getattr(player, "name", ""))
+                search_bits.append(getattr(player, "score", ""))
+        safe_search = escape(
+            " ".join(
+                str(part).strip()
+                for part in search_bits
+                if str(part).strip()
+            ).lower(),
+            quote=True,
+        )
+        if selected_league_filter == "all":
+            show_initially = True
+        elif selected_league_filter == "selected":
+            show_initially = game_id in selected_ids
+        elif selected_league_filter == "favorites":
+            show_initially = favorite_game
+        elif selected_league_filter == "top25":
+            show_initially = is_top_25
+        else:
+            show_initially = league_key == selected_league_filter
+        row_style = "" if show_initially else ' style="display:none"'
+
+        game_row_parts.append(f"""
+        <div class="game-row-container" draggable="true" data-search="{safe_search}" data-id="{safe_game_id}" data-league="{league_key}" data-top25="{"true" if is_top_25 else "false"}" data-live="{"true" if is_live else "false"}" data-favorite="{"true" if favorite_game else "false"}"{row_style}>
             <label class="game-row">
                 <input type="checkbox" name="game" value="{safe_game_id}" {checked}>
                 <div class="scoreboard">
@@ -2090,8 +2467,9 @@ def games():
                 </div>
             </label>
         </div>
-        """
+        """)
 
+    game_rows = "".join(game_row_parts)
     if not game_rows:
         game_rows = """
         <div class="empty">
@@ -2255,8 +2633,8 @@ def games():
 
             let visibleCount = 0;
 
-            document.querySelectorAll(".game-row-container").forEach(function(row) {{
-                const text = row.innerText.toLowerCase();
+            gameRows.forEach(function(row) {{
+                const text = row.dataset.search || "";
                 const rowLeague = row.dataset.league;
                 const rowIsLive = row.dataset.live === "true";
 
@@ -2396,11 +2774,17 @@ def games():
         }}
 
         const container = document.getElementById("games_card");
+        const gameRows = container
+            ? Array.from(container.querySelectorAll(".game-row-container"))
+            : [];
+        let dragFrame = 0;
+        let dragY = 0;
 
         container.addEventListener("dragstart", function(e) {{
             const row = e.target.closest(".game-row-container");
 
             if (row) {{
+                container.classList.add("is-reordering");
                 row.classList.add("dragging");
 
                 if (e.dataTransfer) {{
@@ -2410,6 +2794,11 @@ def games():
         }});
 
         container.addEventListener("dragend", function(e) {{
+            if (dragFrame) {{
+                window.cancelAnimationFrame(dragFrame);
+                dragFrame = 0;
+            }}
+            container.classList.remove("is-reordering");
             const row = e.target.closest(".game-row-container");
 
             if (row) {{
@@ -2423,36 +2812,55 @@ def games():
             }}
         }});
 
-        container.addEventListener("dragover", function(e) {{
-            e.preventDefault();
-
+        function moveDraggedGame() {{
+            dragFrame = 0;
             const draggingItem = document.querySelector(".dragging");
             if (!draggingItem) return;
 
-            const siblings = [...container.querySelectorAll(".game-row-container:not(.dragging)")]
-                .filter(function(row) {{
-                    return row.style.display !== "none";
-                }});
-
-            const nextSibling = siblings.find(sibling => {{
-                const box = sibling.getBoundingClientRect();
-                return e.clientY <= box.top + box.height / 2;
-            }});
-
+            const siblings = [];
+            const nodes = container.querySelectorAll(".game-row-container");
+            for (let index = 0; index < nodes.length; index++) {{
+                const row = nodes[index];
+                if (row !== draggingItem && row.style.display !== "none") {{
+                    siblings.push(row);
+                }}
+            }}
+            let low = 0;
+            let high = siblings.length;
+            while (low < high) {{
+                const mid = (low + high) >> 1;
+                const box = siblings[mid].getBoundingClientRect();
+                if (dragY <= box.top + box.height / 2) {{
+                    high = mid;
+                }} else {{
+                    low = mid + 1;
+                }}
+            }}
+            const nextSibling = siblings[low] || null;
             if (nextSibling) {{
-                container.insertBefore(draggingItem, nextSibling);
-            }} else {{
-                container.appendChild(draggingItem);
+                if (draggingItem.nextElementSibling !== nextSibling) {{
+                    container.insertBefore(draggingItem, nextSibling);
+                }}
+            }} else if (siblings.length) {{
+                const last = siblings[siblings.length - 1];
+                if (draggingItem.previousElementSibling !== last) {{
+                    container.appendChild(draggingItem);
+                }}
+            }}
+        }}
+
+        container.addEventListener("dragover", function(e) {{
+            e.preventDefault();
+            dragY = e.clientY;
+            if (!dragFrame) {{
+                dragFrame = window.requestAnimationFrame(moveDraggedGame);
             }}
         }});
 
-        document.querySelectorAll(
-            'input[type="checkbox"][name="game"]'
-        ).forEach(function(checkbox) {{
-            checkbox.addEventListener(
-                "change",
-                handleGameSelectionChange
-            );
+        container.addEventListener("change", function (event) {{
+            if (event.target && event.target.name === "game") {{
+                handleGameSelectionChange();
+            }}
         }});
 
         document.addEventListener("DOMContentLoaded", function () {{
@@ -2631,7 +3039,7 @@ def _focus_game_rows(
     badge,
     settings,
 ):
-    rows = ""
+    row_parts = []
     league_games = [
         game
         for game in games
@@ -2678,7 +3086,7 @@ def _focus_game_rows(
             is_favorite_game(game, settings)
         )
 
-        rows += f"""
+        row_parts.append(f"""
         <label
             class="game-row focus-game-row"
             data-league="{league_key}"
@@ -2708,9 +3116,9 @@ def _focus_game_rows(
                 </div>
             </div>
         </label>
-        """
+        """)
 
-    return rows
+    return "".join(row_parts)
 
 
 @app.route("/focus")
@@ -3063,10 +3471,7 @@ def focus_page():
 
                 rows.forEach(function(row) {{
                     searchableCount += 1;
-                    const haystack = (
-                        row.getAttribute("data-search")
-                        || row.innerText
-                    ).toLowerCase();
+                    const haystack = row.getAttribute("data-search") || "";
                     const match = !search || haystack.indexOf(search) !== -1;
                     row.style.display = match ? "" : "none";
                     if (match) {{
@@ -3502,7 +3907,7 @@ def alerts_page():
                     {team_checked}
                 >
 
-                {web_team_mark(requested_league, abbreviation, settings)}
+                {web_team_mark(requested_league, abbreviation, settings, accent=False)}
 
                 <div class="game-info">
                     <div class="matchup">
@@ -5146,6 +5551,8 @@ def fantasy_page():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         season = request.form.get("season", "2026").strip()
+        previous_username = str(fantasy.get("username") or "")
+        previous_season = str(fantasy.get("season") or "2026")
 
         if not season.isdigit() or len(season) != 4:
             error = "Enter a valid four-digit season."
@@ -5162,32 +5569,51 @@ def fantasy_page():
                         user.get("user_id"),
                         season,
                     )
-
-                    selected_leagues = request.form.getlist(
-                        "selected_leagues"
-                    )
+                    if not isinstance(leagues, list):
+                        leagues = []
 
                     valid_league_ids = {
                         str(league.get("league_id"))
                         for league in leagues
+                        if league.get("league_id")
                     }
-
-                    selected_leagues = [
+                    leagues_were_listed = (
+                        request.form.get("leagues_listed") == "1"
+                    )
+                    saved_username = (
+                        user.get("username")
+                        or username
+                    )
+                    account_changed = (
+                        not leagues_were_listed
+                        or saved_username.lower() != previous_username.lower()
+                        or season != previous_season
+                    )
+                    load_leagues = request.form.get("load_leagues") == "1"
+                    posted_leagues = [
                         league_id
-                        for league_id in selected_leagues
+                        for league_id in request.form.getlist(
+                            "selected_leagues"
+                        )
                         if league_id in valid_league_ids
                     ]
+                    # The first lookup has no checkboxes yet, so an empty
+                    # post would save "no leagues" and the ticker would
+                    # stay blank. Add every league on the account.
+                    if account_changed or load_leagues:
+                        selected_leagues = sorted(valid_league_ids)
+                    else:
+                        selected_leagues = posted_leagues
+
+                    enabled = request.form.get("enabled") == "on"
+                    if (account_changed or load_leagues) and selected_leagues:
+                        enabled = True
 
                     update_settings({
                         "fantasy": {
-                            "enabled": (
-                                request.form.get("enabled") == "on"
-                            ),
+                            "enabled": enabled,
                             "provider": "sleeper",
-                            "username": (
-                                user.get("username")
-                                or username
-                            ),
+                            "username": saved_username,
                             "user_id": user.get("user_id", ""),
                             "season": season,
                             "refresh_interval": 120,
@@ -5195,7 +5621,12 @@ def fantasy_page():
                         }
                     })
 
-                    return autosave_response("/fantasy")
+                    return autosave_response(
+                        "/fantasy",
+                        {
+                            "reload": account_changed or load_leagues,
+                        },
+                    )
 
             except Exception as exc:
                 error = f"Unable to connect to Sleeper: {exc}"
@@ -5214,6 +5645,8 @@ def fantasy_page():
                 fantasy["user_id"],
                 fantasy.get("season", "2026"),
             )
+            if not isinstance(leagues, list):
+                leagues = []
         except Exception as exc:
             error = f"Unable to load Sleeper leagues: {exc}"
 
@@ -5230,11 +5663,7 @@ def fantasy_page():
             str(league.get("name", "Unnamed League"))
         )
 
-        checked = (
-            "checked"
-            if not selected or league_id in selected
-            else ""
-        )
+        checked = "checked" if league_id in selected else ""
 
         league_rows += f"""
         <label class="game-row">
@@ -5255,11 +5684,19 @@ def fantasy_page():
         """
 
     if not league_rows:
-        league_rows = """
-        <div class="empty">
-            Connect your Sleeper account to load leagues.
-        </div>
-        """
+        if fantasy.get("user_id") and not error:
+            league_rows = """
+            <div class="empty">
+                No NFL leagues for this season.
+                Check the username and season, then load again.
+            </div>
+            """
+        else:
+            league_rows = """
+            <div class="empty">
+                Enter your Sleeper username and load your leagues.
+            </div>
+            """
 
     enabled_checked = (
         "checked"
@@ -5302,6 +5739,7 @@ def fantasy_page():
         <form method="POST" data-autosave="1">
             <div class="card">
                 <div class="card-title">Sleeper Account</div>
+                <div class="error" data-autosave-error hidden></div>
 
                 <label class="game-row">
                     <input
@@ -5334,11 +5772,25 @@ def fantasy_page():
                     name="season"
                     value="{escape(str(fantasy.get('season', '2026')), quote=True)}"
                     placeholder="Season"
+                    inputmode="numeric"
                 >
+
+                <button
+                    class="save-button"
+                    type="submit"
+                    name="load_leagues"
+                    value="1"
+                >
+                    Load leagues
+                </button>
             </div>
 
             <div class="card">
                 <div class="card-title">Leagues</div>
+                {
+                    '<input type="hidden" name="leagues_listed" value="1">'
+                    if leagues else ""
+                }
                 {league_rows}
             </div>
         </form>
@@ -7403,10 +7855,16 @@ def settings_page():
             }}
         }}
 
-        loadUpdateStatus();
-        updateStatusTimer = setInterval(loadUpdateStatus, 2000);
-        loadSystemStats();
-        setInterval(loadSystemStats, 2000);
+        function pollSettingsStatus() {{
+            if (document.hidden) {{
+                return;
+            }}
+            loadUpdateStatus();
+            loadSystemStats();
+        }}
+        pollSettingsStatus();
+        updateStatusTimer = setInterval(pollSettingsStatus, 5000);
+        document.addEventListener("visibilitychange", pollSettingsStatus);
     </script>
 </body>
 </html>
@@ -7494,7 +7952,7 @@ def favorites_page():
                 >
 
                 <span>
-                    {web_team_mark(league_key, normalized_team, settings)}
+                    {web_team_mark(league_key, normalized_team, settings, accent=False)}
                 </span>
             </label>
             """
@@ -7507,8 +7965,12 @@ def favorites_page():
             </div>
             """
 
+        team_count = len(team_options)
+        grid_rows = (team_count + 2) // 3 if team_count else 1
+        league_height = 160 + grid_rows * 70
+
         rows += f"""
-        <div class="control">
+        <div class="control favorite-league" style="contain-intrinsic-size: auto {league_height}px">
 
             <div class="control-top">
                 <label>
