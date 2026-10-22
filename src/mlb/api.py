@@ -1,5 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timedelta
 import unicodedata
 
 from common.timezone import (
@@ -480,17 +480,35 @@ def _parse_game(game, include_scoring_plays=False):
     )
 
 
-def _fetch_schedule(hydrate):
-    today = datetime.now(
-        get_local_timezone()
-    ).strftime("%Y-%m-%d")
+# How far ahead to look when today has no game still to be played.
+NEXT_GAME_DAYS = 7
+_SCHEDULE_HYDRATE = "probablePitcher,linescore,team,broadcasts"
+
+
+def _fetch_schedule(hydrate, on_date=None):
+    if on_date is None:
+        on_date = datetime.now(get_local_timezone()).strftime("%Y-%m-%d")
 
     params = {
         "sportId": 1,
-        "date": today,
+        "date": on_date,
         "hydrate": hydrate,
     }
 
+    return _get_schedule(params)
+
+
+def _fetch_schedule_between(hydrate, start_date, end_date):
+    params = {
+        "sportId": 1,
+        "startDate": start_date,
+        "endDate": end_date,
+        "hydrate": hydrate,
+    }
+    return _get_schedule(params)
+
+
+def _get_schedule(params):
     response = _session.get(
         MLB_SCHEDULE_URL,
         params=params,
@@ -503,32 +521,96 @@ def _fetch_schedule(hydrate):
     return response.json()
 
 
+def _game_is_over(game):
+    status = str(getattr(game, "status", "") or "").upper()
+    return any(
+        word in status
+        for word in ("FINAL", "POSTPONE", "CANCEL", "SUSPEND")
+    )
+
+
+def _slate_has_action(games):
+    return any(not _game_is_over(game) for game in games)
+
+
+def _parse_date_block(date_block, include_scoring_plays=False):
+    games = []
+    for game in date_block.get("games", []):
+        try:
+            games.append(
+                _parse_game(
+                    game,
+                    include_scoring_plays=include_scoring_plays,
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return games
+
+
+def choose_baseball_slate(today_games, later_slates):
+    """Today's unfinished games, or the next day that still has one.
+
+    later_slates is a sequence of (date, games) in calendar order.
+    """
+    if _slate_has_action(today_games):
+        return list(today_games)
+
+    for _date, games in later_slates:
+        if _slate_has_action(games):
+            return list(games)
+
+    return list(today_games)
+
+
+def _later_slates(data, today):
+    slates = []
+    today_text = today.isoformat()
+    for date_block in data.get("dates", []):
+        official = str(date_block.get("date") or "")
+        if not official or official <= today_text:
+            continue
+        slates.append((official, _parse_date_block(date_block)))
+    slates.sort(key=lambda item: item[0])
+    return slates
+
+
 def _parse_schedule(data, include_scoring_plays=False):
     games = []
 
     for date_block in data.get("dates", []):
-        for game in date_block.get("games", []):
-            try:
-                games.append(
-                    _parse_game(
-                        game,
-                        include_scoring_plays=(
-                            include_scoring_plays
-                        ),
-                    )
-                )
-            except (KeyError, TypeError, ValueError):
-                continue
+        games.extend(
+            _parse_date_block(
+                date_block,
+                include_scoring_plays=include_scoring_plays,
+            )
+        )
 
     return games
 
 
 def get_today_games():
-    data = _fetch_schedule(
-        "probablePitcher,linescore,team,broadcasts"
-    )
+    zone = get_local_timezone()
+    today = datetime.now(zone).date()
+    games = _parse_schedule(_fetch_schedule(_SCHEDULE_HYDRATE, today.isoformat()))
 
-    return _enrich_live_at_bats(_parse_schedule(data))
+    if _slate_has_action(games):
+        return _enrich_live_at_bats(games)
+
+    start = today + timedelta(days=1)
+    end = today + timedelta(days=NEXT_GAME_DAYS)
+    try:
+        upcoming = _fetch_schedule_between(
+            _SCHEDULE_HYDRATE,
+            start.isoformat(),
+            end.isoformat(),
+        )
+    except (OSError, ValueError, requests.RequestException) as exc:
+        print(f"MLB next-game lookup failed: {exc}")
+        return _enrich_live_at_bats(games)
+
+    chosen = choose_baseball_slate(games, _later_slates(upcoming, today))
+    return _enrich_live_at_bats(chosen)
 
 
 def get_alert_games():
