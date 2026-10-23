@@ -194,6 +194,24 @@ SOCCER_LEAGUE_OPTIONS = [
     for league_id, league_name in SOCCER_LEAGUES.items()
 ]
 
+FOCUS_LEAGUES = [
+    ("nfl", "NFL"),
+    ("cfb", "College Football"),
+    ("mlb", "MLB"),
+]
+
+FOCUS_LEAGUE_HINTS = {
+    "nfl": "Select one or more games to display in Focus Mode.",
+    "cfb": (
+        "Ranked teams show AP rank on the scoreboard. "
+        "Select one or more games to display in Focus Mode."
+    ),
+    "mlb": (
+        "Live games show the scorecard, count, batter, pitcher, "
+        "and a strike zone of every pitch in the current at-bat."
+    ),
+}
+
 FAVORITE_LEAGUES = [
     (
         "mlb",
@@ -1043,7 +1061,7 @@ def page_styles():
       if (target.id && /search/i.test(target.id)) {
         return true;
       }
-      if (target.id === "alert_league" || target.id === "logo_league") {
+      if (target.id === "alert_league" || target.id === "logo_league" || target.id === "focus_league" || target.id === "favorite_league") {
         return true;
       }
       if (target.id === "live_games_only" || target.id === "league_filter") {
@@ -3176,6 +3194,13 @@ def _focus_game_rows(
     return "".join(row_parts)
 
 
+def _focus_league_key(value) -> str:
+    league = str(value or "").strip().lower()
+    if league not in {key for key, _label in FOCUS_LEAGUES}:
+        return "nfl"
+    return league
+
+
 @app.route("/focus")
 @login_required
 def focus_page():
@@ -3199,29 +3224,12 @@ def focus_page():
         )
     )
 
-    selected_nfl_ids = set(
+    league_key = _focus_league_key(request.values.get("league"))
+    league_label = dict(FOCUS_LEAGUES)[league_key]
+    selected_ids = {
         str(value)
-        for value in focus_settings.get(
-            "nfl_game_ids",
-            [],
-        )
-    )
-
-    selected_cfb_ids = set(
-        str(value)
-        for value in focus_settings.get(
-            "cfb_game_ids",
-            [],
-        )
-    )
-
-    selected_mlb_ids = set(
-        str(value)
-        for value in focus_settings.get(
-            "mlb_game_ids",
-            [],
-        )
-    )
+        for value in focus_settings.get(f"{league_key}_game_ids", [])
+    }
 
     try:
         rotation_seconds = int(
@@ -3241,53 +3249,33 @@ def focus_page():
         ),
     )
 
-    nfl_rows = _focus_game_rows(
+    game_badge = {
+        "nfl": "NFL",
+        "cfb": "CFB",
+        "mlb": "MLB",
+    }[league_key]
+    game_rows = _focus_game_rows(
         latest_games,
-        "nfl",
-        selected_nfl_ids,
-        "focus_nfl_game",
-        "NFL",
+        league_key,
+        selected_ids,
+        f"focus_{league_key}_game",
+        game_badge,
         settings,
     )
 
-    cfb_rows = _focus_game_rows(
-        latest_games,
-        "cfb",
-        selected_cfb_ids,
-        "focus_cfb_game",
-        "CFB",
-        settings,
-    )
-
-    mlb_rows = _focus_game_rows(
-        latest_games,
-        "mlb",
-        selected_mlb_ids,
-        "focus_mlb_game",
-        "MLB",
-        settings,
-    )
-
-    if not nfl_rows:
-        nfl_rows = """
+    if not game_rows:
+        game_rows = f"""
         <div class="empty">
-            No NFL games loaded yet.
+            No {escape(league_label)} games loaded yet.
         </div>
         """
 
-    if not cfb_rows:
-        cfb_rows = """
-        <div class="empty">
-            No CFB games loaded yet.
-        </div>
-        """
-
-    if not mlb_rows:
-        mlb_rows = """
-        <div class="empty">
-            No MLB games loaded yet.
-        </div>
-        """
+    league_options = []
+    for key, label in FOCUS_LEAGUES:
+        picked = " selected" if key == league_key else ""
+        league_options.append(
+            f'<option value="{escape(key)}"{picked}>{escape(label)}</option>'
+        )
 
     enabled_checked = (
         "checked"
@@ -3393,93 +3381,62 @@ def focus_page():
             </div>
 
             <div class="card">
-                <div class="card-title">
-                    Find a Game
+                <div class="card-title">League</div>
+                <div class="hint" style="margin-bottom: 14px;">
+                    Pick a league, then choose the games
+                    to pin on the full-screen board.
                 </div>
+                <select
+                    class="select-input favorite-league-select"
+                    id="focus_league"
+                    onchange="window.location.href='/focus?league=' + encodeURIComponent(this.value)"
+                >
+                    {''.join(league_options)}
+                </select>
+                <input type="hidden" name="league" value="{escape(league_key, quote=True)}">
+            </div>
 
+            <div class="card">
+                <div class="card-title">{escape(league_label)} Games</div>
+                <div class="hint" style="margin-bottom: 14px;">
+                    {escape(FOCUS_LEAGUE_HINTS[league_key])}
+                </div>
                 <input
-                    class="search-input"
+                    class="search-input favorite-team-search"
                     type="search"
                     id="focus_game_search"
-                    placeholder="Search teams, abbreviations, or status..."
+                    placeholder="Search {escape(league_label)} games..."
                     autocomplete="off"
                     enterkeyhint="search"
                     spellcheck="false"
+                    oninput="filterFocusGames()"
                 >
-
-                <div class="hint">
-                    Filters NFL, CFB, and MLB lists.
-                    Checked games stay selected even
-                    if they are hidden by search.
+                <div class="favorite-select-actions">
+                    <button
+                        class="secondary-button"
+                        type="button"
+                        onclick="setFocusGames(true)"
+                    >
+                        Select All
+                    </button>
+                    <button
+                        class="secondary-button"
+                        type="button"
+                        onclick="setFocusGames(false)"
+                    >
+                        Clear
+                    </button>
                 </div>
-            </div>
-
-            <div
-                class="card focus-league-card"
-                data-league="nfl"
-            >
-                <div class="card-title">
-                    NFL Games
+                <div id="focus_game_list">
+                    {game_rows}
                 </div>
-
                 <div
-                    class="hint"
-                    style="margin-bottom: 14px;"
+                    id="focus_no_results"
+                    class="empty"
+                    hidden
                 >
-                    Select one or more games to display
-                    in Focus Mode.
+                    No matching games.
                 </div>
-
-                {nfl_rows}
-            </div>
-
-            <div
-                class="card focus-league-card"
-                data-league="cfb"
-            >
-                <div class="card-title">
-                    CFB Games
-                </div>
-
-                <div
-                    class="hint"
-                    style="margin-bottom: 14px;"
-                >
-                    Ranked teams show AP rank on the
-                    scoreboard. Select one or more
-                    games to display in Focus Mode.
-                </div>
-
-                {cfb_rows}
-            </div>
-
-            <div
-                class="card focus-league-card"
-                data-league="mlb"
-            >
-                <div class="card-title">
-                    MLB Games
-                </div>
-
-                <div
-                    class="hint"
-                    style="margin-bottom: 14px;"
-                >
-                    Live games show the scorecard,
-                    count, batter, pitcher, and a
-                    strike zone of every pitch in
-                    the current at-bat.
-                </div>
-
-                {mlb_rows}
-            </div>
-
-            <div
-                id="focus_no_results"
-                class="empty"
-                hidden
-            >
-                No matching games.
             </div>
         </form>
     </div>
@@ -3503,6 +3460,20 @@ def focus_page():
             }}
         );
 
+        function setFocusGames(checked) {{
+            document.querySelectorAll(
+                '#focus_game_list input[type="checkbox"]'
+            ).forEach(function (input) {{
+                input.checked = checked;
+            }});
+            var form = document.querySelector(
+                'form[action="/save_focus"]'
+            );
+            if (window.autosaveForm && form) {{
+                window.autosaveForm(form, 0);
+            }}
+        }}
+
         function filterFocusGames() {{
             const searchInput = document.getElementById(
                 "focus_game_search"
@@ -3514,36 +3485,23 @@ def focus_page():
                 "focus_no_results"
             );
             let visibleCount = 0;
-            let searchableCount = 0;
+            const rows = document.querySelectorAll(
+                ".focus-game-row"
+            );
 
-            document.querySelectorAll(
-                ".focus-league-card"
-            ).forEach(function(card) {{
-                const rows = card.querySelectorAll(
-                    ".focus-game-row"
-                );
-                let visibleInCard = 0;
-
-                rows.forEach(function(row) {{
-                    searchableCount += 1;
-                    const haystack = row.getAttribute("data-search") || "";
-                    const match = !search || haystack.indexOf(search) !== -1;
-                    row.style.display = match ? "" : "none";
-                    if (match) {{
-                        visibleInCard += 1;
-                    }}
-                }});
-
-                if (rows.length > 0) {{
-                    card.style.display = visibleInCard > 0 ? "" : "none";
-                    visibleCount += visibleInCard;
+            rows.forEach(function(row) {{
+                const haystack = row.getAttribute("data-search") || "";
+                const match = !search || haystack.indexOf(search) !== -1;
+                row.style.display = match ? "" : "none";
+                if (match) {{
+                    visibleCount += 1;
                 }}
             }});
 
             if (empty) {{
                 empty.hidden = !(
                     search
-                    && searchableCount > 0
+                    && rows.length > 0
                     && visibleCount === 0
                 );
             }}
@@ -3579,67 +3537,20 @@ def focus_page():
 )
 @login_required
 def save_focus():
-    selected_nfl_ids = (
-        request.form.getlist(
-            "focus_nfl_game"
-        )
-    )
+    posted_league = str(request.form.get("league", "")).strip().lower()
+    if posted_league not in {key for key, _label in FOCUS_LEAGUES}:
+        return autosave_response("/focus")
 
-    selected_cfb_ids = (
-        request.form.getlist(
-            "focus_cfb_game"
-        )
-    )
-
-    selected_mlb_ids = (
-        request.form.getlist(
-            "focus_mlb_game"
-        )
-    )
-
-    valid_nfl_game_ids = {
+    league_key = _focus_league_key(posted_league)
+    valid_ids = {
         get_game_id(game)
         for game in latest_games
-        if get_game_league(game)[0]
-        == "nfl"
+        if get_game_league(game)[0] == league_key
     }
-
-    valid_cfb_game_ids = {
-        get_game_id(game)
-        for game in latest_games
-        if get_game_league(game)[0]
-        == "cfb"
-    }
-
-    valid_mlb_game_ids = {
-        get_game_id(game)
-        for game in latest_games
-        if get_game_league(game)[0]
-        == "mlb"
-    }
-
-    selected_nfl_ids = [
+    selected_ids = [
         game_identifier
-        for game_identifier
-        in selected_nfl_ids
-        if game_identifier
-        in valid_nfl_game_ids
-    ]
-
-    selected_cfb_ids = [
-        game_identifier
-        for game_identifier
-        in selected_cfb_ids
-        if game_identifier
-        in valid_cfb_game_ids
-    ]
-
-    selected_mlb_ids = [
-        game_identifier
-        for game_identifier
-        in selected_mlb_ids
-        if game_identifier
-        in valid_mlb_game_ids
+        for game_identifier in request.form.getlist(f"focus_{league_key}_game")
+        if game_identifier in valid_ids
     ]
 
     try:
@@ -3670,22 +3581,12 @@ def save_focus():
     update_settings({
         "focus_mode": {
             "enabled": focus_enabled,
-            "nfl_game_ids": (
-                selected_nfl_ids
-            ),
-            "cfb_game_ids": (
-                selected_cfb_ids
-            ),
-            "mlb_game_ids": (
-                selected_mlb_ids
-            ),
-            "rotation_seconds": (
-                rotation_seconds
-            ),
+            "rotation_seconds": rotation_seconds,
+            f"{league_key}_game_ids": selected_ids,
         },
     })
 
-    return autosave_response("/focus")
+    return autosave_response(url_for("focus_page", league=league_key))
 
 @app.route("/alerts", methods=["GET", "POST"])
 @login_required
