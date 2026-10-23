@@ -226,5 +226,18 @@ class TimezoneTests(unittest.TestCase):
         time.tzset()
 
 
+class TimezoneMenuTests(unittest.TestCase):
+    def test_settings_menu_starts_with_common_zones(self):
+        from web.app import _timezone_options_html
+
+        common = _timezone_options_html("auto")
+        saved = _timezone_options_html("Europe/London")
+
+        self.assertIn("America/Chicago", common)
+        self.assertNotIn("Europe/London", common)
+        self.assertIn("Europe/London", saved)
+        self.assertLess(common.count("<option"), 20)
+
+
 if __name__ == "__main__":
     unittest.main()

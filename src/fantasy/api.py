@@ -15,6 +15,14 @@ CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 HTTP_TIMEOUT = (3.05, 10)
 
+
+def _safe_error(exc: Exception) -> str:
+    """Drop account ids that requests puts in the exception text."""
+    text = str(exc)
+    text = re.sub(r"/user/\d+", "/user/…", text)
+    text = re.sub(r"/\d{6,}", "/…", text)
+    return text
+
 AVATAR_CACHE = Path("/tmp/scorecast-fantasy-avatars")
 
 NFL_STATE_CACHE_SECONDS = 300
@@ -114,7 +122,7 @@ def get_cached_nfl_state():
 
     except Exception as exc:
         print(
-            f"Fantasy NFL state unavailable: {exc}"
+            f"Fantasy NFL state unavailable: {_safe_error(exc)}"
         )
 
         return _nfl_state_cache or {}
@@ -169,7 +177,7 @@ def get_cached_user_leagues(
 
     except Exception as exc:
         print(
-            f"Fantasy leagues unavailable: {exc}"
+            f"Fantasy leagues unavailable: {_safe_error(exc)}"
         )
 
         return cached or []
@@ -234,7 +242,7 @@ def get_cached_league_data(
     except Exception as exc:
         print(
             f"Fantasy league data unavailable "
-            f"({league_id}): {exc}"
+            f"({league_id}): {_safe_error(exc)}"
         )
 
         return old_rosters, old_users
@@ -310,7 +318,7 @@ def get_weekly_projections(
     except Exception as exc:
         print(
             f"Fantasy projections unavailable: "
-            f"{exc}"
+            f"{_safe_error(exc)}"
         )
 
         return cached or {}
@@ -515,7 +523,7 @@ def download_avatar(avatar_id):
     except Exception as exc:
         print(
             f"Fantasy avatar download failed "
-            f"({avatar_id}): {exc}"
+            f"({avatar_id}): {_safe_error(exc)}"
         )
 
         if temp_path.exists():
@@ -546,7 +554,7 @@ def refresh_league_avatars(
     except Exception as exc:
         print(
             f"Unable to load fantasy avatars "
-            f"for league {league_id}: {exc}"
+            f"for league {league_id}: {_safe_error(exc)}"
         )
         return
 
@@ -899,7 +907,7 @@ def get_today_games():
             print(
                 f"Fantasy matchup refresh "
                 f"failed ({league_id}): "
-                f"{exc}"
+                f"{_safe_error(exc)}"
             )
             continue
 

@@ -1111,7 +1111,24 @@ def install_update(
     )
 
 
+TRUSTED_REPOSITORY = "braydencurrier/scorecast"
+
+
+def assert_trusted_origin() -> None:
+    url = run_git(
+        "remote",
+        "get-url",
+        "origin",
+    ).strip().lower().replace(":", "/")
+
+    if TRUSTED_REPOSITORY not in url:
+        raise UpdateError(
+            "Updates only install from the GameLine Pro repository."
+        )
+
+
 def check_for_update() -> tuple[str, str, str]:
+    assert_trusted_origin()
     fetch_repository()
 
     latest_tag = find_latest_tag()

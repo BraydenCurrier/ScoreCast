@@ -30,12 +30,54 @@ _REMOTE_MARKERS = (
 _cache_guard = threading.Lock()
 _refresh_guard = threading.Lock()
 _cache: dict | None = None
+_refresh_pending = False
 
 
 def clear_release_cache() -> None:
     global _cache
     with _cache_guard:
         _cache = None
+
+
+def peek_release_info(current_version: str) -> dict:
+    """Return the last release check without waiting on GitHub."""
+    fresh = _cached_info(current_version)
+    if fresh is not None:
+        return fresh
+
+    _schedule_release_refresh(current_version)
+    with _cache_guard:
+        cached = _cache
+        if cached and cached["current_version"] == current_version:
+            return dict(cached["info"])
+    return _empty(current_version)
+
+
+def _schedule_release_refresh(current_version: str) -> None:
+    global _refresh_pending
+
+    if not _refresh_guard.acquire(blocking=False):
+        return
+    try:
+        if _refresh_pending:
+            return
+        _refresh_pending = True
+    finally:
+        _refresh_guard.release()
+
+    def run() -> None:
+        global _refresh_pending
+        try:
+            latest_release_info(current_version)
+        finally:
+            with _refresh_guard:
+                _refresh_pending = False
+
+    threading.Thread(
+        target=run,
+        name="release-lookup",
+        daemon=True,
+    ).start()
 
 
 def latest_release_info(current_version: str) -> dict:

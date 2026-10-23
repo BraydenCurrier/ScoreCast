@@ -13,7 +13,6 @@ from typing import Any
 from common.settings import SETTINGS_DIR, ensure_settings_directory
 
 
-BOOTSTRAP_PASSWORD = "ticker123"
 USERS_FILE = SETTINGS_DIR / "users.json"
 WEB_SECRET_FILE = SETTINGS_DIR / "web-secret"
 

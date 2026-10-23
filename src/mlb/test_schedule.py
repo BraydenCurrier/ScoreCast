@@ -97,6 +97,29 @@ class StartupSlateTests(unittest.TestCase):
         self.assertEqual(failed, [])
         self.assertEqual(quiet, [])
 
+    def test_dns_failure_is_retried_soon(self):
+        import main
+
+        self.assertTrue(
+            main._feeds_unreachable(
+                {"mlb": OSError("Temporary failure in name resolution")}
+            )
+        )
+        self.assertFalse(main._feeds_unreachable({}))
+        self.assertFalse(
+            main._feeds_unreachable({"mlb": ValueError("bad json")})
+        )
+
+        main._sport_intervals["nba"] = main.QUIET_REFRESH_SECONDS
+        now = 1_000.0
+        main.schedule_sport_retry(["nba"], now)
+        fetched = main._sport_fetched_at["nba"]
+        self.assertLess(now - fetched, main.QUIET_REFRESH_SECONDS)
+        self.assertGreaterEqual(
+            (now + main.RETRY_AFTER_FAILURE_SECONDS) - fetched,
+            main.QUIET_REFRESH_SECONDS,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

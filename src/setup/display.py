@@ -3,6 +3,7 @@ from __future__ import annotations
 from PIL import Image, ImageDraw
 
 from common.fonts import print_4x5, print_gfx_5x7
+from setup.network import hotspot_password
 from setup.qr import dashboard_payload, draw_qr, wifi_payload
 from setup.state import (
     PHASE_ACCOUNT,
@@ -40,12 +41,13 @@ def render_setup_display(width=384, height=32) -> Image.Image:
 
     if phase == PHASE_HOTSPOT:
         ssid = str(state.get("ssid") or "GAMELINE")
-        size = draw_qr(image, wifi_payload(ssid), x=1, y=1)
+        password = hotspot_password()
+        size = draw_qr(image, wifi_payload(ssid, password), x=1, y=1)
         _text_block(
             draw,
             (
                 ("SCAN", CYAN, "5x7"),
-                ("WIFI", WHITE, "5x7"),
+                (password, WHITE, "5x7"),
                 (ssid.upper()[:18], GREY, "4x5"),
             ),
             size + 4,

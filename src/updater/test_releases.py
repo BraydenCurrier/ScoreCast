@@ -1,11 +1,15 @@
 import unittest
 from unittest import mock
 
+import threading
+import time
+
 from updater.releases import (
     clear_release_cache,
     latest_release_info,
     notes_from_payloads,
     parse_github_remote,
+    peek_release_info,
     select_latest_tag,
     split_message,
 )
@@ -161,6 +165,41 @@ class ReleaseLookupTests(unittest.TestCase):
             again["description"],
             "Held to the panel refresh.",
         )
+
+    def test_peek_returns_without_waiting_for_github(self):
+        clear_release_cache()
+        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+
+        def slow(_current):
+            started.set()
+            self.assertTrue(release.wait(2))
+            finished.set()
+            return {
+                "update_available": False,
+                "latest_version": "1.9.2",
+                "current_version": "1.9.2",
+                "title": "",
+                "description": "",
+            }
+
+        with mock.patch(
+            "updater.releases.github_repository",
+            return_value=("BraydenCurrier", "ScoreCast"),
+        ), mock.patch(
+            "updater.releases._fetch_release",
+            side_effect=slow,
+        ):
+            started_at = time.perf_counter()
+            info = peek_release_info("1.9.2")
+            elapsed = time.perf_counter() - started_at
+
+        self.assertLess(elapsed, 0.3)
+        self.assertFalse(info["update_available"])
+        self.assertTrue(started.wait(1))
+        release.set()
+        self.assertTrue(finished.wait(1))
 
 
 if __name__ == "__main__":
