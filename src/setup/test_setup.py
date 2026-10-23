@@ -19,8 +19,9 @@ class QrTests(unittest.TestCase):
     def test_wifi_payload_and_size(self):
         from setup.qr import qr_matrix, wifi_payload
 
-        payload = wifi_payload("GameLine-A1B2")
-        self.assertTrue(payload.startswith("WIFI:T:nopass;S:GameLine-A1B2"))
+        payload = wifi_payload("GameLine-A1B2", "A1B2C3D4")
+        self.assertTrue(payload.startswith("WIFI:T:WPA;S:GameLine-A1B2"))
+        self.assertIn("P:A1B2C3D4", payload)
         matrix = qr_matrix(payload)
         self.assertLessEqual(len(matrix), 29)
         self.assertEqual(len(matrix), len(matrix[0]))

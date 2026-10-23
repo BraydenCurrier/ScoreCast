@@ -1,5 +1,6 @@
 import os
 import pickle
+import socket
 import subprocess
 import sys
 import threading
@@ -153,6 +154,10 @@ _ticker_revision = 0
 PREGAME_REFRESH_SECONDS = 10 * 60
 HIDDEN_LIVE_REFRESH_SECONDS = 60
 QUIET_REFRESH_SECONDS = 30 * 60
+# A failed feed is tried again shortly. A quiet league is not.
+RETRY_AFTER_FAILURE_SECONDS = 5
+STARTUP_FETCH_DEADLINE = 90
+STARTUP_FETCH_PAUSE = 2
 
 _sport_fetched_at = {}
 _sport_intervals = {}
@@ -395,6 +400,42 @@ def bets_refresh_due(now, settings):
 def mark_sports_fetched(sports, now):
     for sport in sports:
         _sport_fetched_at[sport] = now
+
+
+def schedule_sport_retry(sports, now):
+    """Try a failed feed again in a few seconds, not half an hour."""
+    for sport in sports:
+        interval = _sport_intervals.get(sport, QUIET_REFRESH_SECONDS)
+        wait = max(interval - RETRY_AFTER_FAILURE_SECONDS, 0)
+        _sport_fetched_at[sport] = now - wait
+
+
+def _dns_ready():
+    try:
+        socket.getaddrinfo("site.api.espn.com", 443)
+        return True
+    except OSError:
+        return False
+
+
+def _feeds_unreachable(errors):
+    if not errors:
+        return False
+    text = " ".join(str(error).lower() for error in errors.values())
+    return any(
+        phrase in text
+        for phrase in (
+            "name resolution",
+            "temporary failure",
+            "timed out",
+            "timeout",
+            "network is unreachable",
+            "network unreachable",
+            "connection refused",
+            "nodename nor servname",
+            "failed to establish",
+        )
+    )
 
 
 def forget_sport_fetch_times():
@@ -1091,7 +1132,16 @@ def refresh_games_background(due_sports, refresh_bets):
             )
             _install_prerendered_cards(payload.get("cards") or [])
             publish_games(payload.get("games") or [])
-            mark_sports_fetched(due_sports, time.monotonic())
+            now = time.monotonic()
+            failed = set(payload.get("errors") or {})
+            mark_sports_fetched(
+                [sport for sport in due_sports if sport not in failed],
+                now,
+            )
+            schedule_sport_retry(
+                [sport for sport in due_sports if sport in failed],
+                now,
+            )
 
             sports_errors = payload.get("errors") or {}
             refreshed = ", ".join(sport.upper() for sport in due_sports)
@@ -1116,7 +1166,7 @@ def refresh_games_background(due_sports, refresh_bets):
 
     except Exception as e:
         if due_sports:
-            mark_sports_fetched(due_sports, time.monotonic())
+            schedule_sport_retry(due_sports, time.monotonic())
         print(
             "Games refresh failed; keeping previous data:",
             e,
@@ -1155,16 +1205,45 @@ def run_web_server():
 
 
 def load_initial_games():
+    """Fetch every league before the board starts scrolling.
+
+    Wi-Fi often has no DNS for a few seconds after boot. Keep trying
+    until the feeds answer, instead of treating that failure as an
+    empty slate for the next half hour.
+    """
     if get_developer_settings().get("test_games"):
-        return sample_games()
+        return sample_games(), set()
 
-    sports_results, sports_errors = fetch_all_sports()
+    deadline = time.monotonic() + STARTUP_FETCH_DEADLINE
+    games = []
+    errors = {}
+    announced = False
+    while not _dns_ready():
+        if time.monotonic() >= deadline:
+            break
+        if not announced:
+            print("Waiting for the network before loading games.")
+            announced = True
+        time.sleep(STARTUP_FETCH_PAUSE)
 
-    return combine_sports_results(
-        sports_results,
-        sports_errors=sports_errors,
-        previous_games=[],
-    )
+    while True:
+        sports_results, errors = fetch_all_sports()
+        games = combine_sports_results(
+            sports_results,
+            sports_errors=errors,
+            previous_games=[],
+        )
+        if not _feeds_unreachable(errors) or time.monotonic() >= deadline:
+            break
+        print("Score feeds are not reachable yet. Retrying.")
+        time.sleep(STARTUP_FETCH_PAUSE)
+
+    if errors:
+        failed = ", ".join(sport.upper() for sport in sorted(errors))
+        print(f"Loaded {len(games)} games. Still waiting on {failed}.")
+    else:
+        print(f"Loaded {len(games)} games.")
+    return games, set(errors)
 
 if __name__ == "__main__":
     canvas_key, scroll_columns, capture_buffer = load_panel_shift()
@@ -1249,6 +1328,7 @@ if __name__ == "__main__":
 
     start_timezone_refresh()
 
+    failed_sports = set()
     if setup_holds_display():
         publish_games([])
     else:
@@ -1258,6 +1338,12 @@ if __name__ == "__main__":
             "Display timezone: "
             f"{zone_status['effective']} ({zone_status['source']})"
         )
+        present_frame(
+            render_idle_splash(
+                DISPLAY_WIDTH,
+                MATRIX_HEIGHT,
+            )
+        )
         refresh_fantasy_avatars_on_startup()
         try:
             init_bet_store()
@@ -1265,7 +1351,8 @@ if __name__ == "__main__":
         except Exception as error:
             print("Bet tracker init deferred:", error)
 
-        publish_games(load_initial_games())
+        initial_games, failed_sports = load_initial_games()
+        publish_games(initial_games)
         try:
             refresh_open_bets()
         except Exception as error:
@@ -1308,14 +1395,21 @@ if __name__ == "__main__":
     focus_last_switch = time.monotonic()
     focus_previous_ids = ()
 
+    settings = get_settings()
     if not setup_holds_display():
-        mark_sports_fetched(SPORT_FETCHERS, time.monotonic())
+        _refresh_schedule(settings)
+        started = time.monotonic()
+        loaded = [
+            sport for sport in SPORT_FETCHERS
+            if sport not in failed_sports
+        ]
+        mark_sports_fetched(loaded, started)
+        schedule_sport_retry(failed_sports, started)
     _bets_fetched_at = time.monotonic()
     last_settings_poll = 0.0
     last_update_poll = 0.0
     update_in_progress = False
 
-    settings = get_settings()
     last_test_games = get_developer_settings(settings).get("test_games")
 
     last_brightness = None
@@ -1418,7 +1512,7 @@ if __name__ == "__main__":
         frame_delay = 1.0 / target_fps
 
         scroll_speed = float(settings.get("scroll_speed", 30.0))
-        brightness = int(settings.get("brightness", 50))
+        brightness = int(settings.get("brightness", 40))
 
         if setup_holds_display():
             note_external_frame()

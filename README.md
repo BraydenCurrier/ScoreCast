@@ -149,7 +149,7 @@ Open:
 http://<raspberry-pi-ip>:8080
 ```
 
-The first visit uses the setup password `ticker123`. GameLine Pro then asks you to create a username and password. That first account is the root user and is the only profile that can add more people later.
+The first visit asks you to create a username and password. That first account is the root user and is the only profile that can add more people later.
 
 Everything can now be configured from the web dashboard.
 

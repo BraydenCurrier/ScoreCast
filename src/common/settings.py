@@ -19,7 +19,7 @@ SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 DEFAULT_SETTINGS = {
     "timezone": "auto",
     "scroll_speed": 30.0,
-    "brightness": 70,
+    "brightness": 40,
     "refresh_interval": 30,
     "fps": 90,
     "hidden_games": [],
@@ -141,6 +141,8 @@ DEFAULT_SETTINGS = {
         "test_games": False,
         "score_slide": True,
     },
+
+    "developer_unlocked": False,
 
 }
 

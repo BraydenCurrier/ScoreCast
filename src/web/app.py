@@ -1,4 +1,5 @@
 import gzip
+import json
 import subprocess
 import threading
 import time
@@ -14,9 +15,9 @@ from common.game_ids import game_id as shared_game_id
 from common.game_ids import selected_sports_ids
 from common.settings import get_developer_settings, get_settings, update_settings
 from common.timezone import (
-    ensure_network_timezone,
     normalize_timezone_setting,
     timezone_choice_groups,
+    timezone_label,
     timezone_status,
 )
 from common.system_stats import collect_system_stats
@@ -76,7 +77,7 @@ from fantasy.api import (
     get_user_leagues,
 )
 
-from updater.releases import latest_release_info
+from updater.releases import peek_release_info
 from updater.status import (
     mark_start_requested,
     read_status,
@@ -937,7 +938,7 @@ def page_styles():
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="{font_href}" media="print" onload="this.media='all'">
     <noscript><link rel="stylesheet" href="{font_href}"></noscript>
-    <link rel="stylesheet" href="/static/app.css?v=31">
+    <link rel="stylesheet" href="/static/app.css?v=33">
     """ + """
     <script>
     (function () {
@@ -1786,6 +1787,44 @@ def home():
     return redirect("/games")
 
 
+_LOGIN_WINDOW_SECONDS = 10 * 60
+_LOGIN_LOCK_SECONDS = 5 * 60
+_LOGIN_FAILURE_LIMIT = 8
+_login_failures: dict[str, list[float]] = {}
+_login_failures_lock = threading.Lock()
+
+
+def _login_is_locked(ip: str) -> bool:
+    now = time.monotonic()
+    with _login_failures_lock:
+        recent = [
+            stamp
+            for stamp in _login_failures.get(ip, [])
+            if now - stamp < _LOGIN_WINDOW_SECONDS
+        ]
+        _login_failures[ip] = recent
+        if len(recent) < _LOGIN_FAILURE_LIMIT:
+            return False
+        return now - recent[-1] < _LOGIN_LOCK_SECONDS
+
+
+def _login_record_failure(ip: str) -> None:
+    now = time.monotonic()
+    with _login_failures_lock:
+        recent = [
+            stamp
+            for stamp in _login_failures.get(ip, [])
+            if now - stamp < _LOGIN_WINDOW_SECONDS
+        ]
+        recent.append(now)
+        _login_failures[ip] = recent
+
+
+def _login_clear(ip: str) -> None:
+    with _login_failures_lock:
+        _login_failures.pop(ip, None)
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     try:
@@ -1817,16 +1856,25 @@ def login():
     error = ""
 
     if request.method == "POST":
-        user = authenticate(
-            request.form.get("username", ""),
-            request.form.get("password", ""),
-        )
+        client_ip = request.remote_addr or ""
+        if _login_is_locked(client_ip):
+            error = (
+                "Too many sign-in attempts. "
+                "Wait a few minutes and try again."
+            )
+        else:
+            user = authenticate(
+                request.form.get("username", ""),
+                request.form.get("password", ""),
+            )
 
-        if user is not None:
-            establish_session(user)
-            return redirect("/games")
+            if user is not None:
+                _login_clear(client_ip)
+                establish_session(user)
+                return redirect("/games")
 
-        error = "Invalid username or password"
+            _login_record_failure(client_ip)
+            error = "Invalid username or password"
 
     error_html = f"<div class='error'>{escape(error)}</div>" if error else ""
 
@@ -2012,6 +2060,13 @@ def reboot_raspberry_pi():
 def restart_scorecast():
     import threading
     import time
+
+    user = current_user()
+    if not user or user.get("role") != "root":
+        return jsonify({
+            "ok": False,
+            "message": "Only the root profile can restart GameLine Pro.",
+        }), 403
 
     def restart_service():
         # Give Flask time to return the response before
@@ -6602,14 +6657,12 @@ def settings_page():
     settings = get_settings()
 
     scroll_speed = settings.get("scroll_speed", 0.4)
-    brightness = settings.get("brightness", 50)
+    brightness = settings.get("brightness", 40)
     refresh_interval = settings.get("refresh_interval", 120)
     fps = settings.get("fps", 60)
     timezone_setting = normalize_timezone_setting(
         settings.get("timezone", "auto")
     )
-    if timezone_setting == "auto":
-        ensure_network_timezone(block=True, timeout=4)
     timezone_detail = timezone_status()["detail"]
 
     user = current_user()
@@ -6617,8 +6670,9 @@ def settings_page():
     developer = get_developer_settings(settings)
     test_games_checked = "checked" if developer.get("test_games") else ""
     score_slide_checked = "checked" if developer.get("score_slide") else ""
+    developer_unlocked = bool(settings.get("developer_unlocked")) and is_root
     developer_html = ""
-    if is_root:
+    if developer_unlocked:
         developer_html = f"""
             <div class="card" id="developer">
                 <div class="card-title">Developer</div>
@@ -6726,9 +6780,8 @@ def settings_page():
                                 <div class="settings-row-title">Forget Wi-Fi</div>
                                 <div class="hint">
                                     Also drop saved networks and start the
-                                    setup hotspot. Use this to test a boxed
-                                    unit. Leave off if you only want a fresh
-                                    account on the current network.
+                                    setup hotspot. Leave off if you only want
+                                    a fresh account on the current network.
                                 </div>
                             </div>
                         </label>
@@ -6746,6 +6799,23 @@ def settings_page():
                         Reset
                     </button>
                 </div>
+                <div class="settings-row">
+                    <div class="settings-row-copy">
+                        <div class="settings-row-title">Hide developer options</div>
+                        <div class="hint">
+                            Sample games and these controls stay off
+                            until you open them again.
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        class="quiet-button"
+                        onclick="setDeveloperAccess(false)"
+                    >
+                        Hide
+                    </button>
+                </div>
+                <input type="hidden" name="developer_form" value="1">
             </div>
         """
     saved_message = ""
@@ -6759,6 +6829,79 @@ def settings_page():
         if is_root
         else ""
     )
+
+    if is_root and not developer_unlocked:
+        version_html = (
+            f'<button type="button" id="version_unlock" '
+            f'class="settings-row-value version-unlock">'
+            f'v{escape(software_version)}</button>'
+        )
+    else:
+        version_html = (
+            f'<div class="settings-row-value">'
+            f'v{escape(software_version)}</div>'
+        )
+
+    if is_root:
+        update_button_html = """
+                    <button
+                        type="button"
+                        id="update_button"
+                        class="ghost-button"
+                        onclick="startGameLineUpdate()"
+                    >
+                        Check for update
+                    </button>
+        """
+        restart_button_html = """
+                    <button
+                        type="button"
+                        id="system_restart_button"
+                        class="quiet-button"
+                        onclick="restartGameLine()"
+                    >
+                        Restart
+                    </button>
+        """
+        unlock_script = """
+        async function setDeveloperAccess(enabled) {
+            const response = await fetch("/settings/developer", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                credentials: "same-origin",
+                body: JSON.stringify({enabled: enabled})
+            });
+            if (response.ok) {
+                window.location.reload();
+            }
+        }
+        """
+    else:
+        update_button_html = ""
+        restart_button_html = ""
+        unlock_script = ""
+
+    if is_root and not developer_unlocked:
+        unlock_script += """
+        (function () {
+            var row = document.getElementById("version_unlock");
+            if (!row) {
+                return;
+            }
+            var taps = 0;
+            var last = 0;
+            row.addEventListener("click", function () {
+                var now = Date.now();
+                taps = now - last < 2000 ? taps + 1 : 1;
+                last = now;
+                if (taps < 7) {
+                    return;
+                }
+                taps = 0;
+                setDeveloperAccess(true);
+            });
+        })();
+        """
 
     return f"""
 <!DOCTYPE html>
@@ -6882,6 +7025,7 @@ def settings_page():
                         A saved timezone overrides that.
                         The Pi system timezone is not used.
                     </div>
+                    {_timezone_picker_script()}
                 </div>
             </div>
 
@@ -6892,9 +7036,7 @@ def settings_page():
                     <div class="settings-row-copy">
                         <div class="settings-row-title">Version</div>
                     </div>
-                    <div class="settings-row-value">
-                        v{escape(software_version)}
-                    </div>
+                    {version_html}
                 </div>
 
                 <div
@@ -6977,14 +7119,7 @@ def settings_page():
                         </div>
                     </div>
 
-                    <button
-                        type="button"
-                        id="update_button"
-                        class="ghost-button"
-                        onclick="startGameLineUpdate()"
-                    >
-                        Check for update
-                    </button>
+                    {update_button_html}
                 </div>
 
                 <div class="settings-row">
@@ -6999,14 +7134,7 @@ def settings_page():
                             class="hint"
                         ></div>
                     </div>
-                    <button
-                        type="button"
-                        id="system_restart_button"
-                        class="quiet-button"
-                        onclick="restartGameLine()"
-                    >
-                        Restart
-                    </button>
+                    {restart_button_html}
                 </div>
             </div>
 
@@ -7159,10 +7287,12 @@ def settings_page():
                 || "Update status unavailable."
             );
 
-            button.disabled = (
-                active
-                || updateStarting
-            );
+            if (button) {{
+                button.disabled = (
+                    active
+                    || updateStarting
+                );
+            }}
 
             const release = status.release || {{}};
             const notes = document.getElementById(
@@ -7229,13 +7359,15 @@ def settings_page():
                 window.applyUpdateBanner(status);
             }}
 
-            button.textContent = active
-                ? "Updating…"
-                : (
-                    release.update_available
-                        ? "Install update"
-                        : "Check for update"
-                );
+            if (button) {{
+                button.textContent = active
+                    ? "Updating…"
+                    : (
+                        release.update_available
+                            ? "Install update"
+                            : "Check for update"
+                    );
+            }}
 
             container.style.display = (
                 active
@@ -7865,330 +7997,234 @@ def settings_page():
         pollSettingsStatus();
         updateStatusTimer = setInterval(pollSettingsStatus, 5000);
         document.addEventListener("visibilitychange", pollSettingsStatus);
+        {unlock_script}
     </script>
 </body>
 </html>
     """
 
+def _favorite_league_key(raw):
+    league_keys = {key for key, _label in FAVORITE_LEAGUES}
+    league = str(raw or "").strip().lower()
+    if league in league_keys:
+        return league
+    return "nfl"
+
+
+def _selected_favorite_teams(league_key, submitted_teams):
+    valid_options = {
+        option.upper()
+        for option in get_favorite_team_options(league_key)
+    }
+    selected_teams = []
+    seen = set()
+    for team in submitted_teams:
+        normalized_team = str(team).strip().upper()
+        if (
+            normalized_team
+            and normalized_team in valid_options
+            and normalized_team not in seen
+        ):
+            selected_teams.append(normalized_team)
+            seen.add(normalized_team)
+    return selected_teams
+
+
 @app.route("/favorites")
 @login_required
 def favorites_page():
     settings = get_settings()
+    favorite_settings = settings.get("favorite_teams") or {}
+    if not isinstance(favorite_settings, dict):
+        favorite_settings = {}
 
-    favorite_settings = (
-        settings.get(
-            "favorite_teams",
-            {}
-        )
-    )
+    league_key = _favorite_league_key(request.values.get("league"))
+    league_label = dict(FAVORITE_LEAGUES)[league_key]
+    selected_values = favorite_settings.get(league_key, [])
+    if isinstance(selected_values, str):
+        selected_values = [selected_values]
+    selected = {
+        str(team).strip().upper()
+        for team in selected_values
+        if str(team).strip()
+    }
 
-    rows = ""
-
-    for (
-        league_key,
-        league_label
-    ) in FAVORITE_LEAGUES:
-
-        selected_values = (
-            favorite_settings.get(
-                league_key,
-                []
-            )
-        )
-
-        if isinstance(
-            selected_values,
-            str
-        ):
-            selected_values = [
-                selected_values
-            ]
-
-        selected = {
-            str(team)
-            .strip()
-            .upper()
-            for team
-            in selected_values
-            if str(team).strip()
-        }
-
-        team_options = (
-            get_favorite_team_options(
-                league_key
-            )
+    league_options = []
+    for key, label in FAVORITE_LEAGUES:
+        picked = " selected" if key == league_key else ""
+        league_options.append(
+            f'<option value="{escape(key)}"{picked}>{escape(label)}</option>'
         )
 
-        option_rows = ""
-
-        for team in team_options:
-            normalized_team = (
-                str(team)
-                .strip()
-                .upper()
+    team_rows = []
+    for team in get_favorite_team_options(league_key):
+        normalized_team = str(team).strip().upper()
+        if not normalized_team:
+            continue
+        display_name = _logo_team_label(league_key, normalized_team)
+        checked = "checked" if normalized_team in selected else ""
+        search = escape(
+            f"{display_name} {normalized_team}".lower(),
+            quote=True,
+        )
+        detail = ""
+        if display_name.upper() != normalized_team:
+            detail = (
+                f'<div class="details">{escape(normalized_team)}</div>'
             )
-
-            safe_team = escape(
-                normalized_team,
-                quote=True
-            )
-
-            checked = (
-                "checked"
-                if normalized_team
-                in selected
-                else ""
-            )
-
-            option_rows += f"""
-            <label
-                class="favorite-option"
-            >
-                <input
-                    type="checkbox"
-                    name="favorite_{league_key}"
-                    value="{safe_team}"
-                    {checked}
-                >
-
-                <span>
+        team_rows.append(
+            f"""
+            <div class="favorite-team-row" data-team-search="{search}">
+                <label class="game-row favorite-team-label">
+                    <input
+                        type="checkbox"
+                        name="favorite_{league_key}"
+                        value="{escape(normalized_team, quote=True)}"
+                        {checked}
+                    >
                     {web_team_mark(league_key, normalized_team, settings, accent=False)}
-                </span>
-            </label>
-            """
-
-        if not option_rows:
-            option_rows = """
-            <div class="empty">
-                No teams are currently
-                available for this league.
-            </div>
-            """
-
-        team_count = len(team_options)
-        grid_rows = (team_count + 2) // 3 if team_count else 1
-        league_height = 160 + grid_rows * 70
-
-        rows += f"""
-        <div class="control favorite-league" style="contain-intrinsic-size: auto {league_height}px">
-
-            <div class="control-top">
-                <label>
-                    {escape(league_label)}
+                    <div class="game-info">
+                        <div class="matchup">{escape(display_name)}</div>
+                        {detail}
+                    </div>
                 </label>
             </div>
+            """
+        )
 
-            <div class="favorite-grid">
-                {option_rows}
+    if team_rows:
+        team_list = "".join(team_rows)
+    else:
+        team_list = """
+            <div class="empty">
+                No teams are currently available for this league.
             </div>
-
-            <div
-                class="favorite-actions"
-            >
-                <button
-                    class="secondary-button"
-                    type="button"
-                    onclick="
-                        setLeagueFavorites(
-                            '{league_key}',
-                            true
-                        )
-                    "
-                >
-                    Select All
-                </button>
-
-                <button
-                    class="secondary-button"
-                    type="button"
-                    onclick="
-                        setLeagueFavorites(
-                            '{league_key}',
-                            false
-                        )
-                    "
-                >
-                    Clear
-                </button>
-            </div>
-
-            <div class="hint">
-                Every loaded game involving
-                any selected team is always
-                selected on the ticker.
-            </div>
-
-        </div>
         """
 
     return f"""
 <!DOCTYPE html>
-
 <html>
-
 <head>
-
-    <title>
-        GameLine Pro Favorites
-    </title>
-
-    <meta
-        name="viewport"
-        content="
-            width=device-width,
-            initial-scale=1,
-            viewport-fit=cover
-        "
-    >
-
+    <title>GameLine Pro Favorites</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     {page_styles()}
-
 </head>
-
 <body>
-
     <div class="page">
-
         {page_header("favorites")}
 
-        <form
-            method="POST"
-            action="/save_favorites"
-            data-autosave="1"
-        >
-
+        <form method="POST" action="/save_favorites" data-autosave="1">
             <div class="card">
-
-                <div class="card-title">
-                    Favorite Teams
+                <div class="card-title">League</div>
+                <div class="hint" style="margin-bottom: 14px;">
+                    Pick a league, then choose the teams to keep
+                    on the ticker whenever they have a game loaded.
                 </div>
-
-                <div
-                    class="hint"
-                    style="
-                        margin-bottom:
-                        16px;
-                    "
+                <select
+                    class="select-input favorite-league-select"
+                    id="favorite_league"
+                    onchange="window.location.href='/favorites?league=' + encodeURIComponent(this.value)"
                 >
-                    Select as many favorite
-                    teams as you want in
-                    each league. Whenever
-                    one of those teams has
-                    a loaded game,
-                    GameLine Pro keeps that
-                    matchup selected
-                    automatically.
-                </div>
-
-                {rows}
-
+                    {''.join(league_options)}
+                </select>
+                <input type="hidden" name="league" value="{escape(league_key, quote=True)}">
             </div>
 
+            <div class="card">
+                <div class="card-title">Teams</div>
+                <input
+                    class="search-input favorite-team-search"
+                    id="favorite_team_search"
+                    type="search"
+                    placeholder="Search {escape(league_label)} teams..."
+                    oninput="filterFavoriteTeams()"
+                >
+                <div class="favorite-select-actions">
+                    <button
+                        class="secondary-button"
+                        type="button"
+                        onclick="setLeagueFavorites(true)"
+                    >
+                        Select All
+                    </button>
+                    <button
+                        class="secondary-button"
+                        type="button"
+                        onclick="setLeagueFavorites(false)"
+                    >
+                        Clear
+                    </button>
+                </div>
+                <div id="favorite_team_list">
+                    {team_list}
+                </div>
+            </div>
         </form>
-
     </div>
-
     <script>
-
-        function setLeagueFavorites(
-            league,
-            checked
-        ) {{
-
-            document
-                .querySelectorAll(
-                    'input[name="favorite_'
-                    + league
-                    + '"]'
-                )
-                .forEach(
-                    function(input) {{
-
-                        input.checked =
-                            checked;
-
-                    }}
-                );
+        function setLeagueFavorites(checked) {{
+            document.querySelectorAll(
+                '#favorite_team_list input[type="checkbox"]'
+            ).forEach(function (input) {{
+                input.checked = checked;
+            }});
             var form = document.querySelector(
                 'form[action="/save_favorites"]'
             );
             if (window.autosaveForm && form) {{
                 window.autosaveForm(form, 0);
             }}
-
         }}
 
+        function filterFavoriteTeams() {{
+            var input = document.getElementById("favorite_team_search");
+            var search = input
+                ? input.value.toLowerCase().trim()
+                : "";
+            document.querySelectorAll(".favorite-team-row").forEach(
+                function (row) {{
+                    var teamText = row.dataset.teamSearch || "";
+                    row.style.display = teamText.includes(search)
+                        ? ""
+                        : "none";
+                }}
+            );
+        }}
     </script>
-
 </body>
-
 </html>
     """
 
-@app.route(
-    "/save_favorites",
-    methods=["POST"]
-)
+
+@app.route("/save_favorites", methods=["POST"])
 @login_required
 def save_favorites():
+    league_key = _favorite_league_key(request.form.get("league"))
+    if str(request.form.get("league", "")).strip().lower() not in {
+        key for key, _label in FAVORITE_LEAGUES
+    }:
+        return autosave_response("/favorites")
+
+    settings = get_settings()
+    current = settings.get("favorite_teams") or {}
+    if not isinstance(current, dict):
+        current = {}
 
     favorites = {}
+    for key, values in current.items():
+        if isinstance(values, str):
+            values = [values]
+        if isinstance(values, list):
+            favorites[key] = list(values)
 
-    for (
+    favorites[league_key] = _selected_favorite_teams(
         league_key,
-        _
-    ) in FAVORITE_LEAGUES:
-
-        submitted_teams = (
-            request.form.getlist(
-                f"favorite_{league_key}"
-            )
-        )
-
-        valid_options = {
-            option.upper()
-            for option
-            in get_favorite_team_options(
-                league_key
-            )
-        }
-
-        selected_teams = []
-        seen = set()
-
-        for team in submitted_teams:
-
-            normalized_team = (
-                str(team)
-                .strip()
-                .upper()
-            )
-
-            if (
-                normalized_team
-                and normalized_team
-                in valid_options
-                and normalized_team
-                not in seen
-            ):
-                selected_teams.append(
-                    normalized_team
-                )
-
-                seen.add(
-                    normalized_team
-                )
-
-        favorites[
-            league_key
-        ] = selected_teams
-
-    update_settings({
-        "favorite_teams":
-            favorites,
-    })
-
-    return autosave_response("/favorites")
+        request.form.getlist(f"favorite_{league_key}"),
+    )
+    update_settings({"favorite_teams": favorites})
+    return autosave_response(
+        url_for("favorites_page", league=league_key)
+    )
 
 @app.route("/save_games", methods=["POST"])
 @login_required
@@ -8347,7 +8383,7 @@ def save_settings():
         )
 
     user = current_user()
-    if user and user["role"] == "root":
+    if user and user["role"] == "root" and request.form.get("developer_form") == "1":
         payload["developer"] = {
             "test_games": (
                 request.form.get("developer_test_games") == "1"
@@ -8362,39 +8398,125 @@ def save_settings():
     return autosave_response("/settings")
 
 
+@app.route("/settings/developer", methods=["POST"])
+@login_required
+def set_developer_access():
+    user = current_user()
+    if not user or user.get("role") != "root":
+        return jsonify({
+            "ok": False,
+            "message": "Only the root profile can change developer options.",
+        }), 403
+
+    body = request.get_json(silent=True) or {}
+    enabled = bool(body.get("enabled"))
+    payload = {"developer_unlocked": enabled}
+    if not enabled:
+        current = get_developer_settings()
+        payload["developer"] = {
+            "test_games": False,
+            "score_slide": current.get("score_slide", True),
+        }
+    update_settings(payload)
+    return jsonify({
+        "ok": True,
+        "developer_unlocked": enabled,
+    })
+
+
 @app.route("/api/timezone")
 @login_required
 def api_timezone():
-    ensure_network_timezone(block=True, timeout=4)
     return jsonify(timezone_status())
 
 
+@lru_cache(maxsize=1)
+def _timezone_catalog_json() -> str:
+    payload = [
+        {
+            "label": group,
+            "choices": [
+                {"v": value, "l": label}
+                for value, label in choices
+            ],
+        }
+        for group, choices in timezone_choice_groups()
+    ]
+    return json.dumps(payload, separators=(",", ":"))
+
+
 def _timezone_options_html(selected):
+    """Common zones only. The full list is added after the page paints."""
     parts = []
     auto_selected = " selected" if selected == "auto" else ""
     parts.append(
         f'<option value="auto"{auto_selected}>Automatic (network)</option>'
     )
     known = {"auto"}
-    for group, choices in timezone_choice_groups():
-        parts.append(f'<optgroup label="{escape(group)}">')
-        for value, label in choices:
-            known.add(value)
-            picked = " selected" if value == selected else ""
-            parts.append(
-                f'<option value="{escape(value)}"{picked}>'
-                f"{escape(label)}</option>"
-            )
-        parts.append("</optgroup>")
+    groups = timezone_choice_groups()
+    common = groups[0][1] if groups else []
+    parts.append('<optgroup label="Common">')
+    for value, label in common:
+        known.add(value)
+        picked = " selected" if value == selected else ""
+        parts.append(
+            f'<option value="{escape(value)}"{picked}>'
+            f"{escape(label)}</option>"
+        )
+    parts.append("</optgroup>")
     if selected not in known:
-        parts.insert(
-            1,
-            (
-                f'<option value="{escape(selected)}" selected>'
-                f"{escape(selected)}</option>"
-            ),
+        parts.append(
+            f'<option value="{escape(selected)}" selected>'
+            f"{escape(timezone_label(selected))}</option>"
         )
     return "\n".join(parts)
+
+
+def _timezone_picker_script() -> str:
+    catalog = _timezone_catalog_json().replace("<", "\\u003c")
+    return f"""
+    <script type="application/json" id="timezone-catalog">{catalog}</script>
+    <script>
+    (function () {{
+      var select = document.getElementById("timezone");
+      var catalog = document.getElementById("timezone-catalog");
+      if (!select || !catalog) return;
+
+      function fill() {{
+        if (select.dataset.full === "1") return;
+        var groups;
+        try {{
+          groups = JSON.parse(catalog.textContent);
+        }} catch (error) {{
+          return;
+        }}
+        select.dataset.full = "1";
+        var current = select.value;
+        select.replaceChildren();
+        var automatic = document.createElement("option");
+        automatic.value = "auto";
+        automatic.textContent = "Automatic (network)";
+        select.appendChild(automatic);
+        groups.forEach(function (group) {{
+          var box = document.createElement("optgroup");
+          box.label = group.label;
+          (group.choices || []).forEach(function (choice) {{
+            var option = document.createElement("option");
+            option.value = choice.v;
+            option.textContent = choice.l;
+            box.appendChild(option);
+          }});
+          select.appendChild(box);
+        }});
+        select.value = current;
+        catalog.remove();
+      }}
+
+      select.addEventListener("pointerdown", fill);
+      select.addEventListener("focus", fill);
+    }})();
+    </script>
+    """
 
 
 @app.route("/api/stocks/search")
@@ -8434,7 +8556,7 @@ def api_update_status():
         )
 
     status["service_active"] = service_active
-    status["release"] = latest_release_info(
+    status["release"] = peek_release_info(
         get_scorecast_version()
     )
 
@@ -8446,6 +8568,13 @@ def api_update_status():
 )
 @login_required
 def api_start_update():
+    user = current_user()
+    if not user or user.get("role") != "root":
+        return jsonify({
+            "ok": False,
+            "message": "Only the root profile can install updates.",
+        }), 403
+
     service_state = update_service_state()
 
     if service_state == "unknown":

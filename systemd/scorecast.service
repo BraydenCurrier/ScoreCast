@@ -1,7 +1,10 @@
 [Unit]
 Description=GameLine Pro LED Sports Ticker
+# Keep ports 80 and 8080 on the home network. Do not forward them from the router.
 After=NetworkManager.service
 Wants=NetworkManager.service
+StartLimitIntervalSec=120
+StartLimitBurst=5
 
 [Service]
 Type=simple

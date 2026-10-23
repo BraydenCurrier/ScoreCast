@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
 import time
@@ -95,7 +96,7 @@ def wifi_interface() -> str:
     raise NetworkError("No Wi-Fi radio was found.")
 
 
-def hotspot_ssid() -> str:
+def _device_serial() -> str:
     serial = ""
     try:
         for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
@@ -111,8 +112,25 @@ def hotspot_ssid() -> str:
         except OSError:
             serial = "0000"
 
-    suffix = re.sub(r"[^A-Fa-f0-9]", "", serial)[-4:].upper().zfill(4)
+    return serial or "0000"
+
+
+def hotspot_ssid() -> str:
+    suffix = re.sub(r"[^A-Fa-f0-9]", "", _device_serial())[-4:].upper().zfill(4)
     return f"GameLine-{suffix}"
+
+
+def hotspot_password() -> str:
+    """WPA passphrase for the setup hotspot.
+
+    Derived from the board serial so the QR code and NetworkManager
+    always agree. The SSID only shows the last four characters, so
+    seeing the network name is not enough to join.
+    """
+    digest = hashlib.sha256(
+        f"gameline-setup:{_device_serial()}".encode("utf-8")
+    ).hexdigest()
+    return digest[:8].upper()
 
 
 def default_route_ip() -> str:
@@ -224,6 +242,10 @@ def ensure_hotspot() -> str:
         "disabled",
         "connection.autoconnect",
         "no",
+        "wifi-sec.key-mgmt",
+        "wpa-psk",
+        "wifi-sec.psk",
+        hotspot_password(),
     )
     if modified.returncode != 0:
         raise NetworkError(modified.stderr.strip() or "Could not configure the setup hotspot.")

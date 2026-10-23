@@ -20,8 +20,12 @@ def escape_wifi_text(value: str) -> str:
     )
 
 
-def wifi_payload(ssid: str) -> str:
-    return f"WIFI:T:nopass;S:{escape_wifi_text(ssid)};;"
+def wifi_payload(ssid: str, password: str = "") -> str:
+    name = escape_wifi_text(ssid)
+    secret = escape_wifi_text(password)
+    if secret:
+        return f"WIFI:T:WPA;S:{name};P:{secret};;"
+    return f"WIFI:T:nopass;S:{name};;"
 
 
 def dashboard_payload(url: str) -> str:

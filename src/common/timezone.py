@@ -12,6 +12,7 @@ import json
 import os
 import threading
 import time
+from functools import lru_cache
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
@@ -90,6 +91,7 @@ def timezone_label(name: str) -> str:
     return _COMMON_LABELS.get(name, str(name or "").replace("_", " "))
 
 
+@lru_cache(maxsize=1)
 def timezone_choice_groups() -> list[tuple[str, list[tuple[str, str]]]]:
     common_names = {name for name, _label in COMMON_TIMEZONES}
     groups: list[tuple[str, list[tuple[str, str]]]] = [
