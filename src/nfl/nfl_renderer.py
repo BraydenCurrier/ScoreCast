@@ -7,6 +7,28 @@ LOGO_SIZE = 30
 CARD_WIDTH = 70
 
 
+def _normalized_status(game):
+    status = str(getattr(game, "status", "") or "").strip().upper()
+    if status.startswith("STATUS_"):
+        status = status[len("STATUS_"):]
+    return status.replace(" ", "_").replace("-", "_")
+
+
+def is_final(game):
+    return _normalized_status(game).startswith("FINAL")
+
+
+def final_label(game):
+    status = _normalized_status(game)
+    try:
+        quarter = int(game.quarter or 0)
+    except (TypeError, ValueError):
+        quarter = 0
+    if "OVERTIME" in status or quarter > 4:
+        return "F-OT"
+    return "FINAL"
+
+
 def ordinal_down(down):
     if down == 1:
         return "1st"
@@ -147,7 +169,7 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
 
     #teams
     print_gfx_5x7(draw, game.away, 2 + offset_x, 2, away_color)
-    print_gfx_5x7(draw, game.home, 50 + offset_x, 2, home_color)
+    draw_text_right(draw, game.home, CARD_WIDTH - 2 + offset_x, 2, home_color)
 
     if(game.status == "STATUS_SCHEDULED"):
         #start time
@@ -160,6 +182,21 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
         if game.broadcast:
                     draw_broadcast_logo(image, game.broadcast, 34 + offset_x, 24, settings)
         # records
+        print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 2 + offset_x, 22, GREY)
+        print_3x5_right(draw, f"{game.home_wins}-{game.home_losses}", 66 + offset_x, 22, GREY)
+
+    elif is_final(game):
+        if game.away_score < 10:
+            print_gfx_5x7(draw, str(game.away_score), 8 + offset_x, 12, YELLOW)
+        else:
+            print_gfx_5x7(draw, str(game.away_score), 5 + offset_x, 12, YELLOW)
+
+        if game.home_score < 10:
+            draw_text_right(draw, game.home_score, 61 + offset_x, 12, YELLOW)
+        else:
+            draw_text_right(draw, game.home_score, 64 + offset_x, 12, YELLOW)
+
+        print_4x5_centered(draw, final_label(game), 35 + offset_x, 13, YELLOW)
         print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 2 + offset_x, 22, GREY)
         print_3x5_right(draw, f"{game.home_wins}-{game.home_losses}", 66 + offset_x, 22, GREY)
 
