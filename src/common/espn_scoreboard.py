@@ -75,6 +75,11 @@ def timeouts_remaining(situation: dict[str, Any] | None, side: str, cap: int = 7
         return None
     key = "homeTimeouts" if side == "home" else "awayTimeouts"
     raw = situation.get(key)
+    if isinstance(raw, dict):
+        raw = raw.get(
+            "timeoutsRemainingCurrent",
+            raw.get("timeoutsRemaining"),
+        )
     if raw in (None, ""):
         blob = situation.get("timeouts")
         if isinstance(blob, dict):

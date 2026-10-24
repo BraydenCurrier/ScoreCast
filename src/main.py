@@ -49,6 +49,7 @@ from cfb.api import get_today_games as get_live_cfb
 from cfb.cfb_renderer import render_game_strip_onto as draw_cfb_strip
 
 from nba.api import get_today_games as get_live_nba
+from nba.focus_renderer import render_nba_focus
 from nba.nba_renderer import render_game_strip_onto as draw_nba_strip
 
 from nhl.api import get_today_games as get_live_nhl
@@ -713,6 +714,7 @@ def get_focus_games(
         _id_list("nfl_game_ids")
         + _id_list("cfb_game_ids")
         + _id_list("mlb_game_ids")
+        + _id_list("nba_game_ids")
     )
 
     if not selected_ids:
@@ -728,6 +730,7 @@ def get_focus_games(
                 is_nfl_game(game)
                 or is_cfb_game(game)
                 or is_mlb_game(game)
+                or is_nba_game(game)
             )
             and game_id(game)
             in selected_set
@@ -1733,6 +1736,11 @@ if __name__ == "__main__":
                 )
             elif is_mlb_game(focus_game):
                 focus_frame = render_mlb_focus(
+                    focus_game,
+                    settings,
+                )
+            elif is_nba_game(focus_game):
+                focus_frame = render_nba_focus(
                     focus_game,
                     settings,
                 )

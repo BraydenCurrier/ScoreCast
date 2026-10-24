@@ -27,4 +27,20 @@ class BasketballGame:
     away_timeouts: int | None = None
     home_timeouts: int | None = None
     bonus: str = ""
+    away_in_bonus: bool = False
+    home_in_bonus: bool = False
     event_id: str = ""
+
+    away_leader: str = ""
+    away_leader_points: str = ""
+    home_leader: str = ""
+    home_leader_points: str = ""
+
+    last_play_text: str = ""
+    last_play_type: str = ""
+    last_play_team: str = ""
+    last_play_athlete: str = ""
+    last_play_points: int = 0
+
+    away_quarters: tuple = ()
+    home_quarters: tuple = ()

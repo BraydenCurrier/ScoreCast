@@ -66,6 +66,7 @@ class FocusPageTests(unittest.TestCase):
                 html = appmod.focus_page.__wrapped__()
 
         self.assertIn('id="focus_league"', html)
+        self.assertIn('value="nba"', html)
         self.assertIn('value="mlb" selected', html)
         self.assertIn('name="focus_mlb_game"', html)
         self.assertIn("NYY", html)
