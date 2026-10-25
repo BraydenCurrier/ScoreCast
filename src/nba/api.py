@@ -30,6 +30,18 @@ CORE_SITUATION_URL = (
     "https://sports.core.api.espn.com/v2/sports/basketball/"
     "leagues/nba/events/{event_id}/competitions/{event_id}/situation"
 )
+CORE_ROSTER_URL = (
+    "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/"
+    "events/{event_id}/competitions/{event_id}/competitors/{team_id}/roster"
+)
+CORE_PLAYER_STATS_URL = (
+    "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/"
+    "events/{event_id}/competitions/{event_id}/competitors/{team_id}/"
+    "roster/{athlete_id}/statistics/0"
+)
+
+# Last player who appeared in a play, kept when the newest play names nobody.
+_recent_players = {}
 
 
 def fetch_nba_scoreboard():
@@ -118,6 +130,90 @@ def _details_from_payload(situation, play, home, away):
     }
 
 
+def _ref_id(ref, kind):
+    match = re.search(rf"/{kind}/(\d+)", str(ref or ""))
+    return match.group(1) if match else ""
+
+
+def _leading_name(text):
+    """Player name at the start of an ESPN play description."""
+    stop = {
+        "makes", "misses", "made", "missed", "enters", "leaves",
+        "personal", "loose", "shooting", "offensive", "defensive",
+        "blocks", "steals", "steal", "turnover", "foul", "flagrant",
+        "technical", "lost", "bad", "out", "of", "vs", "alley",
+        "with", "traveling", "kicked", "double", "hanging",
+        "running", "driving", "cutting", "floating", "pullup",
+        "step", "steps", "hook", "layup", "dunk", "tip", "rebound",
+        "timeout", "full", "challenge", "review", "end", "quarter",
+        "period", "game", "second", "seconds", "ejected", "flopping",
+        "palming", "inbound", "shot", "clock", "violation", "charge",
+        "goaltending", "delay", "gains", "possession", "away", "from",
+        "play",
+    }
+    words = []
+    for word in str(text or "").split():
+        cleaned = word.strip(".,()[]{}:")
+        if not cleaned:
+            continue
+        if not words and not cleaned[0].isalpha():
+            return ""
+        if cleaned.lower() in stop or cleaned[0].isdigit():
+            break
+        words.append(cleaned)
+    return " ".join(words).strip()
+
+
+def _core_play_player(play, home, away):
+    if not isinstance(play, dict):
+        return None
+    participants = [
+        item for item in (play.get("participants") or [])
+        if isinstance(item, dict)
+    ]
+    person = next(
+        (item for item in participants if item.get("type") != "subout"),
+        None,
+    )
+    if person is None:
+        return None
+    athlete = person.get("athlete") if isinstance(person.get("athlete"), dict) else {}
+    stats = person.get("statistics") if isinstance(person.get("statistics"), dict) else {}
+    team = play.get("team") if isinstance(play.get("team"), dict) else {}
+    athlete_id = _ref_id(athlete.get("$ref"), "athletes")
+    team_id = (
+        _ref_id(stats.get("$ref"), "competitors")
+        or _ref_id(team.get("$ref"), "teams")
+    )
+    if not athlete_id or not team_id:
+        return None
+    return {
+        "athlete_id": athlete_id,
+        "team_id": team_id,
+        "name": _leading_name(play.get("text")),
+        "team": _abbr_for_team_id(team_id, home, away),
+        "text": str(play.get("text") or "").strip(),
+        "kind": str((play.get("type") or {}).get("text") or "").strip(),
+        "points": safe_int(play.get("scoreValue"), 0) or 0,
+    }
+
+
+def _recent_plays(event_id):
+    """The newest plays, oldest first. The last item is the current play."""
+    url = (
+        "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/"
+        f"events/{event_id}/competitions/{event_id}/plays?limit=8"
+    )
+    page = _fetch_json(url)
+    page_count = safe_int(page.get("pageCount"), 1) or 1
+    if page_count > 1:
+        page = _fetch_json(f"{url}&page={page_count}")
+    return [
+        item for item in (page.get("items") or [])
+        if isinstance(item, dict)
+    ]
+
+
 def _live_details(event_id, home, away):
     event_id = str(event_id or "").strip()
     if not event_id:
@@ -129,15 +225,73 @@ def _live_details(event_id, home, away):
     except (requests.RequestException, ValueError, json.JSONDecodeError):
         return {}
 
-    play = {}
-    last = situation.get("lastPlay")
-    ref = last.get("$ref") if isinstance(last, dict) else ""
-    if ref:
-        try:
-            play = _fetch_json(ref)
-        except (requests.RequestException, ValueError, json.JSONDecodeError):
-            play = {}
-    return _details_from_payload(situation, play, home, away)
+    plays = []
+    try:
+        plays = _recent_plays(event_id)
+    except (requests.RequestException, ValueError, json.JSONDecodeError):
+        plays = []
+
+    play = plays[-1] if plays else {}
+    if not play:
+        last = situation.get("lastPlay")
+        ref = last.get("$ref") if isinstance(last, dict) else ""
+        if ref:
+            try:
+                play = _fetch_json(ref)
+            except (requests.RequestException, ValueError, json.JSONDecodeError):
+                play = {}
+            if play:
+                plays = [play]
+
+    details = _details_from_payload(situation, play, home, away)
+    if play.get("text"):
+        details["latest_text"] = str(play.get("text") or "").strip()
+        details["latest_kind"] = str((play.get("type") or {}).get("text") or "").strip()
+        details["latest_points"] = safe_int(play.get("scoreValue"), 0) or 0
+    for candidate in reversed(plays):
+        player = _core_play_player(candidate, home, away)
+        if player and player.get("name"):
+            details["core_play"] = player
+            break
+    return details
+
+
+def _on_court_numbers(roster):
+    """Jerseys for the five players marked active on the floor."""
+    numbers = []
+    entries = roster.get("entries") if isinstance(roster, dict) else None
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        if not entry.get("active") or entry.get("didNotPlay"):
+            continue
+        jersey = str(entry.get("jersey") or "").strip()
+        if not jersey:
+            continue
+        numbers.append(jersey)
+        if len(numbers) == 5:
+            break
+    return tuple(numbers)
+
+
+def _competitor_team_id(competitor):
+    team = competitor.get("team") if isinstance(competitor, dict) else None
+    team = team if isinstance(team, dict) else {}
+    return str(team.get("id") or competitor.get("id") or "").strip()
+
+
+def _on_court(event_id, competitor):
+    event_id = str(event_id or "").strip()
+    team_id = _competitor_team_id(competitor)
+    if not event_id or not team_id:
+        return ()
+    try:
+        roster = _fetch_json(
+            CORE_ROSTER_URL.format(event_id=event_id, team_id=team_id)
+        )
+    except (requests.RequestException, ValueError, json.JSONDecodeError):
+        return ()
+    return _on_court_numbers(roster)
 
 
 def _bonus_flags(situation):
@@ -219,6 +373,7 @@ def _last_play(situation, home, away):
             break
 
     athlete = ""
+    athlete_id = ""
     involved = play.get("athletesInvolved") or []
     if involved and isinstance(involved[0], dict):
         athlete = str(
@@ -226,9 +381,85 @@ def _last_play(situation, home, away):
             or involved[0].get("fullName")
             or ""
         ).strip()
+        athlete_id = str(involved[0].get("id") or "").strip()
+        if not team_id:
+            team_id = str((involved[0].get("team") or {}).get("id") or "").strip()
 
     points = safe_int(play.get("scoreValue"), 0) or 0
-    return text, kind, team, athlete, points
+    return text, kind, team, athlete, points, athlete_id, team_id
+
+
+def _stat_display(categories, abbreviation):
+    wanted = str(abbreviation or "").upper()
+    for category in categories or []:
+        if not isinstance(category, dict):
+            continue
+        for stat in category.get("stats") or []:
+            if not isinstance(stat, dict):
+                continue
+            if str(stat.get("abbreviation") or "").upper() != wanted:
+                continue
+            return str(stat.get("displayValue") or "").strip()
+    return ""
+
+
+def _player_line_from_stats(payload):
+    splits = payload.get("splits") if isinstance(payload, dict) else None
+    categories = splits.get("categories") if isinstance(splits, dict) else None
+    return {
+        "points": _stat_display(categories, "PTS"),
+        "rebounds": _stat_display(categories, "REB"),
+        "assists": _stat_display(categories, "AST"),
+    }
+
+
+def _fetch_player_line(event_id, team_id, athlete_id):
+    try:
+        payload = _fetch_json(
+            CORE_PLAYER_STATS_URL.format(
+                event_id=event_id,
+                team_id=team_id,
+                athlete_id=athlete_id,
+            )
+        )
+    except (requests.RequestException, ValueError, json.JSONDecodeError):
+        return None
+    line = _player_line_from_stats(payload)
+    if not any(line.values()):
+        return None
+    return line
+
+
+def _tracked_player(event_id, athlete_id, team_id, name, team_abbr_name):
+    """Stats for the newest play that named a player."""
+    event_id = str(event_id or "").strip()
+    cached = _recent_players.get(event_id)
+    athlete_id = str(athlete_id or "").strip()
+    team_id = str(team_id or "").strip()
+    name = str(name or "").strip()
+    if athlete_id and team_id:
+        chosen = {
+            "id": athlete_id,
+            "team_id": team_id,
+            "name": name or (cached or {}).get("name", ""),
+            "team": team_abbr_name or (cached or {}).get("team", ""),
+        }
+    elif cached:
+        chosen = cached
+    else:
+        return None
+
+    line = _fetch_player_line(event_id, chosen["team_id"], chosen["id"])
+    if line is None:
+        return cached
+    chosen = {
+        **chosen,
+        "points": line["points"],
+        "rebounds": line["rebounds"],
+        "assists": line["assists"],
+    }
+    _recent_players[event_id] = chosen
+    return chosen
 
 
 def get_record(team):
@@ -285,11 +516,20 @@ def get_today_games():
             last_play_team,
             last_play_athlete,
             last_play_points,
+            last_play_athlete_id,
+            last_play_team_id,
         ) = _last_play(situation, home, away)
         away_in_bonus, home_in_bonus = _bonus_flags(situation)
         possession = possession_abbr(situation, home, away)
         away_timeouts = timeouts_remaining(situation, "away", cap=7)
         home_timeouts = timeouts_remaining(situation, "home", cap=7)
+        away_lineup = ()
+        home_lineup = ()
+        play_player = ""
+        play_player_team = ""
+        play_player_points = ""
+        play_player_rebounds = ""
+        play_player_assists = ""
 
         status = competition["status"]
         status_type = status.get("type") or {}
@@ -318,6 +558,37 @@ def get_today_games():
                 home_timeouts = details["home_timeouts"]
             away_in_bonus = away_in_bonus or details.get("away_in_bonus", False)
             home_in_bonus = home_in_bonus or details.get("home_in_bonus", False)
+            away_lineup = _on_court(event.get("id"), away)
+            home_lineup = _on_court(event.get("id"), home)
+            if details.get("latest_text"):
+                last_play_text = details["latest_text"]
+                last_play_type = details.get("latest_kind") or last_play_type
+                last_play_points = details.get("latest_points", last_play_points)
+            core_play = details.get("core_play") or {}
+            if core_play.get("athlete_id"):
+                last_play_athlete_id = core_play["athlete_id"]
+            if core_play.get("team_id"):
+                last_play_team_id = core_play["team_id"]
+            if (
+                core_play.get("name")
+                and core_play.get("text") == details.get("latest_text")
+            ):
+                last_play_athlete = core_play["name"]
+                if core_play.get("team"):
+                    last_play_team = core_play["team"]
+            tracked = _tracked_player(
+                event.get("id"),
+                last_play_athlete_id,
+                last_play_team_id,
+                core_play.get("name") or last_play_athlete,
+                core_play.get("team") or last_play_team,
+            )
+            if tracked:
+                play_player = tracked.get("name", "")
+                play_player_team = tracked.get("team", "")
+                play_player_points = tracked.get("points", "")
+                play_player_rebounds = tracked.get("rebounds", "")
+                play_player_assists = tracked.get("assists", "")
 
         if state == "pre":
             game_status = "Scheduled"
@@ -388,8 +659,15 @@ def get_today_games():
                 last_play_team=last_play_team,
                 last_play_athlete=last_play_athlete,
                 last_play_points=last_play_points,
+                play_player=play_player,
+                play_player_team=play_player_team,
+                play_player_points=play_player_points,
+                play_player_rebounds=play_player_rebounds,
+                play_player_assists=play_player_assists,
                 away_quarters=_quarter_scores(away),
                 home_quarters=_quarter_scores(home),
+                away_lineup=away_lineup,
+                home_lineup=home_lineup,
             )
         )
 

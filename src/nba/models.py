@@ -41,6 +41,13 @@ class BasketballGame:
     last_play_team: str = ""
     last_play_athlete: str = ""
     last_play_points: int = 0
+    play_player: str = ""
+    play_player_team: str = ""
+    play_player_points: str = ""
+    play_player_rebounds: str = ""
+    play_player_assists: str = ""
 
     away_quarters: tuple = ()
     home_quarters: tuple = ()
+    away_lineup: tuple = ()
+    home_lineup: tuple = ()

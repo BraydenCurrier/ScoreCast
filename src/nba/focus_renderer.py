@@ -8,10 +8,9 @@ from common.football_focus import (
     _score_slide_state,
 )
 from common.fonts import (
-    get_3x5_width,
     get_4x5_width,
     gfx_5x7_width,
-    print_3x5,
+    gfx_7x11_width,
     print_4x5,
     print_4x5_centered,
     print_gfx_5x7,
@@ -67,44 +66,121 @@ def _mix(a, b, t):
     )
 
 
+_NAME_SUFFIXES = {"JR", "SR", "II", "III", "IV", "V"}
+_MAKE_WORDS = {"make", "makes", "made"}
+_MISS_WORDS = {"miss", "misses", "missed"}
+_NUMBER_WORDS = {"three": "3", "five": "5", "eight": "8", "ten": "10"}
+
+
 def _last_name(value):
     parts = str(value or "").replace(".", " ").upper().split()
+    while parts and parts[-1] in _NAME_SUFFIXES:
+        parts.pop()
     return parts[-1] if parts else ""
+
+
+def _play_words(text):
+    words = []
+    for raw in str(text or "").split():
+        word = raw.strip(".,()[]{}:;\"'`").lower()
+        if word:
+            words.append(word)
+    return words
+
+
+def _has_word(words, *options):
+    return any(word in options for word in words)
+
+
+def _labeled(name, mark):
+    return f"{name} {mark}".strip()
+
+
+def _seconds_mark(words):
+    for index, word in enumerate(words):
+        if word not in {"second", "seconds"} or index == 0:
+            continue
+        previous = words[index - 1]
+        if previous.isdigit():
+            return f"{previous} SEC"
+        mapped = _NUMBER_WORDS.get(previous)
+        if mapped:
+            return f"{mapped} SEC"
+    return ""
+
+
+def _is_three(words):
+    if "second" in words or "seconds" in words:
+        return False
+    return _has_word(words, "three", "3pt", "3-pointer", "three-pointer")
 
 
 def play_line(text, kind, athlete):
     """Short center label for one ESPN play description."""
     kind_u = str(kind or "").upper()
-    text_l = str(text or "").lower()
+    words = _play_words(text)
     name = _last_name(athlete)
+    made = _has_word(words, *_MAKE_WORDS)
+    missed = _has_word(words, *_MISS_WORDS)
 
-    if "TIMEOUT" in kind_u or "timeout" in text_l:
-        return "TIMEOUT"
-    if "CHALLENGE" in kind_u or "challenge" in text_l:
+    if "CHALLENGE" in kind_u or _has_word(words, "challenge"):
         return "CHALLENGE"
-    if "FOUL" in kind_u or "foul" in text_l:
-        return f"{name} FOUL".strip()
-    if "FREE THROW" in kind_u or "free throw" in text_l:
-        made = "make" in text_l
-        missed = "miss" in text_l
+    if "REVIEW" in kind_u or _has_word(words, "review"):
+        return "REVIEW"
+    if "TIMEOUT" in kind_u or _has_word(words, "timeout"):
+        return "TIMEOUT"
+    if "END GAME" in kind_u or (_has_word(words, "end") and _has_word(words, "game")):
+        return "END GAME"
+    if (
+        "END PERIOD" in kind_u
+        or (_has_word(words, "end") and _has_word(words, "quarter", "period"))
+    ):
+        return "END QTR"
+    if "JUMPBALL" in kind_u.replace(" ", "") or (
+        _has_word(words, "vs") and _has_word(words, "possession")
+    ):
+        return "JUMP BALL"
+    if "SUBSTITUTION" in kind_u or _has_word(words, "enters"):
+        return _labeled(name, "IN") if name else "SUB"
+    if "EJECTION" in kind_u or _has_word(words, "ejected"):
+        return _labeled(name, "EJECTED")
+    if "DELAY" in kind_u or (_has_word(words, "delay") and _has_word(words, "game")):
+        return "DELAY"
+    if "KICK" in kind_u or _has_word(words, "kicked"):
+        return _labeled(name, "KICK")
+    if "CHARGE" in kind_u or _has_word(words, "charge"):
+        return _labeled(name, "CHARGE")
+    if "GOALTEND" in kind_u or _has_word(words, "goaltending"):
+        return _labeled(name, "GOAL")
+    if "FOUL" in kind_u or _has_word(words, "foul"):
+        return _labeled(name, "FOUL")
+    if "FREE THROW" in kind_u or (_has_word(words, "free") and _has_word(words, "throw")):
         mark = "FT" if made or not missed else "FT MISS"
-        return f"{name} {mark}".strip()
-    if "three" in text_l:
-        verb = "3PT" if "make" in text_l else "MISS 3"
-        return f"{name} {verb}".strip()
-    if "make" in text_l or "made" in text_l:
-        return f"{name} MAKE".strip()
-    if "miss" in text_l:
-        return f"{name} MISS".strip()
-    if "rebound" in text_l:
-        return f"{name} REB".strip()
-    if "steal" in text_l:
-        return f"{name} STL".strip()
-    if "turnover" in text_l:
-        return f"{name} TO".strip()
-    if "block" in text_l:
-        return f"{name} BLK".strip()
-    return name
+        return _labeled(name, mark)
+    if "TURNOVER" in kind_u or _has_word(words, "turnover"):
+        if ("SHOT" in kind_u and "CLOCK" in kind_u) or (
+            _has_word(words, "shot") and _has_word(words, "clock")
+        ):
+            return "SHOT CLOCK"
+        if "TRAVEL" in kind_u or _has_word(words, "traveling"):
+            return _labeled(name, "TRAVEL")
+        seconds = _seconds_mark(words)
+        if seconds:
+            return _labeled(name, seconds)
+        return _labeled(name, "TO")
+    if made or missed:
+        if _is_three(words):
+            return _labeled(name, "3PT" if made else "MISS 3")
+        return _labeled(name, "MAKE" if made else "MISS")
+    if _has_word(words, "steal", "steals"):
+        return _labeled(name, "STL")
+    if _has_word(words, "block", "blocks", "blocked"):
+        return _labeled(name, "BLK")
+    if _has_word(words, "rebound", "rebounds"):
+        if _has_word(words, "team"):
+            return "TEAM REB"
+        return _labeled(name, "REB")
+    return ""
 
 
 def _fit_gfx(text, max_width):
@@ -234,6 +310,7 @@ def _draw_team_column(
     show_status=False,
     in_bonus=False,
     timeouts=None,
+    lineup=(),
     game_id="",
 ):
     team = str(team).upper()
@@ -306,6 +383,23 @@ def _draw_team_column(
                 align,
             )
 
+    if lineup:
+        score_width = gfx_7x11_width(str(score)) if score is not None else 0
+        if align_right:
+            gap_left = logo_x + LOGO_SIZE + 3
+            gap_right = text_x - score_width - 3
+        else:
+            gap_left = text_x + score_width + 3
+            gap_right = logo_x - 3
+        _draw_jersey_row(
+            draw,
+            lineup,
+            gap_left,
+            gap_right,
+            16,
+            _ink_on_black(color),
+        )
+
     if show_status:
         _draw_status_row(
             draw,
@@ -328,25 +422,96 @@ def _period_text(game):
     return label or clock
 
 
-def _quarter_text(values):
-    numbers = [str(_safe_int(value)) for value in values or ()]
-    while len(numbers) > 1 and get_3x5_width(" ".join(numbers)) > CENTER_LIMIT:
-        numbers = numbers[1:]
-    return " ".join(numbers)
+def _ink_on_black(color):
+    brightness = (color[0] * 30 + color[1] * 59 + color[2] * 11) // 100
+    if brightness >= 110:
+        return color
+    return _mix(color, WHITE, 0.5)
 
 
-def _draw_quarter_rows(draw, game, y):
-    away = _quarter_text(getattr(game, "away_quarters", ()))
-    home = _quarter_text(getattr(game, "home_quarters", ()))
-    if not away and not home:
+def _jersey_numbers(numbers):
+    chosen = []
+    for number in numbers or ():
+        text = str(number).strip()
+        if text:
+            chosen.append(text)
+        if len(chosen) == 5:
+            break
+    return chosen
+
+
+def _draw_jersey_row(draw, numbers, left, right, y, color):
+    """Five jersey numbers, centered in the open gap beside the score."""
+    nums = _jersey_numbers(numbers)
+    if not nums or right - left < 8:
         return
-    cx = FOCUS_WIDTH // 2
-    if away:
-        width = get_3x5_width(away)
-        print_3x5(draw, away, cx - width // 2, y, team_color(game.away))
-    if home:
-        width = get_3x5_width(home)
-        print_3x5(draw, home, cx - width // 2, y + 6, team_color(game.home))
+
+    def span(gap):
+        return sum(get_4x5_width(number) for number in nums) + gap * (len(nums) - 1)
+
+    while len(nums) > 1 and span(2) > right - left:
+        nums.pop()
+    gap = 4 if span(4) <= right - left else 2
+    row_w = span(gap)
+    x = left + max(0, (right - left - row_w) // 2)
+    label = "LINEUP"
+    label_w = get_4x5_width(label)
+    label_x = x + (row_w - label_w) // 2
+    label_x = max(left, min(label_x, right - label_w))
+    print_4x5(draw, label, label_x, y - 6, DIM_WHITE)
+    for number in nums:
+        print_4x5(draw, number, x, y + 1, color)
+        x += get_4x5_width(number) + gap
+
+
+def _draw_play_player(draw, game):
+    """Name, then points, rebounds, and assists, on one line."""
+    name = _last_name(getattr(game, "play_player", ""))
+    if not name:
+        return
+    chunks = []
+    for value, label in (
+        (getattr(game, "play_player_points", ""), "PTS"),
+        (getattr(game, "play_player_rebounds", ""), "REB"),
+        (getattr(game, "play_player_assists", ""), "AST"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            chunks.append((text, label))
+    team = str(getattr(game, "play_player_team", "") or "")
+    name_color = _ink_on_black(team_color(team)) if team else WHITE
+    left = LEFT_PANEL_RIGHT + 2
+    right = RIGHT_PANEL_LEFT - 2
+    y = 24
+
+    def fit(text, max_width):
+        text = str(text or "").upper().strip()
+        while text and get_4x5_width(text) > max_width:
+            text = text[:-1].rstrip()
+        return text
+
+    if not chunks:
+        name = fit(name, right - left)
+        print_4x5_centered(draw, name, (left + right) // 2, y, name_color)
+        return
+    gap = 4
+    chunk_gap = 4
+    widths = [
+        get_4x5_width(value) + 2 + get_4x5_width(label)
+        for value, label in chunks
+    ]
+    stats_w = sum(widths) + chunk_gap * (len(chunks) - 1)
+    name = fit(name, max(0, right - left - gap - stats_w))
+    name_w = get_4x5_width(name) if name else 0
+    total = name_w + (gap if name else 0) + stats_w
+    x = left + max(0, (right - left - total) // 2)
+    if name:
+        print_4x5(draw, name, x, y, name_color)
+        x += name_w + gap
+    for (value, label), width in zip(chunks, widths):
+        print_4x5(draw, value, x, y, YELLOW)
+        print_4x5(draw, label, x + get_4x5_width(value) + 2, y, DIM_WHITE)
+        x += width + chunk_gap
 
 
 def _draw_scheduled(image, draw, game, settings):
@@ -399,6 +564,7 @@ def _draw_live_or_final(image, draw, game, settings):
         show_status=live,
         in_bonus=_team_in_bonus(game, str(game.away).upper(), False),
         timeouts=getattr(game, "away_timeouts", None) if live else None,
+        lineup=getattr(game, "away_lineup", ()) if live else (),
         game_id=game_id,
     )
     _draw_team_column(
@@ -414,6 +580,7 @@ def _draw_live_or_final(image, draw, game, settings):
         show_status=live,
         in_bonus=_team_in_bonus(game, str(game.home).upper(), True),
         timeouts=getattr(game, "home_timeouts", None) if live else None,
+        lineup=getattr(game, "home_lineup", ()) if live else (),
         game_id=game_id,
     )
 
@@ -434,8 +601,8 @@ def _draw_live_or_final(image, draw, game, settings):
             play_color = YELLOW if _safe_int(getattr(game, "last_play_points", 0)) > 0 else WHITE
             print_gfx_5x7_centered(draw, label, cx, 10, play_color)
 
-    quarter_y = 12 if final or is_halftime(game) else 20
-    _draw_quarter_rows(draw, game, quarter_y)
+    if live:
+        _draw_play_player(draw, game)
 
 
 def render_nba_focus(game, settings):

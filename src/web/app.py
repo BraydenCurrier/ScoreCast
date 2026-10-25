@@ -213,7 +213,7 @@ FOCUS_LEAGUE_HINTS = {
     ),
     "nba": (
         "Live games show the quarter, clock, last play, "
-        "quarter scores, timeouts, bonus, and possession."
+        "who's on the court, timeouts, bonus, and possession."
     ),
 }
 
