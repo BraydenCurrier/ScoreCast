@@ -1,8 +1,11 @@
+import hashlib
+import io
 import re
 import time
 from pathlib import Path
 
 import requests
+from PIL import Image
 
 from common.settings import get_settings, update_settings
 from fantasy.models import FantasyMatchup
@@ -391,6 +394,18 @@ def get_current_week():
         return 1
 
 
+def _user_avatar(user):
+    """Team logo first, then the Sleeper profile picture."""
+    metadata = user.get("metadata") if isinstance(user, dict) else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    for key in ("avatar", "team_avatar", "team_logo"):
+        value = str(metadata.get(key) or "").strip()
+        if value:
+            return value
+    return str((user or {}).get("avatar") or "").strip()
+
+
 def get_owner_info_map(users):
     owners = {}
 
@@ -413,10 +428,7 @@ def get_owner_info_map(users):
 
         owners[user_id] = {
             "name": str(name),
-            "avatar": (
-                user.get("avatar")
-                or ""
-            ),
+            "avatar": _user_avatar(user),
         }
 
     return owners
@@ -467,15 +479,35 @@ def team_abbreviation(
     return f"T{roster_id or 0}"[:4]
 
 
-def get_cached_avatar(avatar_id):
+_avatar_failures = {}
+AVATAR_RETRY_SECONDS = 600
+
+
+def _avatar_key(avatar_id):
+    avatar_id = str(avatar_id or "").strip()
+    if re.fullmatch(r"[A-Za-z0-9]+", avatar_id):
+        return avatar_id
     if not avatar_id:
         return ""
+    return hashlib.sha256(avatar_id.encode()).hexdigest()
 
-    path = (
-        AVATAR_CACHE
-        / f"{avatar_id}.png"
-    )
 
+def _avatar_urls(avatar_id):
+    avatar_id = str(avatar_id or "").strip()
+    if avatar_id.startswith(("http://", "https://")):
+        return [avatar_id]
+    return [
+        f"{AVATAR_URL}/{avatar_id}",
+        f"https://sleepercdn.com/avatars/{avatar_id}",
+    ]
+
+
+def get_cached_avatar(avatar_id):
+    key = _avatar_key(avatar_id)
+    if not key:
+        return ""
+
+    path = AVATAR_CACHE / f"{key}.png"
     if path.is_file():
         return str(path)
 
@@ -483,18 +515,12 @@ def get_cached_avatar(avatar_id):
 
 
 def download_avatar(avatar_id):
-    if not avatar_id:
+    key = _avatar_key(avatar_id)
+    if not key:
         return ""
 
-    path = (
-        AVATAR_CACHE
-        / f"{avatar_id}.png"
-    )
-
-    temp_path = (
-        AVATAR_CACHE
-        / f"{avatar_id}.tmp"
-    )
+    path = AVATAR_CACHE / f"{key}.png"
+    temp_path = AVATAR_CACHE / f"{key}.tmp"
 
     try:
         AVATAR_CACHE.mkdir(
@@ -502,34 +528,39 @@ def download_avatar(avatar_id):
             exist_ok=True
         )
 
-        response = _session.get(
-            f"{AVATAR_URL}/{avatar_id}",
-            timeout=HTTP_TIMEOUT,
-            verify=CA_BUNDLE,
-        )
-
-        response.raise_for_status()
+        response = None
+        last_error = None
+        for url in _avatar_urls(avatar_id):
+            try:
+                response = _session.get(
+                    url,
+                    timeout=HTTP_TIMEOUT,
+                    verify=CA_BUNDLE,
+                )
+                response.raise_for_status()
+                Image.open(io.BytesIO(response.content)).verify()
+                break
+            except Exception as exc:
+                last_error = exc
+                response = None
+        if response is None:
+            raise last_error or RuntimeError("avatar download failed")
 
         temp_path.write_bytes(
             response.content
         )
-
-        temp_path.replace(
-            path
-        )
-
+        temp_path.replace(path)
         return str(path)
 
     except Exception as exc:
         print(
             f"Fantasy avatar download failed "
-            f"({avatar_id}): {_safe_error(exc)}"
+            f"({_safe_error(exc)})"
         )
 
         if temp_path.exists():
             try:
                 temp_path.unlink()
-
             except OSError:
                 pass
 
@@ -537,6 +568,29 @@ def download_avatar(avatar_id):
             return str(path)
 
         return ""
+
+
+def ensure_avatar(avatar_id):
+    """Return a cached logo, downloading it when the startup fetch missed."""
+    cached = get_cached_avatar(avatar_id)
+    if cached:
+        return cached
+
+    key = _avatar_key(avatar_id)
+    if not key:
+        return ""
+
+    failed_at = _avatar_failures.get(key, 0)
+    if time.monotonic() - failed_at < AVATAR_RETRY_SECONDS:
+        return ""
+
+    path = download_avatar(avatar_id)
+    if path:
+        _avatar_failures.pop(key, None)
+        return path
+
+    _avatar_failures[key] = time.monotonic()
+    return ""
 
 
 def refresh_league_avatars(
@@ -561,8 +615,8 @@ def refresh_league_avatars(
     downloaded = set()
 
     for user in users:
-        avatar_id = user.get(
-            "avatar"
+        avatar_id = _user_avatar(
+            user
         )
 
         if not avatar_id:
@@ -781,7 +835,7 @@ def get_team_info(
             roster_id
         ),
 
-        "logo": get_cached_avatar(
+        "logo": ensure_avatar(
             info.get("avatar")
         ),
     }

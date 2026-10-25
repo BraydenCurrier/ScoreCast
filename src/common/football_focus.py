@@ -5,6 +5,7 @@ import time
 
 from PIL import Image, ImageDraw
 
+from common.football_play import challenge_details
 from common.fonts import (
     get_4x5_width,
     print_3x5,
@@ -1094,6 +1095,35 @@ def _last_play_detail(game):
     return f"{label} {last}"
 
 
+def _fit_center(text, limit, width_of):
+    text = str(text or "").strip()
+    while text and width_of(text) > limit:
+        text = text[:-1].rstrip()
+    return text
+
+
+def _challenge_notice(game):
+    """Clock line and detail for a coach's challenge or booth review."""
+    kind = str(getattr(game, "challenge_kind", "") or "").strip().lower()
+    team = str(getattr(game, "challenge_team", "") or "").upper().strip()
+    call = str(getattr(game, "challenge_call", "") or "").upper().strip()
+    result = str(getattr(game, "challenge_result", "") or "").upper().strip()
+    if not kind:
+        parsed = challenge_details(getattr(game, "last_play_text", ""))
+        kind = parsed["challenge_kind"]
+        team = team or parsed["challenge_team"]
+        call = call or parsed["challenge_call"]
+        result = result or parsed["challenge_result"]
+    if kind not in {"challenge", "review"}:
+        return None
+    if kind == "challenge":
+        top = f"{team} CHALLENGE".strip()
+    else:
+        top = "REVIEW"
+    detail = " ".join(part for part in (call, result) if part)
+    return top, detail
+
+
 def _draw_live_center(draw, game, style):
     cx = FOCUS_WIDTH // 2
     is_halftime = _is_halftime(game)
@@ -1110,6 +1140,7 @@ def _draw_live_center(draw, game, style):
         return
 
     reviewing = bool(getattr(game, "play_under_review", False))
+    challenge = _challenge_notice(game)
     top_text = label
     if label and clock:
         top_text = f"{label} {clock}"
@@ -1121,12 +1152,17 @@ def _draw_live_center(draw, game, style):
     down_text = _down_label(game)
     yard_text = _format_yardline(game)
     detail = ""
-    if not scoring:
+    if challenge:
+        detail = _fit_center(challenge[1], 118, get_4x5_width)
+    elif not scoring:
         detail = _last_play_detail(game)
         if detail == down_text:
             detail = ""
 
-    if reviewing:
+    if challenge:
+        notice = _fit_center(challenge[0], 120, gfx_5x7_width)
+        print_gfx_5x7_centered(draw, notice, cx, CLOCK_Y, FOUL_ORANGE)
+    elif reviewing:
         print_gfx_5x7_centered(draw, "REVIEW", cx, CLOCK_Y, FOUL_ORANGE)
     elif top_text:
         print_gfx_5x7_centered(draw, top_text, cx, CLOCK_Y, CLOCK_AMBER)
@@ -1138,7 +1174,7 @@ def _draw_live_center(draw, game, style):
 
     down_y = SCORING_Y if scoring else DOWN_Y
 
-    if scoring and play_label:
+    if scoring and play_label and not challenge:
         if flash_on:
             print_gfx_5x7_centered(draw, play_label, cx, SCORING_Y, YELLOW)
     elif down_text and yard_text:

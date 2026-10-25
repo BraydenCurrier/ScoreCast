@@ -1,5 +1,6 @@
 import gzip
 import json
+import re
 import subprocess
 import threading
 import time
@@ -74,6 +75,7 @@ from nfl.player_directory import (
 )
 from fantasy.api import (
     connect_sleeper_user,
+    get_cached_avatar,
     get_user_leagues,
 )
 
@@ -1501,7 +1503,7 @@ def _accent_from_logo_cached(logo_path, _mtime_ns):
     return best
 
 
-def web_team_mark(league_key, abbreviation, settings, rank=None, accent=True):
+def web_team_mark(league_key, abbreviation, settings, rank=None, accent=True, logo_path=None):
     raw = str(abbreviation or "").strip()
     if not raw:
         return '<span class="score-team-main"><span class="score-abbr"></span></span>'
@@ -1512,7 +1514,18 @@ def web_team_mark(league_key, abbreviation, settings, rank=None, accent=True):
     rgb = _web_team_rgb(league_key, raw)
     league = str(league_key or "").strip().lower()
 
-    if league in _LOGO_MARK_LEAGUES:
+    avatar_id = ""
+    if league == "fantasy" and logo_path:
+        avatar_id = Path(str(logo_path)).stem
+        if not re.fullmatch(r"[A-Za-z0-9]+", avatar_id):
+            avatar_id = ""
+    if avatar_id:
+        logo_html = (
+            f'<img class="score-logo" src="/fantasy-avatar/{avatar_id}" '
+            f'alt="" width="24" height="24" loading="lazy" '
+            f'decoding="async" draggable="false">'
+        )
+    elif league in _LOGO_MARK_LEAGUES:
         try:
             ident = normalize_identifier(raw)
             variants = get_logo_variants(league, ident)
@@ -2475,12 +2488,14 @@ def games():
                 getattr(game, "away", ""),
                 settings,
                 getattr(game, "away_rank", None),
+                logo_path=getattr(game, "away_logo", ""),
             )
             home_mark = web_team_mark(
                 league_key,
                 getattr(game, "home", ""),
                 settings,
                 getattr(game, "home_rank", None),
+                logo_path=getattr(game, "home_logo", ""),
             )
             scoreboard = f"""
                 <div class="score-meta">
@@ -3153,12 +3168,14 @@ def _focus_game_rows(
             getattr(game, "away", ""),
             settings,
             getattr(game, "away_rank", None),
+            logo_path=getattr(game, "away_logo", ""),
         )
         home_mark = web_team_mark(
             league_key,
             getattr(game, "home", ""),
             settings,
             getattr(game, "home_rank", None),
+            logo_path=getattr(game, "home_logo", ""),
         )
         star_html = favorite_star_html(
             is_favorite_game(game, settings)
@@ -5916,6 +5933,19 @@ def _render_logo_team_list(league, settings):
             0,
         )
     return "".join(rows), len(league_teams)
+
+
+@app.route("/fantasy-avatar/<avatar_id>")
+@login_required
+def fantasy_avatar(avatar_id):
+    if not re.fullmatch(r"[A-Za-z0-9]+", avatar_id or ""):
+        abort(404)
+    logo_path = get_cached_avatar(avatar_id)
+    if not logo_path:
+        abort(404)
+    response = send_file(logo_path, mimetype="image/png")
+    response.cache_control.max_age = 3600
+    return response
 
 
 @app.route(

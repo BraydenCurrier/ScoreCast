@@ -1,4 +1,5 @@
 import json
+import re
 import threading
 import time
 
@@ -129,11 +130,184 @@ def play_under_review(situation, last_play, status_type=None):
     blob = " ".join(str(part or "") for part in parts).lower()
     if "under review" in blob or "play review" in blob:
         return True
+    if (
+        "challenged the" in blob
+        or "coach's challenge" in blob
+        or "coaches challenge" in blob
+    ):
+        return True
+    if "reviewed the" in blob and "ruling" in blob:
+        return True
     if "reviewed" in blob:
         return False
     if "challenge" in blob and "review" in blob:
         return True
     return False
+
+
+_CHALLENGE_CALLS = (
+    ("incomplete pass", "INC"),
+    ("pass completion", "CATCH"),
+    ("short of the goal line", "GOAL LINE"),
+    ("broke the plane", "GOAL LINE"),
+    ("short of the line to gain", "LINE TO GAIN"),
+    ("not down by contact", "DOWN"),
+    ("down by contact", "DOWN"),
+    ("out of bounds", "BOUNDS"),
+    ("interception", "INT"),
+    ("fumble", "FUMBLE"),
+    ("kick touched", "KICK"),
+    ("pass interference", "PI"),
+)
+_CHALLENGE_WINDOW = 4
+
+
+def _empty_challenge():
+    return {
+        "challenge_kind": "",
+        "challenge_team": "",
+        "challenge_call": "",
+        "challenge_result": "",
+    }
+
+
+def _board_abbr(abbr):
+    abbr = str(abbr or "").upper().strip()
+    if abbr == "WAS":
+        return "WSH"
+    if abbr == "LA":
+        return "LAR"
+    return abbr
+
+
+def _challenge_phrase(text):
+    match = re.search(
+        r"(?:challenged|reviewed) the (.+?) ruling",
+        str(text or ""),
+        re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    phrase = " ".join(match.group(1).lower().split())
+    for needle, label in _CHALLENGE_CALLS:
+        if needle in phrase:
+            return label
+    words = [word for word in phrase.upper().split() if word not in {"THE", "A", "WAS"}]
+    return " ".join(words[:3])
+
+
+def _challenge_result(text, review):
+    lowered = str(text or "").lower()
+    if "reversed" in lowered:
+        return "OVERTURNED"
+    if "upheld" in lowered or "stands" in lowered:
+        return "STANDS"
+    if isinstance(review, dict) and "upheld" in review:
+        return "STANDS" if review.get("upheld") else "OVERTURNED"
+    return ""
+
+
+def _team_id(ref):
+    match = re.search(r"/teams/(\d+)", str(ref or ""))
+    return match.group(1) if match else ""
+
+
+def challenge_details(text, review=None, abbrs=None):
+    """Team, call, and result for one ESPN challenge or booth review."""
+    review = review if isinstance(review, dict) else {}
+    text = str(text or "")
+    lowered = text.lower()
+    kind = str(review.get("type") or "").strip().lower()
+    if "challenged the" in lowered or kind == "challenge":
+        kind = "challenge"
+    elif kind == "official" or (
+        "reviewed the" in lowered and "ruling" in lowered
+    ):
+        kind = "review"
+    else:
+        kind = ""
+
+    empty = _empty_challenge()
+    if not kind:
+        return empty
+
+    team = ""
+    team_ref = review.get("team")
+    ref = team_ref.get("$ref") if isinstance(team_ref, dict) else ""
+    team_id = _team_id(ref)
+    if team_id and isinstance(abbrs, dict):
+        team = _board_abbr(abbrs.get(team_id, ""))
+
+    return {
+        "challenge_kind": kind,
+        "challenge_team": team,
+        "challenge_call": _challenge_phrase(text),
+        "challenge_result": _challenge_result(text, review),
+    }
+
+
+def _abbrs_by_id(payload):
+    abbrs = {}
+    competitions = ((payload or {}).get("header") or {}).get("competitions") or []
+    competitors = []
+    if competitions and isinstance(competitions[0], dict):
+        competitors = competitions[0].get("competitors") or []
+    for side in competitors:
+        if not isinstance(side, dict):
+            continue
+        team = side.get("team") or {}
+        team_id = str(team.get("id") or "").strip()
+        abbr = _board_abbr(team.get("abbreviation"))
+        if team_id and abbr:
+            abbrs[team_id] = abbr
+    return abbrs
+
+
+def _summary_plays(payload):
+    drives = (payload or {}).get("drives") or {}
+    grouped = []
+    previous = drives.get("previous") or []
+    if isinstance(previous, dict):
+        previous = [previous]
+    grouped.extend(previous)
+    current = drives.get("current")
+    if isinstance(current, dict):
+        grouped.append(current)
+    elif isinstance(current, list):
+        grouped.extend(current)
+
+    plays = []
+    for drive in grouped:
+        if not isinstance(drive, dict):
+            continue
+        for play in drive.get("plays") or []:
+            if isinstance(play, dict):
+                plays.append(play)
+
+    def sequence(item):
+        index, play = item
+        try:
+            number = int(play.get("sequenceNumber") or 0)
+        except (TypeError, ValueError):
+            number = 0
+        return (number, index)
+
+    return [play for _, play in sorted(enumerate(plays), key=sequence)]
+
+
+def latest_challenge(payload):
+    """The newest challenge still within the last few plays."""
+    plays = _summary_plays(payload)
+    abbrs = _abbrs_by_id(payload)
+    for play in reversed(plays[-_CHALLENGE_WINDOW:]):
+        details = challenge_details(
+            play.get("text"),
+            play.get("review"),
+            abbrs,
+        )
+        if details["challenge_kind"]:
+            return details
+    return _empty_challenge()
 
 
 NFL_SUMMARY_URL = (
@@ -152,7 +326,7 @@ _box_cache = {}
 
 
 def _empty_box_totals():
-    return {
+    totals = {
         "away_rush_yards": None,
         "away_pass_yards": None,
         "away_turnovers": None,
@@ -160,6 +334,8 @@ def _empty_box_totals():
         "home_pass_yards": None,
         "home_turnovers": None,
     }
+    totals.update(_empty_challenge())
+    return totals
 
 
 def _period_number(node):
@@ -291,6 +467,8 @@ def box_totals_for(league, event_id, status_name=""):
         totals = _parse_box_totals(payload)
         if league == "cfb":
             totals["ot_drive"] = ot_drive_number(payload)
+        if "FINAL" not in str(status_name or "").upper():
+            totals.update(latest_challenge(payload))
         ttl = BOX_TTL
     except Exception:
         totals = dict(cached[1]) if cached else empty

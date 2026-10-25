@@ -54,6 +54,10 @@ class CollegeFootballGame:
     home_timeouts: int | None = None
     short_down_text: str = ""
     play_under_review: bool = False
+    challenge_kind: str = ""
+    challenge_team: str = ""
+    challenge_call: str = ""
+    challenge_result: str = ""
     away_rush_yards: int | None = None
     away_pass_yards: int | None = None
     away_turnovers: int | None = None
