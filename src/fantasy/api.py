@@ -1,8 +1,10 @@
 import hashlib
 import io
 import re
+import sys
 import time
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import requests
 from PIL import Image
@@ -514,6 +516,70 @@ def get_cached_avatar(avatar_id):
     return ""
 
 
+def _load_svg_renderer():
+    try:
+        import cairosvg
+        return cairosvg
+    except ImportError:
+        vendor = Path(__file__).resolve().parents[1] / "third_party"
+        if str(vendor) not in sys.path:
+            sys.path.insert(0, str(vendor))
+        import cairosvg
+        return cairosvg
+
+
+def _is_svg(content, content_type):
+    if "svg" in str(content_type or "").lower():
+        return True
+    head = content[:400].lstrip().lower()
+    return head.startswith(b"<svg") or head.startswith(b"<?xml") and b"<svg" in head
+
+
+def _as_png(content, content_type):
+    """Pillow cannot read ESPN's SVG logos, so those are drawn to PNG first."""
+    if _is_svg(content, content_type):
+        png = _load_svg_renderer().svg2png(
+            bytestring=content,
+            output_width=64,
+            output_height=64,
+        )
+        with Image.open(io.BytesIO(png)) as image:
+            image.load()
+        return png
+
+    with Image.open(io.BytesIO(content)) as image:
+        image.load()
+        if image.format == "PNG":
+            return content
+        output = io.BytesIO()
+        image.convert("RGBA").save(output, format="PNG")
+        return output.getvalue()
+
+
+def _espn_image_cookies():
+    try:
+        fantasy = get_settings().get("fantasy") or {}
+    except Exception:
+        return None
+    swid = unquote(str(fantasy.get("espn_swid") or "").strip())
+    secret = str(fantasy.get("espn_s2") or "").strip()
+    if not swid or not secret:
+        return None
+    return {"SWID": swid, "espn_s2": secret}
+
+
+def _image_request_kwargs(url):
+    headers = {
+        "Accept": "image/png,image/jpeg,image/webp,image/svg+xml,*/*",
+    }
+    cookies = None
+    host = (urlparse(url).hostname or "").lower()
+    if host.endswith("fantasy.espn.com"):
+        headers["Referer"] = "https://fantasy.espn.com/"
+        cookies = _espn_image_cookies()
+    return {"headers": headers, "cookies": cookies}
+
+
 def download_avatar(avatar_id):
     key = _avatar_key(avatar_id)
     if not key:
@@ -528,7 +594,7 @@ def download_avatar(avatar_id):
             exist_ok=True
         )
 
-        response = None
+        png = None
         last_error = None
         for url in _avatar_urls(avatar_id):
             try:
@@ -536,19 +602,22 @@ def download_avatar(avatar_id):
                     url,
                     timeout=HTTP_TIMEOUT,
                     verify=CA_BUNDLE,
+                    **_image_request_kwargs(url),
                 )
                 response.raise_for_status()
-                Image.open(io.BytesIO(response.content)).verify()
+                png = _as_png(
+                    response.content,
+                    response.headers.get("content-type"),
+                )
                 break
             except Exception as exc:
-                last_error = exc
-                response = None
-        if response is None:
+                host = urlparse(url).hostname or "avatar"
+                last_error = RuntimeError(f"{host}: {_safe_error(exc)}")
+                png = None
+        if png is None:
             raise last_error or RuntimeError("avatar download failed")
 
-        temp_path.write_bytes(
-            response.content
-        )
+        temp_path.write_bytes(png)
         temp_path.replace(path)
         return str(path)
 
@@ -884,7 +953,7 @@ def get_today_games():
     )
 
     if not user_id:
-        return []
+        return _with_espn_matchups([], fantasy)
 
     selected_leagues = set(
         str(league_id)
@@ -895,7 +964,7 @@ def get_today_games():
     )
 
     if not selected_leagues:
-        return []
+        return _with_espn_matchups([], fantasy)
 
     week = get_current_week()
 
@@ -1022,6 +1091,14 @@ def get_today_games():
                 )
             )
 
+            records = {
+                roster.get("roster_id"): roster.get("settings") or {}
+                for roster in rosters
+                if isinstance(roster, dict)
+            }
+            away_settings = records.get(away_roster_id) or {}
+            home_settings = records.get(home_roster_id) or {}
+
             away_info = get_team_info(
                 away_roster_id,
                 roster_owner_map,
@@ -1145,7 +1222,23 @@ def get_today_games():
                             "logo"
                         ]
                     ),
+
+                    away_wins=int(away_settings.get("wins") or 0),
+                    away_losses=int(away_settings.get("losses") or 0),
+                    away_ties=int(away_settings.get("ties") or 0),
+                    home_wins=int(home_settings.get("wins") or 0),
+                    home_losses=int(home_settings.get("losses") or 0),
+                    home_ties=int(home_settings.get("ties") or 0),
                 )
             )
 
+    return _with_espn_matchups(games, fantasy)
+
+
+def _with_espn_matchups(games, fantasy):
+    try:
+        from fantasy.espn import matchups_for_settings
+        games.extend(matchups_for_settings(fantasy))
+    except Exception as exc:
+        print(f"ESPN fantasy refresh failed: {_safe_error(exc)}")
     return games

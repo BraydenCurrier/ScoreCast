@@ -122,6 +122,10 @@ DEFAULT_SETTINGS = {
         "season": "2026",
         "refresh_interval": 120,
         "selected_leagues": [],
+        "espn_sport": "ffl",
+        "espn_leagues": [],
+        "espn_swid": "",
+        "espn_s2": "",
     },
 
     "focus_mode": {

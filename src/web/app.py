@@ -78,6 +78,7 @@ from fantasy.api import (
     get_cached_avatar,
     get_user_leagues,
 )
+from fantasy.espn import ESPN_SPORTS, EspnError, form_settings, league_name, fetch_league
 
 from updater.releases import peek_release_info
 from updater.status import (
@@ -963,7 +964,7 @@ def page_styles():
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="{font_href}" media="print" onload="this.media='all'">
     <noscript><link rel="stylesheet" href="{font_href}"></noscript>
-    <link rel="stylesheet" href="/static/app.css?v=33">
+    <link rel="stylesheet" href="/static/app.css?v=34">
     """ + """
     <script>
     (function () {
@@ -1100,7 +1101,7 @@ def page_styles():
       if (!isAutosaveForm(form) || shouldSkipAutosave(target)) {
         return;
       }
-      if (target.name === "username" || target.name === "season") {
+      if (target.name === "username" || target.name === "season" || target.name === "espn_leagues") {
         return;
       }
       if (
@@ -5518,6 +5519,24 @@ def api_alert_player_fantasy():
 
     return jsonify(payload)
 
+def _fantasy_league_row(name, detail, remove_value):
+    safe_remove = escape(remove_value, quote=True)
+    return f"""
+    <div class="game-row">
+        <div class="game-info">
+            <div class="matchup">{escape(str(name))}</div>
+            <div class="details">{escape(str(detail))}</div>
+        </div>
+        <button
+            type="button"
+            class="ghost-button league-remove"
+            data-remove="{safe_remove}"
+            onclick="this.form.elements.remove_league.value=this.getAttribute('data-remove'); window.autosaveForm(this.form, 0);"
+        >Remove</button>
+    </div>
+    """
+
+
 @app.route("/fantasy", methods=["GET", "POST"])
 @login_required
 def fantasy_page():
@@ -5535,8 +5554,37 @@ def fantasy_page():
 
         if not season.isdigit() or len(season) != 4:
             error = "Enter a valid four-digit season."
+        else:
+            try:
+                espn_fields = form_settings(request.form, fantasy, season)
+            except EspnError as exc:
+                error = str(exc)
+                espn_fields = None
+
+        if error:
+            pass
+        elif (
+            not username
+            and not (espn_fields or {}).get("espn_leagues")
+            and not fantasy.get("user_id")
+            and not request.form.get("remove_league")
+        ):
+            error = "Enter a Sleeper username or an ESPN league ID."
         elif not username:
-            error = "Enter your Sleeper username."
+            enabled = request.form.get("enabled") == "on"
+            if espn_fields.get("espn_leagues") and (
+                espn_fields.get("espn_leagues") != list(fantasy.get("espn_leagues") or [])
+                or request.form.get("check_espn") == "1"
+            ):
+                enabled = True
+            update_settings({
+                "fantasy": {
+                    "enabled": enabled,
+                    "season": season,
+                    **espn_fields,
+                }
+            })
+            return autosave_response("/fantasy", {"reload": True})
         else:
             try:
                 user = connect_sleeper_user(username)
@@ -5569,23 +5617,39 @@ def fantasy_page():
                         or season != previous_season
                     )
                     load_leagues = request.form.get("load_leagues") == "1"
+                    removed = str(request.form.get("remove_league") or "")
+                    removed_sleeper = (
+                        removed.split(":", 1)[1].strip()
+                        if removed.startswith("sleeper:")
+                        else ""
+                    )
                     posted_leagues = [
                         league_id
                         for league_id in request.form.getlist(
                             "selected_leagues"
                         )
                         if league_id in valid_league_ids
+                        and league_id != removed_sleeper
                     ]
                     # The first lookup has no checkboxes yet, so an empty
                     # post would save "no leagues" and the ticker would
                     # stay blank. Add every league on the account.
                     if account_changed or load_leagues:
-                        selected_leagues = sorted(valid_league_ids)
+                        selected_leagues = sorted(
+                            league_id
+                            for league_id in valid_league_ids
+                            if league_id != removed_sleeper
+                        )
                     else:
                         selected_leagues = posted_leagues
 
                     enabled = request.form.get("enabled") == "on"
                     if (account_changed or load_leagues) and selected_leagues:
+                        enabled = True
+                    if espn_fields.get("espn_leagues") and (
+                        espn_fields.get("espn_leagues") != list(fantasy.get("espn_leagues") or [])
+                        or request.form.get("check_espn") == "1"
+                    ):
                         enabled = True
 
                     update_settings({
@@ -5597,13 +5661,23 @@ def fantasy_page():
                             "season": season,
                             "refresh_interval": 120,
                             "selected_leagues": selected_leagues,
+                            **espn_fields,
                         }
                     })
 
+                    espn_changed = (
+                        espn_fields.get("espn_leagues") != [
+                            str(league_id)
+                            for league_id in (fantasy.get("espn_leagues") or [])
+                        ]
+                        or espn_fields.get("espn_sport") != str(fantasy.get("espn_sport") or "ffl")
+                        or request.form.get("check_espn") == "1"
+                        or bool(request.form.get("remove_league"))
+                    )
                     return autosave_response(
                         "/fantasy",
                         {
-                            "reload": account_changed or load_leagues,
+                            "reload": account_changed or load_leagues or espn_changed,
                         },
                     )
 
@@ -5629,53 +5703,64 @@ def fantasy_page():
         except Exception as exc:
             error = f"Unable to load Sleeper leagues: {exc}"
 
-    selected = {
+    selected = [
         str(league_id)
         for league_id in fantasy.get("selected_leagues", [])
+        if str(league_id).strip()
+    ]
+    sleeper_names = {
+        str(league.get("league_id")): str(league.get("name") or "Unnamed League")
+        for league in leagues
+        if league.get("league_id")
     }
 
     league_rows = ""
-
-    for league in leagues:
-        league_id = str(league.get("league_id", ""))
-        league_name = escape(
-            str(league.get("name", "Unnamed League"))
+    for league_id in selected:
+        league_rows += _fantasy_league_row(
+            sleeper_names.get(league_id, f"League {league_id}"),
+            f"Sleeper · League ID: {league_id}",
+            f"sleeper:{league_id}",
+        )
+        league_rows += (
+            f'<input type="hidden" name="selected_leagues" '
+            f'value="{escape(league_id, quote=True)}">'
         )
 
-        checked = "checked" if league_id in selected else ""
-
-        league_rows += f"""
-        <label class="game-row">
-            <input
-                type="checkbox"
-                name="selected_leagues"
-                value="{escape(league_id, quote=True)}"
-                {checked}
-            >
-
-            <div class="game-info">
-                <div class="matchup">{league_name}</div>
-                <div class="details">
-                    League ID: {escape(league_id)}
-                </div>
-            </div>
-        </label>
-        """
+    espn_sport = str(fantasy.get("espn_sport") or "ffl")
+    if espn_sport not in ESPN_SPORTS:
+        espn_sport = "ffl"
+    espn_sport_label = ESPN_SPORTS.get(espn_sport, "ESPN")
+    for league_id in fantasy.get("espn_leagues") or []:
+        league_id = str(league_id)
+        try:
+            payload = fetch_league(
+                espn_sport,
+                fantasy.get("season", "2026"),
+                league_id,
+                fantasy.get("espn_swid", ""),
+                fantasy.get("espn_s2", ""),
+            )
+            label = league_name(payload, league_id)
+            detail = f"ESPN {espn_sport_label} · League ID: {league_id}"
+        except EspnError as exc:
+            label = f"League {league_id}"
+            detail = f"ESPN {espn_sport_label} · {exc}"
+        except Exception:
+            label = f"League {league_id}"
+            detail = f"ESPN {espn_sport_label} · ESPN could not be checked."
+        league_rows += _fantasy_league_row(
+            label,
+            detail,
+            f"espn:{league_id}",
+        )
 
     if not league_rows:
-        if fantasy.get("user_id") and not error:
-            league_rows = """
-            <div class="empty">
-                No NFL leagues for this season.
-                Check the username and season, then load again.
-            </div>
-            """
-        else:
-            league_rows = """
-            <div class="empty">
-                Enter your Sleeper username and load your leagues.
-            </div>
-            """
+        league_rows = """
+        <div class="empty">
+            No fantasy leagues added yet.
+            Load Sleeper leagues, or add an ESPN league ID.
+        </div>
+        """
 
     enabled_checked = (
         "checked"
@@ -5687,6 +5772,20 @@ def fantasy_page():
         "Fantasy settings saved."
         if request.args.get("saved") == "1"
         else message
+    )
+
+    espn_login_saved = bool(
+        str(fantasy.get("espn_swid") or "").strip()
+        and str(fantasy.get("espn_s2") or "").strip()
+    )
+    sport_options = "".join(
+        f'<option value="{code}"'
+        f'{" selected" if code == espn_sport else ""}>'
+        f"{label}</option>"
+        for code, label in ESPN_SPORTS.items()
+    )
+    cookie_placeholder = (
+        "Saved" if espn_login_saved else "Only for a private league"
     )
 
     return f"""
@@ -5716,6 +5815,7 @@ def fantasy_page():
         }
 
         <form method="POST" data-autosave="1">
+            <input type="hidden" name="remove_league" value="">
             <div class="card">
                 <div class="card-title">Sleeper Account</div>
                 <div class="error" data-autosave-error hidden></div>
@@ -5732,7 +5832,7 @@ def fantasy_page():
                             Enable Fantasy
                         </div>
                         <div class="details">
-                            Show Sleeper matchups on the ticker.
+                            Show Sleeper and ESPN matchups on the ticker.
                         </div>
                     </div>
                 </label>
@@ -5765,10 +5865,61 @@ def fantasy_page():
             </div>
 
             <div class="card">
+                <div class="card-title">ESPN</div>
+                <div class="hint" style="margin-bottom: 14px;">
+                    Open the league on fantasy.espn.com.
+                    The number in the address is the league ID.
+                    Added leagues are listed below, and each one can be removed.
+                    Public leagues need nothing else.
+                    A private league also needs SWID and espn_s2
+                    from that site's cookies while you are logged in.
+                    ESPN does not offer an app login.
+                    Leave the cookie boxes blank to keep a saved pair.
+                    They are not shown again.
+                </div>
+                <select class="select-input" name="espn_sport">
+                    {sport_options}
+                </select>
+                <input
+                    class="search-input"
+                    type="text"
+                    name="espn_leagues"
+                    value=""
+                    placeholder="Add a league ID"
+                    inputmode="numeric"
+                    autocomplete="off"
+                >
+                <input
+                    class="search-input"
+                    type="password"
+                    name="espn_swid"
+                    value=""
+                    placeholder="SWID — {escape(cookie_placeholder, quote=True)}"
+                    autocomplete="off"
+                >
+                <input
+                    class="search-input"
+                    type="password"
+                    name="espn_s2"
+                    value=""
+                    placeholder="espn_s2 — {escape(cookie_placeholder, quote=True)}"
+                    autocomplete="off"
+                >
+                <input type="hidden" name="check_espn" value="">
+                <button
+                    class="save-button"
+                    type="submit"
+                    onclick="this.form.elements.check_espn.value='1'"
+                >
+                    Add ESPN league
+                </button>
+            </div>
+
+            <div class="card">
                 <div class="card-title">Leagues</div>
                 {
                     '<input type="hidden" name="leagues_listed" value="1">'
-                    if leagues else ""
+                    if fantasy.get("user_id") else ""
                 }
                 {league_rows}
             </div>

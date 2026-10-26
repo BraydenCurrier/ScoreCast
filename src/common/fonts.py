@@ -277,7 +277,7 @@ def get_3x5_width(text):
     total = 0
 
     for c in str(text):
-        if c.isdigit() or c in "-:#":
+        if c.isdigit() or c in "-:.#":
             total += 4
         elif c == " ":
             total += 3

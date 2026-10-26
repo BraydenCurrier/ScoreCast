@@ -32,3 +32,10 @@ class FantasyMatchup:
     home_abbrev: str = ""
     away_logo: str = ""
     home_logo: str = ""
+
+    away_wins: int = -1
+    away_losses: int = -1
+    away_ties: int = 0
+    home_wins: int = -1
+    home_losses: int = -1
+    home_ties: int = 0

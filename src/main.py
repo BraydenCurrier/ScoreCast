@@ -30,7 +30,10 @@ from common.ticker_scroll import (
 from updater.status import is_update_in_progress
 
 from fantasy.api import get_today_games as get_live_fantasy, refresh_fantasy_avatars_on_startup
-from fantasy.renderer import render_game_strip_onto as draw_fantasy_strip
+from fantasy.renderer import (
+    CARD_WIDTH as FANTASY_CARD_WIDTH,
+    render_game_strip_onto as draw_fantasy_strip,
+)
 
 from alerts.manager import possession_alert_manager
 from alerts.renderer import render_possession_alert
@@ -127,7 +130,6 @@ DEFAULT_CARD_WIDTH = 129
 CFB_CARD_WIDTH = 162
 NFL_CARD_WIDTH = 130
 NHL_CARD_WIDTH = 156
-FANTASY_CARD_WIDTH = 143
 STOCK_CARD_WIDTH = 120
 BET_TICKER_WIDTH = BET_CARD_WIDTH
 
