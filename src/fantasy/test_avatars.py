@@ -1,3 +1,4 @@
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,7 @@ from fantasy.api import (
     download_avatar,
     ensure_avatar,
     get_cached_avatar,
+    prefetch_avatars,
 )
 from fantasy.models import FantasyMatchup
 from common.fonts import get_4x5_width
@@ -56,6 +58,28 @@ class FantasyAvatarTests(unittest.TestCase):
             with patch("fantasy.api.AVATAR_CACHE", cache):
                 self.assertTrue(get_cached_avatar("abc123").endswith("abc123.png"))
                 self.assertTrue(ensure_avatar("abc123").endswith("abc123.png"))
+
+    def test_saved_logo_is_not_downloaded_again(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            Image.new("RGB", (8, 8), (0, 255, 0)).save(cache / "abc123.png")
+            with patch("fantasy.api.AVATAR_CACHE", cache), \
+                    patch("fantasy.api._session.get") as get:
+                path = download_avatar("abc123")
+            get.assert_not_called()
+            self.assertTrue(str(path).endswith("abc123.png"))
+
+    def test_oversized_cached_logo_is_shrunk_locally(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            Image.new("RGB", (400, 400), (12, 40, 90)).save(cache / "abc123.png")
+            with patch("fantasy.api.AVATAR_CACHE", cache), \
+                    patch("fantasy.api.SMALL_LOGO_BYTES", 0), \
+                    patch("fantasy.api._session.get") as get:
+                path = download_avatar("abc123")
+            get.assert_not_called()
+            with Image.open(path) as saved:
+                self.assertLessEqual(max(saved.size), 64)
 
     def test_rows_stay_apart_and_records_draw(self):
         game = FantasyMatchup(
@@ -175,13 +199,26 @@ class FantasyAvatarTests(unittest.TestCase):
         response = _response(svg, "image/svg+xml")
         with tempfile.TemporaryDirectory() as directory:
             with patch("fantasy.api.AVATAR_CACHE", Path(directory)), \
-                    patch("fantasy.api._session.get", return_value=response):
+                    patch("fantasy.api._fetch_avatar", return_value=response):
                 path = download_avatar(
                     "https://g.espncdn.com/lm-static/logo.svg"
                 )
             with Image.open(path) as saved:
                 self.assertEqual(saved.format, "PNG")
                 self.assertGreater(saved.size[0], 0)
+
+    def test_cold_cache_downloads_on_its_own_connection(self):
+        buffer = io.BytesIO()
+        Image.new("RGB", (4, 4), (0, 0, 255)).save(buffer, format="PNG")
+        response = _response(buffer.getvalue(), "image/png")
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("fantasy.api.AVATAR_CACHE", Path(directory)), \
+                    patch("fantasy.api._fetch_avatar", return_value=response) as fetch, \
+                    patch("fantasy.api._session.get", side_effect=AssertionError("shared session")):
+                prefetch_avatars(["alpha11", "beta22"])
+            self.assertGreaterEqual(fetch.call_count, 2)
+            self.assertTrue((Path(directory) / "alpha11.png").is_file())
+            self.assertTrue((Path(directory) / "beta22.png").is_file())
 
     def test_private_espn_logos_send_the_saved_login(self):
         with patch("fantasy.api.get_settings", return_value={

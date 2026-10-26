@@ -85,7 +85,7 @@ def _load_avatar(path):
     try:
         with Image.open(path) as source:
             avatar = source.convert("RGBA")
-            avatar.thumbnail((LOGO_SIZE, LOGO_SIZE), Image.Resampling.LANCZOS)
+            avatar.thumbnail((LOGO_SIZE, LOGO_SIZE), Image.Resampling.BOX)
             return avatar.copy()
     except Exception:
         return None

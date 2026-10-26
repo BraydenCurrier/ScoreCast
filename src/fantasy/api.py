@@ -3,6 +3,7 @@ import io
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -19,6 +20,10 @@ AVATAR_URL = "https://sleepercdn.com/avatars/thumbs"
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 HTTP_TIMEOUT = (3.05, 10)
+AVATAR_TIMEOUT = (5, 12)
+LOGO_STORE_SIZE = 64
+# A 64px logo is a few kilobytes. Full player photos saved earlier are not.
+SMALL_LOGO_BYTES = 48_000
 
 
 def _safe_error(exc: Exception) -> str:
@@ -535,25 +540,48 @@ def _is_svg(content, content_type):
     return head.startswith(b"<svg") or head.startswith(b"<?xml") and b"<svg" in head
 
 
+def _png_bytes(image):
+    """Keep only enough pixels for the 30px board slot."""
+    fitted = image.convert("RGBA")
+    if fitted.width > LOGO_STORE_SIZE or fitted.height > LOGO_STORE_SIZE:
+        fitted.thumbnail(
+            (LOGO_STORE_SIZE, LOGO_STORE_SIZE),
+            Image.Resampling.BOX,
+        )
+    output = io.BytesIO()
+    fitted.save(output, format="PNG")
+    return output.getvalue()
+
+
 def _as_png(content, content_type):
     """Pillow cannot read ESPN's SVG logos, so those are drawn to PNG first."""
     if _is_svg(content, content_type):
-        png = _load_svg_renderer().svg2png(
+        content = _load_svg_renderer().svg2png(
             bytestring=content,
-            output_width=64,
-            output_height=64,
+            output_width=LOGO_STORE_SIZE,
+            output_height=LOGO_STORE_SIZE,
         )
-        with Image.open(io.BytesIO(png)) as image:
-            image.load()
-        return png
 
     with Image.open(io.BytesIO(content)) as image:
         image.load()
-        if image.format == "PNG":
-            return content
-        output = io.BytesIO()
-        image.convert("RGBA").save(output, format="PNG")
-        return output.getvalue()
+        return _png_bytes(image)
+
+
+def _shrink_logo_file(path):
+    """Rewrite a cached full-size photo so the next open is small."""
+    try:
+        if not path.is_file() or path.stat().st_size <= SMALL_LOGO_BYTES:
+            return
+        with Image.open(path) as image:
+            image.load()
+            png = _png_bytes(image)
+        if len(png) >= path.stat().st_size:
+            return
+        temp_path = path.with_suffix(".shrink")
+        temp_path.write_bytes(png)
+        temp_path.replace(path)
+    except Exception:
+        return
 
 
 def _espn_image_cookies():
@@ -580,12 +608,36 @@ def _image_request_kwargs(url):
     return {"headers": headers, "cookies": cookies}
 
 
+def _fetch_avatar(url):
+    """One request, one connection.
+
+    The shared API session is not safe to use from the logo threads, and a
+    new board downloads every logo at once. A fresh request keeps that from
+    failing the whole set.
+    """
+    image_kwargs = _image_request_kwargs(url)
+    headers = {"User-Agent": "GameLine/1.0"}
+    headers.update(image_kwargs["headers"])
+    verify = CA_BUNDLE if Path(CA_BUNDLE).is_file() else True
+    return requests.get(
+        url,
+        headers=headers,
+        cookies=image_kwargs["cookies"],
+        timeout=AVATAR_TIMEOUT,
+        verify=verify,
+    )
+
+
 def download_avatar(avatar_id):
     key = _avatar_key(avatar_id)
     if not key:
         return ""
 
     path = AVATAR_CACHE / f"{key}.png"
+    if path.is_file():
+        _shrink_logo_file(path)
+        return str(path)
+
     temp_path = AVATAR_CACHE / f"{key}.tmp"
 
     try:
@@ -598,12 +650,7 @@ def download_avatar(avatar_id):
         last_error = None
         for url in _avatar_urls(avatar_id):
             try:
-                response = _session.get(
-                    url,
-                    timeout=HTTP_TIMEOUT,
-                    verify=CA_BUNDLE,
-                    **_image_request_kwargs(url),
-                )
+                response = _fetch_avatar(url)
                 response.raise_for_status()
                 png = _as_png(
                     response.content,
@@ -650,7 +697,7 @@ def ensure_avatar(avatar_id):
         return ""
 
     failed_at = _avatar_failures.get(key, 0)
-    if time.monotonic() - failed_at < AVATAR_RETRY_SECONDS:
+    if failed_at and time.monotonic() - failed_at < AVATAR_RETRY_SECONDS:
         return ""
 
     path = download_avatar(avatar_id)
@@ -660,6 +707,33 @@ def ensure_avatar(avatar_id):
 
     _avatar_failures[key] = time.monotonic()
     return ""
+
+
+def prefetch_avatars(avatar_ids):
+    """Download missing logos together. A saved file is not fetched again."""
+    pending = []
+    seen = set()
+    for avatar_id in avatar_ids:
+        key = _avatar_key(avatar_id)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        path = AVATAR_CACHE / f"{key}.png"
+        if path.is_file() and path.stat().st_size <= SMALL_LOGO_BYTES:
+            continue
+        failed_at = _avatar_failures.get(key, 0)
+        if (
+            not path.is_file()
+            and failed_at
+            and time.monotonic() - failed_at < AVATAR_RETRY_SECONDS
+        ):
+            continue
+        pending.append(avatar_id)
+    if not pending:
+        return
+    workers = min(4, len(pending))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(download_avatar, pending))
 
 
 def refresh_league_avatars(
@@ -681,26 +755,15 @@ def refresh_league_avatars(
         )
         return
 
-    downloaded = set()
-
+    downloaded = []
+    seen = set()
     for user in users:
-        avatar_id = _user_avatar(
-            user
-        )
-
-        if not avatar_id:
+        avatar_id = _user_avatar(user)
+        if not avatar_id or avatar_id in seen:
             continue
-
-        if avatar_id in downloaded:
-            continue
-
-        download_avatar(
-            avatar_id
-        )
-
-        downloaded.add(
-            avatar_id
-        )
+        seen.add(avatar_id)
+        downloaded.append(avatar_id)
+    prefetch_avatars(downloaded)
 
     print(
         f"Fantasy avatar cache refreshed "
@@ -1038,6 +1101,11 @@ def get_today_games():
             get_owner_info_map(
                 users
             )
+        )
+        prefetch_avatars(
+            info.get("avatar")
+            for info in owner_info_map.values()
+            if isinstance(info, dict)
         )
 
         roster_owner_map = (

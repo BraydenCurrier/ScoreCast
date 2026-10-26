@@ -4,7 +4,13 @@ import time
 
 import requests
 
-from fantasy.api import HTTP_TIMEOUT, _safe_error, ensure_avatar, team_abbreviation
+from fantasy.api import (
+    HTTP_TIMEOUT,
+    _safe_error,
+    ensure_avatar,
+    prefetch_avatars,
+    team_abbreviation,
+)
 from fantasy.models import FantasyMatchup
 
 
@@ -193,6 +199,7 @@ def matchups_from_payload(payload, sport, league_id):
     period = int((payload.get("status") or {}).get("currentMatchupPeriod") or 0)
     scoring_period = _scoring_period(sport, payload.get("status"))
     league_name = str((payload.get("settings") or {}).get("name") or "ESPN")
+    prefetch_avatars(team.get("logo") for team in teams.values())
     games = []
     for item in payload.get("schedule") or []:
         if not isinstance(item, dict):
