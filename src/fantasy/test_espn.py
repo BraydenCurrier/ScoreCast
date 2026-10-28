@@ -7,7 +7,9 @@ from fantasy.espn import (
     failure_message,
     form_settings,
     matchups_from_payload,
+    parse_cookie_paste,
     parse_league_ids,
+    parse_league_paste,
 )
 
 
@@ -77,6 +79,57 @@ class EspnTests(unittest.TestCase):
         self.assertEqual(parse_league_ids(" 101, 202 101 "), ["101", "202"])
         with self.assertRaises(EspnError):
             parse_league_ids("101 abc")
+
+    def test_league_link_sets_the_sport_and_id(self):
+        ids, sport, season = parse_league_paste(
+            "https://fantasy.espn.com/basketball/league?leagueId=55&seasonId=2026"
+        )
+        self.assertEqual(ids, ["55"])
+        self.assertEqual(sport, "fba")
+        self.assertEqual(season, "2026")
+
+    def test_cookie_header_fills_both_secrets(self):
+        swid, secret = parse_cookie_paste(
+            "SWID=%7Babc%7D; other=1; espn_s2=topsecret"
+        )
+        self.assertEqual(swid, "{abc}")
+        self.assertEqual(secret, "topsecret")
+        with self.assertRaises(EspnError):
+            parse_cookie_paste("SWID={abc}")
+
+    def test_a_league_link_and_cookie_header_can_be_saved(self):
+        with patch("fantasy.espn.fetch_league") as fetch:
+            fields = form_settings(
+                {
+                    "espn_sport": "ffl",
+                    "espn_leagues": (
+                        "https://fantasy.espn.com/football/team"
+                        "?leagueId=77&seasonId=2026"
+                    ),
+                    "espn_cookies": "SWID={abc}; espn_s2=secret",
+                    "check_espn": "1",
+                },
+                {},
+                "2026",
+            )
+        self.assertEqual(fields["espn_sport"], "ffl")
+        self.assertEqual(fields["espn_leagues"], ["77"])
+        self.assertEqual(fields["espn_swid"], "{abc}")
+        self.assertEqual(fields["espn_s2"], "secret")
+        fetch.assert_called_once()
+        with patch("fantasy.espn.fetch_league"):
+            with self.assertRaises(EspnError):
+                form_settings(
+                    {
+                        "espn_sport": "ffl",
+                        "espn_leagues": (
+                            "https://fantasy.espn.com/football/team"
+                            "?leagueId=77&seasonId=2025"
+                        ),
+                    },
+                    {},
+                    "2026",
+                )
 
     def test_private_league_message_asks_for_cookies(self):
         message = failure_message(401, ["You are not authorized to view this League."])

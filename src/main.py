@@ -103,6 +103,16 @@ SPORT_DISPLAY_ORDER = (
     "fantasy",
 )
 
+from modes.engine import mode_focus_games, mode_ticker, mode_token
+from players.cards import (
+    player_cards_revision,
+    refresh_player_cards,
+    ticker_player_cards,
+)
+from players.renderer import (
+    card_width as player_card_width,
+    render_game_strip_onto as draw_player_strip,
+)
 from bets.renderer import CARD_WIDTH as BET_CARD_WIDTH
 from bets.renderer import render_bet_notice, render_game_strip_onto as draw_bet_strip
 from bets.store import init_store as init_bet_store
@@ -486,6 +496,10 @@ def is_bet_ticket(game):
     return game.__class__.__name__ == "BetTicket"
 
 
+def is_player_card(game):
+    return game.__class__.__name__ == "PlayerCard"
+
+
 def is_mlb_game(game):
     return game.__class__.__name__ == "BaseballGame"
 
@@ -543,6 +557,9 @@ def get_sport(game):
 
     if is_bet_ticket(game):
         return "bets"
+
+    if is_player_card(game):
+        return "players"
     
     return "mlb"
 
@@ -561,6 +578,8 @@ def get_game_width(game):
         return STOCK_CARD_WIDTH
     if is_bet_ticket(game):
         return int(getattr(game, "width", None) or BET_TICKER_WIDTH)
+    if is_player_card(game):
+        return player_card_width(game)
 
     return DEFAULT_CARD_WIDTH
 
@@ -588,6 +607,8 @@ def draw_game(image, draw, game, x, settings):
         draw_fantasy_strip(image, draw, game, x, settings)
     elif is_bet_ticket(game):
         draw_bet_strip(image, draw, game, x, settings)
+    elif is_player_card(game):
+        draw_player_strip(image, draw, game, x, settings)
     else:
         draw_mlb_strip(image, draw, game, x, settings)
 
@@ -874,6 +895,16 @@ def card_settings_signature(settings):
         logo_variants_signature(settings),
         bool((settings.get("bets") or {}).get("ticker_enabled", True)),
         bets_revision(),
+        bool((settings.get("player_cards") or {}).get("enabled", True)),
+        tuple(
+            str(player.get("id") or "")
+            for player in (
+                (settings.get("player_cards") or {}).get("players") or []
+            )
+            if isinstance(player, dict)
+        ),
+        player_cards_revision(),
+        mode_token(settings),
     )
 
 
@@ -928,10 +959,22 @@ def rebuild_visible_games_if_needed(settings):
         return _visible_games_cache
 
     ordered_games = apply_saved_order(current_games, settings)
-    visible_games = get_visible_games(ordered_games, settings)
+    manual_games = get_visible_games(ordered_games, settings)
     bets_settings = settings.get("bets") or {}
+    leading_cards = []
     if bets_settings.get("ticker_enabled", True):
-        visible_games = list(ticker_tickets()) + visible_games
+        leading_cards.extend(ticker_tickets())
+    leading_cards.extend(ticker_player_cards())
+    scheduled = mode_ticker(
+        ordered_games,
+        manual_games,
+        leading_cards,
+        settings,
+    )
+    if scheduled is None:
+        visible_games = leading_cards + manual_games
+    else:
+        visible_games = scheduled
 
     live_keys = {
         card_cache_key(game, settings, logo_signature)
@@ -1169,6 +1212,11 @@ def refresh_games_background(due_sports, refresh_bets):
                 print("Bet refresh failed:", error)
             _bets_fetched_at = time.monotonic()
 
+        try:
+            refresh_player_cards()
+        except Exception as error:
+            print("Player card refresh failed:", error)
+
     except Exception as e:
         if due_sports:
             schedule_sport_retry(due_sports, time.monotonic())
@@ -1355,6 +1403,10 @@ if __name__ == "__main__":
             refresh_open_bets()
         except Exception as error:
             print("Bet tracker init deferred:", error)
+        try:
+            refresh_player_cards()
+        except Exception as error:
+            print("Player card refresh deferred:", error)
 
         initial_games, failed_sports = load_initial_games()
         publish_games(initial_games)
@@ -1657,15 +1709,42 @@ if __name__ == "__main__":
             continue
 
         focus_settings = get_focus_settings(settings)
-        if focus_settings.get("enabled"):
+        modes_enabled = bool(
+            (settings.get("modes") or {}).get("enabled")
+        )
+        if focus_settings.get("enabled") or modes_enabled:
             with _games_lock:
                 focus_source_games = _games.copy()
+        else:
+            focus_source_games = []
+
+        if modes_enabled and focus_source_games:
+            ordered_games = apply_saved_order(
+                focus_source_games,
+                settings,
+            )
+            manual_games = get_visible_games(
+                ordered_games,
+                settings,
+            )
+            bets_settings = settings.get("bets") or {}
+            leading_cards = []
+            if bets_settings.get("ticker_enabled", True):
+                leading_cards.extend(ticker_tickets())
+            leading_cards.extend(ticker_player_cards())
+            focus_games = mode_focus_games(
+                ordered_games,
+                settings,
+                manual_games=manual_games,
+                leading=leading_cards,
+            )
+        else:
+            focus_games = []
+        if not focus_games and focus_settings.get("enabled"):
             focus_games = get_focus_games(
                 focus_source_games,
                 settings,
             )
-        else:
-            focus_games = ()
 
         if focus_games:
             note_external_frame()

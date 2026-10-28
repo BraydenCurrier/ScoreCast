@@ -55,3 +55,4 @@ class FootballGame:
     home_rush_yards: int | None = None
     home_pass_yards: int | None = None
     home_turnovers: int | None = None
+    start_at: str = ""

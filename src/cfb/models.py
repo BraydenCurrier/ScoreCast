@@ -66,3 +66,4 @@ class CollegeFootballGame:
     home_turnovers: int | None = None
     # 1 or 2 while the game is in an overtime period.
     ot_drive: int | None = None
+    start_at: str = ""

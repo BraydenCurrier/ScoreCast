@@ -1,6 +1,7 @@
 import hashlib
 import re
 import time
+from urllib.parse import unquote
 
 import requests
 
@@ -36,26 +37,102 @@ class EspnError(Exception):
     pass
 
 
+_SPORT_PATHS = {
+    "football": "ffl",
+    "basketball": "fba",
+    "baseball": "flb",
+    "hockey": "fhl",
+}
+
+
 def parse_league_ids(text):
+    ids, _sport, _season = parse_league_paste(text)
+    return ids
+
+
+def parse_league_paste(text):
+    """Read a league id or a fantasy.espn.com address."""
+    raw = str(text or "").strip()
     ids = []
     seen = set()
-    for part in re.split(r"[\s,]+", str(text or "").strip()):
+    sport = None
+    season = None
+    if not raw:
+        return ids, sport, season
+
+    for match in re.finditer(r"https?://[^\s]+", raw, re.I):
+        found_sport, league_id, found_season = _league_from_url(match.group(0))
+        if found_sport:
+            sport = found_sport
+        if found_season:
+            season = found_season
+        if league_id and league_id not in seen:
+            seen.add(league_id)
+            ids.append(league_id)
+
+    leftover = re.sub(r"https?://[^\s]+", " ", raw)
+    for part in re.split(r"[\s,]+", leftover.strip()):
         if not part:
             continue
-        if not part.isdigit():
-            raise EspnError(f"{part} is not an ESPN league ID.")
-        if part not in seen:
-            seen.add(part)
-            ids.append(part)
-    return ids
+        league_match = re.search(r"(?i)leagueid=(\d+)", part)
+        if league_match:
+            league_id = league_match.group(1)
+        elif part.isdigit():
+            league_id = part
+        else:
+            raise EspnError(f"{part} is not an ESPN league link or ID.")
+        if league_id not in seen:
+            seen.add(league_id)
+            ids.append(league_id)
+    return ids, sport, season
+
+
+def _league_from_url(url):
+    lowered = url.lower()
+    sport = None
+    for name, code in _SPORT_PATHS.items():
+        if f"/{name}" in lowered:
+            sport = code
+            break
+    league_id = None
+    league_match = re.search(r"(?i)[?&]leagueid=(\d+)", url)
+    if league_match:
+        league_id = league_match.group(1)
+    season = None
+    season_match = re.search(r"(?i)[?&]seasonid=(\d{4})", url)
+    if season_match:
+        season = season_match.group(1)
+    return sport, league_id, season
+
+
+def parse_cookie_paste(text):
+    """Pull SWID and espn_s2 out of one copied cookie header."""
+    raw = str(text or "").strip()
+    if not raw:
+        return "", ""
+    found = {}
+    for match in re.finditer(
+        r"(?i)(?:^|[;\s,&])(swid|espn_s2)\s*=\s*([^;\s]+)",
+        raw,
+    ):
+        found[match.group(1).lower()] = unquote(match.group(2).strip().strip('"'))
+    swid = found.get("swid", "")
+    secret = found.get("espn_s2", "")
+    if swid and secret:
+        return swid, secret
+    raise EspnError(
+        "Paste the cookie header from fantasy.espn.com. "
+        "It needs both SWID and espn_s2."
+    )
 
 
 def failure_message(status_code, messages):
     text = " ".join(str(item) for item in (messages or [])).lower()
     if "not authorized" in text or "not visible" in text or status_code in {401, 403}:
         return (
-            "That league is private. Paste SWID and espn_s2 "
-            "from fantasy.espn.com while you are logged in."
+            "That league is private. Paste the cookie header "
+            "from fantasy.espn.com while you are logged in. "
+            "It includes espn_s2."
         )
     if status_code == 404 or "not found" in text:
         return "ESPN could not find that league for this season."
@@ -328,9 +405,22 @@ def form_settings(form, previous, season):
     sport = str(form.get("espn_sport") or "ffl").strip().lower()
     if sport not in ESPN_SPORTS:
         sport = "ffl"
-    posted_ids = parse_league_ids(form.get("espn_leagues", ""))
-    posted_swid = str(form.get("espn_swid") or "").strip()
-    posted_secret = str(form.get("espn_s2") or "").strip()
+    posted_ids, pasted_sport, pasted_season = parse_league_paste(
+        form.get("espn_leagues", "")
+    )
+    if pasted_sport:
+        sport = pasted_sport
+    if pasted_season and str(pasted_season) != str(season or "").strip():
+        raise EspnError(
+            f"That link is for {pasted_season}. "
+            f"The season box is set to {season}."
+        )
+    cookie_paste = str(form.get("espn_cookies") or "").strip()
+    if cookie_paste:
+        posted_swid, posted_secret = parse_cookie_paste(cookie_paste)
+    else:
+        posted_swid = str(form.get("espn_swid") or "").strip()
+        posted_secret = str(form.get("espn_s2") or "").strip()
     swid = posted_swid or str(previous.get("espn_swid") or "")
     secret = posted_secret or str(previous.get("espn_s2") or "")
     previous_ids = [

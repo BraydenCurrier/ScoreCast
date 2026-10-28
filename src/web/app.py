@@ -73,6 +73,7 @@ from nfl.player_directory import (
     search_players,
     watched_nfl_players,
 )
+from players.cards import MAX_PLAYER_CARDS
 from fantasy.api import (
     connect_sleeper_user,
     get_cached_avatar,
@@ -417,6 +418,7 @@ def root_required(f):
 
 def page_header(active_page="games"):
     more_pages = (
+        "modes",
         "stocks",
         "fantasy",
         "players",
@@ -438,7 +440,7 @@ def page_header(active_page="games"):
         "focus": ("Focus", "Pin one game full-width"),
         "fantasy": ("Fantasy", "Sleeper matchups on the ticker"),
         "alerts": ("Alerts", "Team takeovers and chants"),
-        "players": ("Players", "Big-play alerts for NFL stars"),
+        "players": ("Players", "Season cards and big-play alerts"),
         "bets": ("Bets", "Track slips you already placed"),
         "live": ("Live", "Open bets in progress"),
         "history": ("History", "Settled slips"),
@@ -448,6 +450,7 @@ def page_header(active_page="games"):
         "settings": ("Settings", "Display, updates, and access"),
         "favorites": ("Favorites", "Keep your teams first"),
         "profiles": ("Settings", "Display, updates, and access"),
+        "modes": ("Modes", "Schedules that change the board"),
         "stocks": ("Stocks", "Quotes that scroll on the board"),
     }
     page_title, page_lede = page_titles.get(
@@ -567,6 +570,7 @@ def page_header(active_page="games"):
                 <span class="account-name">{username}</span>
                 {root_badge}
             </div>
+            <a class="more-link" href="/modes">Modes</a>
             <a class="more-link" href="/stocks">Stocks</a>
             <a class="more-link" href="/fantasy">Fantasy</a>
             <a class="more-link" href="/players">Players</a>
@@ -1101,7 +1105,7 @@ def page_styles():
       if (!isAutosaveForm(form) || shouldSkipAutosave(target)) {
         return;
       }
-      if (target.name === "username" || target.name === "season" || target.name === "espn_leagues") {
+      if (target.name === "username" || target.name === "season" || target.name === "espn_leagues" || target.name === "espn_cookies") {
         return;
       }
       if (
@@ -2590,6 +2594,8 @@ def games():
                     Only checked games scroll on the board.
                     New games stay off until you select them.
                     Changes apply as soon as you tap a game.
+                    Modes, under More, can add and remove cards
+                    on a schedule.
                 </div>
                 <input
                     class="search-input"
@@ -3611,6 +3617,87 @@ def save_focus():
     })
 
     return autosave_response(url_for("focus_page", league=league_key))
+
+
+@app.route("/modes")
+@login_required
+def modes_page():
+    from modes.page import render_modes_page
+
+    return render_modes_page(
+        page_styles(),
+        page_header("modes"),
+        get_settings(),
+        request.args.get("error") or "",
+    )
+
+
+@app.route("/modes/toggle", methods=["POST"])
+@login_required
+def toggle_mode():
+    from modes.engine import set_mode_enabled
+
+    settings = get_settings()
+    try:
+        block = set_mode_enabled(
+            settings,
+            request.form.get("mode_id"),
+            request.form.get("enabled") == "on",
+        )
+    except ValueError as error:
+        payload = {"ok": False, "error": str(error)}
+        if is_autosave_request():
+            return jsonify(payload), 400
+        return redirect(url_for("modes_page", error=str(error)))
+
+    update_settings({"modes": block})
+    return autosave_response(url_for("modes_page"), {"reload": True})
+
+
+@app.route("/modes/save", methods=["POST"])
+@login_required
+def save_mode():
+    from modes.engine import save_custom_mode, set_mode_enabled
+
+    settings = get_settings()
+    try:
+        block = save_custom_mode(settings, {
+            "name": request.form.get("name"),
+            "days": request.form.getlist("day"),
+            "sports": request.form.getlist("sport"),
+            "phases": request.form.getlist("phase"),
+            "start": request.form.get("start"),
+            "end": request.form.get("end"),
+            "live_only_after": request.form.get("live_only_after"),
+            "focus_after": request.form.get("focus_after"),
+            "hide_outside": request.form.get("hide_outside") == "on",
+            "favorites_only": request.form.get("favorites_only") == "on",
+        })
+        block = set_mode_enabled(
+            {"modes": block},
+            block["custom"][-1]["id"],
+            True,
+        )
+    except ValueError as error:
+        return redirect(url_for("modes_page", error=str(error)))
+
+    update_settings({"modes": block})
+    return redirect(url_for("modes_page"))
+
+
+@app.route("/modes/delete", methods=["POST"])
+@login_required
+def delete_mode():
+    from modes.engine import delete_custom_mode
+
+    update_settings({
+        "modes": delete_custom_mode(
+            get_settings(),
+            request.form.get("mode_id"),
+        ),
+    })
+    return redirect(url_for("modes_page"))
+
 
 @app.route("/alerts", methods=["GET", "POST"])
 @login_required
@@ -4717,6 +4804,55 @@ def players_page():
         </div>
         """
 
+    card_settings = settings.get("player_cards") or {}
+
+    if not isinstance(card_settings, dict):
+        card_settings = {}
+
+    card_players = [
+        player
+        for player in (card_settings.get("players") or [])
+        if isinstance(player, dict)
+    ]
+    cards_enabled = "checked" if card_settings.get("enabled", True) else ""
+    player_card_rows = ""
+
+    for player in card_players:
+        player_id = escape(str(player.get("id") or ""), quote=True)
+        player_name = escape(str(player.get("name") or ""))
+        player_team = escape(str(player.get("team") or ""))
+        player_position = escape(str(player.get("position") or ""))
+        player_card_rows += f"""
+                    <div
+                        class="player-watch-row"
+                        data-player-id="{player_id}"
+                    >
+                        <input
+                            type="hidden"
+                            name="card_player_ids"
+                            value="{player_id}"
+                        >
+                        <div class="player-pos">
+                            {player_position}
+                        </div>
+                        <div class="game-info">
+                            <div class="matchup">
+                                {player_name}
+                            </div>
+                            <div class="details">
+                                {player_team} · {player_position}
+                            </div>
+                        </div>
+                        <button
+                            class="stock-remove-button"
+                            type="button"
+                            data-remove-card="{player_id}"
+                        >
+                            Remove
+                        </button>
+                    </div>
+        """
+
     player_watch_rows = ""
     watched_players = watched_nfl_players(alerts)
 
@@ -4976,6 +5112,80 @@ def players_page():
         <div class="page">
             {page_header("players")}
             {saved_message}
+
+            <form
+                method="POST"
+                action="/players/cards"
+                data-autosave="1"
+                id="player_cards_form"
+            >
+                <div class="card">
+                    <div class="card-title">
+                        Ticker cards
+                    </div>
+
+                    <label class="alert-master-row">
+                        <input
+                            type="checkbox"
+                            name="player_cards_enabled"
+                            {cards_enabled}
+                        >
+                        <div class="alert-icon">🏈</div>
+                        <div class="alert-row-text">
+                            <div class="alert-row-title">
+                                Show on the board
+                            </div>
+                            <div class="alert-row-description">
+                                A scrolling card for each player,
+                                with a headshot and the current game.
+                            </div>
+                        </div>
+                    </label>
+
+                    <p class="player-help">
+                        Search the NFL roster and add up to
+                        {MAX_PLAYER_CARDS} players. The line is
+                        the game in progress, or the last one
+                        they played. A live game is marked,
+                        and shows whether that player is on
+                        the field. Quarterbacks show
+                        passing yards, completions, touchdowns,
+                        and interceptions. Runners show rushing
+                        yards, carries, touchdowns, and catches.
+                        Receivers show receiving yards, catches,
+                        touchdowns, and targets. Kickers show
+                        field goals, extra points, and the long make.
+                    </p>
+
+                    <div class="stock-search player-search">
+                        <input
+                            class="search-input"
+                            id="card_player_search"
+                            type="search"
+                            placeholder="Add a player to the board..."
+                            autocomplete="off"
+                        >
+                        <div
+                            class="stock-search-results"
+                            id="card_player_results"
+                            hidden
+                        ></div>
+                    </div>
+
+                    <div id="player_card_list">
+                        {player_card_rows}
+                    </div>
+
+                    <div
+                        class="empty"
+                        id="player_card_empty"
+                        {"hidden" if player_card_rows else ""}
+                    >
+                        No ticker cards yet.
+                    </div>
+                    <div class="empty" data-autosave-error hidden></div>
+                </div>
+            </form>
 
             <form method="POST" data-autosave="1">
                 <div class="card">
@@ -5472,9 +5682,221 @@ def players_page():
 
             refreshEmpty();
         </script>
+        <script>
+            const cardSearch = document.getElementById("card_player_search");
+            const cardResults = document.getElementById("card_player_results");
+            const cardList = document.getElementById("player_card_list");
+            const cardEmpty = document.getElementById("player_card_empty");
+            const cardForm = document.getElementById("player_cards_form");
+            const maxCards = {MAX_PLAYER_CARDS};
+            let cardSearchTimer = null;
+
+            function cardIds() {{
+                return Array.prototype.map.call(
+                    cardList.querySelectorAll('input[name="card_player_ids"]'),
+                    function (input) {{
+                        return input.value;
+                    }}
+                );
+            }}
+
+            function refreshCardEmpty() {{
+                cardEmpty.hidden = cardIds().length > 0;
+            }}
+
+            function saveCards() {{
+                if (window.autosaveForm && cardForm) {{
+                    window.autosaveForm(cardForm, 0);
+                }}
+            }}
+
+            function addCard(player) {{
+                const playerId = String((player && player.id) || "");
+
+                if (!playerId) {{
+                    return;
+                }}
+
+                if (cardIds().indexOf(playerId) !== -1) {{
+                    cardResults.hidden = true;
+                    cardSearch.value = "";
+                    return;
+                }}
+
+                if (cardIds().length >= maxCards) {{
+                    cardResults.innerHTML = (
+                        '<div class="stock-search-empty">'
+                        + "The board holds "
+                        + maxCards
+                        + " player cards.</div>"
+                    );
+                    cardResults.hidden = false;
+                    return;
+                }}
+
+                const row = document.createElement("div");
+                row.className = "player-watch-row";
+                row.dataset.playerId = playerId;
+
+                const hidden = document.createElement("input");
+                hidden.type = "hidden";
+                hidden.name = "card_player_ids";
+                hidden.value = playerId;
+
+                const pos = document.createElement("div");
+                pos.className = "player-pos";
+                pos.textContent = player.position || "";
+
+                const info = document.createElement("div");
+                info.className = "game-info";
+                const name = document.createElement("div");
+                name.className = "matchup";
+                name.textContent = player.name || "";
+                const details = document.createElement("div");
+                details.className = "details";
+                details.textContent = (
+                    (player.team || "")
+                    + " · "
+                    + (player.position || "")
+                ).replace(/^ · /, "");
+                info.appendChild(name);
+                info.appendChild(details);
+
+                const remove = document.createElement("button");
+                remove.type = "button";
+                remove.className = "stock-remove-button";
+                remove.textContent = "Remove";
+                remove.setAttribute("data-remove-card", playerId);
+
+                row.appendChild(hidden);
+                row.appendChild(pos);
+                row.appendChild(info);
+                row.appendChild(remove);
+                cardList.appendChild(row);
+                refreshCardEmpty();
+                cardResults.hidden = true;
+                cardSearch.value = "";
+                saveCards();
+            }}
+
+            cardList.addEventListener("click", function (event) {{
+                const button = event.target.closest("[data-remove-card]");
+
+                if (!button) {{
+                    return;
+                }}
+
+                const row = cardList.querySelector(
+                    '[data-player-id="' + button.getAttribute("data-remove-card") + '"]'
+                );
+
+                if (row) {{
+                    row.remove();
+                }}
+
+                refreshCardEmpty();
+                saveCards();
+            }});
+
+            cardSearch.addEventListener("input", function () {{
+                const query = cardSearch.value.trim();
+                window.clearTimeout(cardSearchTimer);
+
+                if (query.length < 2) {{
+                    cardResults.hidden = true;
+                    cardResults.innerHTML = "";
+                    return;
+                }}
+
+                cardSearchTimer = window.setTimeout(function () {{
+                    fetch(
+                        "/api/alerts/players/search?q="
+                        + encodeURIComponent(query)
+                    )
+                        .then(function (response) {{
+                            return response.json();
+                        }})
+                        .then(function (payload) {{
+                            const results = (payload && payload.results) || [];
+                            cardResults.innerHTML = "";
+
+                            if (!results.length) {{
+                                cardResults.innerHTML = (
+                                    '<div class="stock-search-empty">'
+                                    + "No players found.</div>"
+                                );
+                                cardResults.hidden = false;
+                                return;
+                            }}
+
+                            results.forEach(function (player) {{
+                                const button = document.createElement("button");
+                                button.type = "button";
+                                button.className = "stock-search-result";
+                                const title = document.createElement("div");
+                                title.className = "matchup";
+                                title.textContent = player.name || "";
+                                const meta = document.createElement("div");
+                                meta.className = "details";
+                                meta.textContent = (
+                                    (player.team || "")
+                                    + " · "
+                                    + (player.position || "")
+                                ).replace(/^ · /, "");
+                                button.appendChild(title);
+                                button.appendChild(meta);
+                                button.addEventListener("click", function () {{
+                                    addCard(player);
+                                }});
+                                cardResults.appendChild(button);
+                            }});
+                            cardResults.hidden = false;
+                        }})
+                        .catch(function () {{
+                            cardResults.innerHTML = (
+                                '<div class="stock-search-empty">'
+                                + "Search failed.</div>"
+                            );
+                            cardResults.hidden = false;
+                        }});
+                }}, 180);
+            }});
+
+            document.addEventListener("click", function (event) {{
+                if (!event.target.closest("#player_cards_form")) {{
+                    cardResults.hidden = true;
+                }}
+            }});
+
+            refreshCardEmpty();
+        </script>
     </body>
     </html>
     """
+
+
+@app.route("/players/cards", methods=["POST"])
+@login_required
+def save_player_cards():
+    current = get_settings().get("player_cards") or {}
+    previous = []
+
+    if isinstance(current, dict):
+        previous = current.get("players") or []
+
+    players = hydrate_watched_players(
+        request.form.getlist("card_player_ids"),
+        previous=previous,
+    )[:MAX_PLAYER_CARDS]
+
+    update_settings({
+        "player_cards": {
+            "enabled": request.form.get("player_cards_enabled") == "on",
+            "players": players,
+        },
+    })
+
+    return autosave_response("/players")
 
 
 @app.route("/api/alerts/players/search")
@@ -5569,7 +5991,7 @@ def fantasy_page():
             and not fantasy.get("user_id")
             and not request.form.get("remove_league")
         ):
-            error = "Enter a Sleeper username or an ESPN league ID."
+            error = "Enter a Sleeper username or an ESPN league link."
         elif not username:
             enabled = request.form.get("enabled") == "on"
             if espn_fields.get("espn_leagues") and (
@@ -5758,7 +6180,7 @@ def fantasy_page():
         league_rows = """
         <div class="empty">
             No fantasy leagues added yet.
-            Load Sleeper leagues, or add an ESPN league ID.
+            Load Sleeper leagues, or paste an ESPN league link.
         </div>
         """
 
@@ -5867,15 +6289,15 @@ def fantasy_page():
             <div class="card">
                 <div class="card-title">ESPN</div>
                 <div class="hint" style="margin-bottom: 14px;">
-                    Open the league on fantasy.espn.com.
-                    The number in the address is the league ID.
-                    Added leagues are listed below, and each one can be removed.
-                    Public leagues need nothing else.
-                    A private league also needs SWID and espn_s2
-                    from that site's cookies while you are logged in.
+                    Paste the league address from fantasy.espn.com.
+                    The sport and league number are read from that link.
+                    The sport menu is only used when you type the number by itself.
+                    A private league also needs one cookie paste:
+                    while you are logged in, open developer tools, choose Network,
+                    select a fantasy.espn.com request, and copy its cookie header.
+                    Leave that box blank to keep a saved login.
+                    It is not shown again.
                     ESPN does not offer an app login.
-                    Leave the cookie boxes blank to keep a saved pair.
-                    They are not shown again.
                 </div>
                 <select class="select-input" name="espn_sport">
                     {sport_options}
@@ -5885,24 +6307,15 @@ def fantasy_page():
                     type="text"
                     name="espn_leagues"
                     value=""
-                    placeholder="Add a league ID"
-                    inputmode="numeric"
+                    placeholder="Paste the league link"
                     autocomplete="off"
                 >
                 <input
                     class="search-input"
                     type="password"
-                    name="espn_swid"
+                    name="espn_cookies"
                     value=""
-                    placeholder="SWID — {escape(cookie_placeholder, quote=True)}"
-                    autocomplete="off"
-                >
-                <input
-                    class="search-input"
-                    type="password"
-                    name="espn_s2"
-                    value=""
-                    placeholder="espn_s2 — {escape(cookie_placeholder, quote=True)}"
+                    placeholder="Cookie header — {escape(cookie_placeholder, quote=True)}"
                     autocomplete="off"
                 >
                 <input type="hidden" name="check_espn" value="">

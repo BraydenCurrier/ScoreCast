@@ -554,6 +554,7 @@ def get_today_games():
             event_id=str(
                 event.get("id", "")
             ),
+            start_at=str(raw_event_date or ""),
         )
 
         games.append(game)

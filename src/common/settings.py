@@ -128,6 +128,16 @@ DEFAULT_SETTINGS = {
         "espn_s2": "",
     },
 
+    "player_cards": {
+        "enabled": True,
+        "players": [],
+    },
+
+    "modes": {
+        "enabled": [],
+        "custom": [],
+    },
+
     "focus_mode": {
         "enabled": False,
         "nfl_game_ids": [],

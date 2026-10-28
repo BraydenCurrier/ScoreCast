@@ -711,6 +711,7 @@ def get_today_games(conference_groups=None):
                     event.get("id", ""),
                     status_type.get("name", ""),
                 ),
+                start_at=str(event.get("date") or ""),
             )
         )
 

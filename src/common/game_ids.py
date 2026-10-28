@@ -15,6 +15,7 @@ CLASS_TO_SPORT = {
     "FantasyMatchup": "fantasy",
     "BaseballGame": "mlb",
     "BetTicket": "bets",
+    "PlayerCard": "players",
 }
 
 
@@ -31,6 +32,9 @@ def game_id(game: Any) -> str:
 
     if class_name == "BetTicket":
         return str(getattr(game, "ticket_id", "") or "")
+
+    if class_name == "PlayerCard":
+        return f"player:{getattr(game, 'player_id', '') or ''}"
 
     sport = sport_for_game(game)
 
