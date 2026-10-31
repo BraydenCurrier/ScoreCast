@@ -64,6 +64,7 @@ jobs:
           compression: xz
           hostname: scorecast
           username: gameline
+          password: 1inepr0
           disable-first-boot-user-rename: 0
           enable-ssh: 1
           enable-cloud-init: 0
