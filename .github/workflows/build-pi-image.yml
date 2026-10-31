@@ -63,7 +63,7 @@ jobs:
           export-last-stage-only: true
           compression: xz
           hostname: scorecast
-          username: pi
+          username: gameline
           disable-first-boot-user-rename: 0
           enable-ssh: 1
           enable-cloud-init: 0
