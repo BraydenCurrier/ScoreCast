@@ -56,3 +56,5 @@ class FootballGame:
     home_pass_yards: int | None = None
     home_turnovers: int | None = None
     start_at: str = ""
+    halftime_started_at: str = ""
+    halftime_seconds: int = 0

@@ -333,6 +333,8 @@ def _empty_box_totals():
         "home_rush_yards": None,
         "home_pass_yards": None,
         "home_turnovers": None,
+        "halftime_started_at": "",
+        "halftime_seconds": 0,
     }
     totals.update(_empty_challenge())
     return totals
@@ -412,7 +414,7 @@ def _int_box_stat(stats, name):
     return None
 
 
-def _parse_box_totals(payload):
+def _parse_box_totals(payload, league="nfl"):
     totals = _empty_box_totals()
     teams = ((payload or {}).get("boxscore") or {}).get("teams") or []
     for entry in teams:
@@ -425,7 +427,72 @@ def _parse_box_totals(payload):
         totals[f"{side}_rush_yards"] = _int_box_stat(stats, "rushingYards")
         totals[f"{side}_pass_yards"] = _int_box_stat(stats, "netPassingYards")
         totals[f"{side}_turnovers"] = _int_box_stat(stats, "turnovers")
+    started, length = halftime_break(payload, league)
+    totals["halftime_started_at"] = started
+    totals["halftime_seconds"] = length
     return totals
+
+
+def halftime_break(payload, league="nfl"):
+    """When the half ended, and how long that intermission usually runs.
+
+    ESPN stamps the end-of-half play with a wallclock. NFL breaks are
+    13 minutes, except the Super Bowl, which is 30. College breaks are
+    20 minutes.
+    """
+    started = ""
+    for play in _summary_plays(payload):
+        if not _is_end_of_half(play):
+            continue
+        stamp = str(play.get("wallclock") or "").strip()
+        if stamp:
+            started = stamp
+    if not started:
+        return "", 0
+    return started, _halftime_length(payload, league)
+
+
+def _is_end_of_half(play):
+    if not isinstance(play, dict):
+        return False
+    period = play.get("period") or {}
+    try:
+        number = int(period.get("number"))
+    except (TypeError, ValueError):
+        return False
+    if number != 2:
+        return False
+    kind = play.get("type") or {}
+    label = str(kind.get("text") if isinstance(kind, dict) else kind or "")
+    text = str(play.get("text") or "").strip().upper()
+    return label.strip().lower() == "end of half" or text.startswith("END QUARTER 2")
+
+
+def _halftime_length(payload, league="nfl"):
+    if str(league or "").lower() == "cfb":
+        return 20 * 60
+    if _is_super_bowl(payload):
+        return 30 * 60
+    return 13 * 60
+
+
+def _is_super_bowl(payload):
+    """ESPN numbers the Super Bowl as postseason week 5."""
+    header = (payload or {}).get("header") or {}
+    season = header.get("season") or {}
+    try:
+        kind = int(season.get("type") or 0)
+    except (TypeError, ValueError):
+        kind = 0
+    if kind != 3:
+        return False
+    week = header.get("week")
+    if isinstance(week, dict):
+        week = week.get("number")
+    try:
+        return int(week) == 5
+    except (TypeError, ValueError):
+        return False
 
 
 def _wants_box_totals(status_name):
@@ -464,7 +531,7 @@ def box_totals_for(league, event_id, status_name=""):
             BOX_TIMEOUT,
         )
         payload = json.loads(body)
-        totals = _parse_box_totals(payload)
+        totals = _parse_box_totals(payload, league)
         if league == "cfb":
             totals["ot_drive"] = ot_drive_number(payload)
         if "FINAL" not in str(status_name or "").upper():

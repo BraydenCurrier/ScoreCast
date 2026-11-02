@@ -13,24 +13,18 @@ from common.settings import get_settings
 
 MAX_PLAYER_CARDS = 12
 HEAD_DIR = Path("/tmp/scorecast-player-heads")
-OVERVIEW_URL = (
-    "https://site.web.api.espn.com/apis/common/v3/sports/"
-    "football/nfl/athletes/{espn_id}/overview"
-)
-HEADSHOT_URL = (
-    "https://a.espncdn.com/i/headshots/nfl/players/full/{espn_id}.png"
-)
 SEARCH_URL = (
     "https://site.web.api.espn.com/apis/common/v3/search"
-    "?query={query}&limit=5&type=player"
+    "?query={query}&limit={limit}&type=player"
 )
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 STATS_OK_SECONDS = 60
 LIVE_REFRESH_SECONDS = 20
-SUMMARY_URL = (
-    "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
-    "summary?event={event_id}"
-)
+COLLEGE_POSITIONS = {"QB", "RB", "WR", "TE", "K"}
+FEEDS = {
+    "nfl": "nfl",
+    "cfb": "college-football",
+}
 STATS_FAIL_SECONDS = 120
 REQUEST_TIMEOUT = (4, 8)
 
@@ -110,6 +104,7 @@ def ticker_player_cards():
             first=player.get("first"),
             last=player.get("last"),
             espn_id=saved.get("espn_id") or player.get("espn_id"),
+            league=_player_league(player),
             stats=saved.get("stats") or (),
             headshot=saved.get("headshot") or "",
             opponent=saved.get("opponent") or "",
@@ -256,7 +251,7 @@ def refresh_player_cards():
             _revision += 1
 
 
-def game_context(payload, team="", position=""):
+def game_context(payload, team="", position="", league="nfl"):
     event = _overview_event(payload)
     state = _event_state(event)
     on_field = ""
@@ -265,7 +260,7 @@ def game_context(payload, team="", position=""):
         on_field = field_status(
             position,
             team,
-            _possession(str(event.get("id") or "")),
+            _possession(str(event.get("id") or ""), league),
         )
 
     return state, on_field
@@ -325,9 +320,11 @@ def field_status(position, team, possession):
     return ""
 
 
-def _possession(event_id):
-    summary = _game_summary(event_id)
+def _possession(event_id, league="nfl"):
+    return _possession_map(_game_summary(event_id, league))
 
+
+def _possession_map(summary):
     if not isinstance(summary, dict):
         return None
 
@@ -350,22 +347,23 @@ def _possession(event_id):
     return found or None
 
 
-def _game_summary(event_id):
+def _game_summary(event_id, league="nfl"):
     event_id = _digits(event_id)
 
     if not event_id:
         return None
 
     now = time.monotonic()
+    cache_key = (_feed(league), event_id)
 
     with _summary_lock:
-        cached = _summaries.get(event_id)
+        cached = _summaries.get(cache_key)
         if cached and now - cached[0] < LIVE_REFRESH_SECONDS:
             return cached[1]
 
     try:
         response = requests.get(
-            SUMMARY_URL.format(event_id=event_id),
+            _summary_url(event_id, league),
             headers={
                 "User-Agent": "GameLine/1.0",
                 "Accept": "application/json",
@@ -380,7 +378,7 @@ def _game_summary(event_id):
         return None
 
     with _summary_lock:
-        _summaries[event_id] = (time.monotonic(), payload)
+        _summaries[cache_key] = (time.monotonic(), payload)
 
     return payload
 
@@ -547,20 +545,20 @@ def _logged_opponent(event):
     return opponent
 
 
-def ensure_headshot(espn_id):
+def ensure_headshot(espn_id, league="nfl"):
     espn_id = _digits(espn_id)
 
     if not espn_id:
         return ""
 
-    path = HEAD_DIR / f"{espn_id}.png"
+    path = HEAD_DIR / f"{_feed(league)}-{espn_id}.png"
 
     if _usable_headshot(path):
         return str(path)
 
     try:
         response = requests.get(
-            HEADSHOT_URL.format(espn_id=espn_id),
+            _headshot_url(espn_id, league),
             headers={
                 "User-Agent": "GameLine/1.0",
                 "Accept": "image/png,image/jpeg,image/webp,*/*",
@@ -608,8 +606,9 @@ def _configured_players():
 
 
 def _load_player(player):
+    league = _player_league(player)
     espn_id = _espn_id_for(player)
-    headshot = ensure_headshot(espn_id) if espn_id else ""
+    headshot = ensure_headshot(espn_id, league) if espn_id else ""
     stats = ()
     opponent = ""
     game_state = ""
@@ -618,7 +617,7 @@ def _load_player(player):
 
     if espn_id:
         try:
-            payload = _fetch_overview(espn_id)
+            payload = _fetch_overview(espn_id, league)
             stats, opponent = game_stat_groups(
                 payload,
                 player.get("position"),
@@ -628,7 +627,19 @@ def _load_player(player):
                 payload,
                 player.get("team"),
                 player.get("position"),
+                league,
             )
+            if league == "cfb":
+                stats, opponent, game_state, on_field = _college_current_game(
+                    payload,
+                    espn_id,
+                    player.get("team"),
+                    player.get("position"),
+                    stats,
+                    opponent,
+                    game_state,
+                    on_field,
+                )
         except Exception as error:
             ok = False
             print(
@@ -653,13 +664,18 @@ def _espn_id_for(player):
     if espn_id:
         return espn_id
 
+    raw_id = str((player or {}).get("id") or "")
+    if raw_id.startswith("cfb:"):
+        return _digits(raw_id.split(":", 1)[1])
+
     name = " ".join(str(player.get("name") or "").split())
     team = str(player.get("team") or "").strip().upper()
 
     if len(name) < 3:
         return ""
 
-    key = (name.casefold(), team)
+    league = _player_league(player)
+    key = (league, name.casefold(), team)
     now = time.monotonic()
 
     with _espn_lock:
@@ -669,7 +685,7 @@ def _espn_id_for(player):
         ):
             return cached[1]
 
-    found = _search_espn_id(name, team)
+    found = _search_espn_id(name, team, league)
 
     with _espn_lock:
         _espn_ids[key] = (time.monotonic(), found)
@@ -677,10 +693,10 @@ def _espn_id_for(player):
     return found
 
 
-def _search_espn_id(name, team):
+def _search_espn_id(name, team, league="nfl"):
     try:
         response = requests.get(
-            SEARCH_URL.format(query=quote(name)),
+            SEARCH_URL.format(query=quote(name), limit=5),
             headers={
                 "User-Agent": "GameLine/1.0",
                 "Accept": "application/json",
@@ -699,7 +715,7 @@ def _search_espn_id(name, team):
     for item in payload.get("items") or []:
         if not isinstance(item, dict):
             continue
-        if str(item.get("league") or "").lower() != "nfl":
+        if str(item.get("league") or "").lower() != _feed(league):
             continue
         if str(item.get("sport") or "").lower() != "football":
             continue
@@ -732,9 +748,9 @@ def _search_team(item):
     return ""
 
 
-def _fetch_overview(espn_id):
+def _fetch_overview(espn_id, league="nfl"):
     response = requests.get(
-        OVERVIEW_URL.format(espn_id=espn_id),
+        _overview_url(espn_id, league),
         headers={
             "User-Agent": "GameLine/1.0",
             "Accept": "application/json",
@@ -858,6 +874,337 @@ def _save_headshot(content, path):
         image.thumbnail((96, 96), Image.Resampling.LANCZOS)
         path.parent.mkdir(parents=True, exist_ok=True)
         image.save(path, "PNG")
+
+
+def search_college_players(query, limit=8):
+    """College skill players from the ESPN search."""
+    text = " ".join(str(query or "").split())
+
+    if len(text) < 2:
+        return []
+
+    try:
+        response = requests.get(
+            SEARCH_URL.format(query=quote(text), limit=10),
+            headers={
+                "User-Agent": "GameLine/1.0",
+                "Accept": "application/json",
+            },
+            timeout=REQUEST_TIMEOUT,
+            verify=_verify(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as error:
+        print(f"College player search failed ({text}): {error}")
+        return []
+
+    found = []
+
+    for item in payload.get("items") or []:
+        card = _college_search_hit(item)
+        if card is None:
+            continue
+        found.append(card)
+        if len(found) >= max(1, int(limit)):
+            break
+
+    return found
+
+
+def stored_card_players(player_ids, posted, previous, limit=MAX_PLAYER_CARDS):
+    """Keep NFL roster records and college players posted from search."""
+    from nfl.player_directory import get_player, public_player
+
+    previous_by_id = {}
+
+    for record in previous or []:
+        card = _public_card(record)
+        if card is not None:
+            previous_by_id[card["id"]] = card
+
+    players = []
+    seen = set()
+    posted = list(posted or [])
+
+    for index, raw_id in enumerate(player_ids or []):
+        player_id = str(raw_id or "").strip()
+
+        if not player_id or player_id in seen:
+            continue
+
+        seen.add(player_id)
+        extra = posted[index] if index < len(posted) and isinstance(posted[index], dict) else {}
+        earlier = previous_by_id.get(player_id) or {}
+        league = _player_league({
+            "id": player_id,
+            "league": extra.get("league") or earlier.get("league"),
+        })
+
+        if league == "nfl":
+            directory = public_player(get_player(player_id))
+            if directory is not None:
+                directory["league"] = "nfl"
+                players.append(directory)
+                if len(players) >= limit:
+                    break
+                continue
+
+        card = _public_card({
+            "id": player_id,
+            "league": league,
+            "name": extra.get("name") or earlier.get("name"),
+            "first": extra.get("first") or earlier.get("first"),
+            "last": extra.get("last") or earlier.get("last"),
+            "team": extra.get("team") or earlier.get("team"),
+            "position": extra.get("position") or earlier.get("position"),
+            "espn_id": extra.get("espn_id") or earlier.get("espn_id"),
+        })
+
+        if card is None:
+            continue
+
+        players.append(card)
+
+        if len(players) >= limit:
+            break
+
+    return players
+
+
+def _college_current_game(
+    payload,
+    espn_id,
+    team,
+    position,
+    stats,
+    opponent,
+    game_state,
+    on_field,
+):
+    """College overviews omit the current game, so use the box score."""
+    event = _overview_event(payload)
+    summary = _game_summary(event.get("id"), "cfb")
+    state = _summary_state(summary)
+
+    if state not in {"live", "final"}:
+        return stats, opponent, game_state, on_field
+
+    label = _summary_opponent(summary, team) or opponent
+    box = _box_stats(summary, espn_id)
+    line = _groups_for_position(position, box) if box else ()
+    field = ""
+
+    if state == "live":
+        field = field_status(position, team, _possession_map(summary))
+
+    return line, label, state, field
+
+
+def _summary_state(summary):
+    if not isinstance(summary, dict):
+        return ""
+
+    competitions = ((summary.get("header") or {}).get("competitions") or [])
+
+    if not competitions or not isinstance(competitions[0], dict):
+        return ""
+
+    state = str(
+        (
+            ((competitions[0].get("status") or {}).get("type") or {}).get("state")
+            or ""
+        )
+    ).lower()
+
+    if state == "in":
+        return "live"
+
+    if state == "post":
+        return "final"
+
+    if state == "pre":
+        return "pre"
+
+    return ""
+
+
+def _summary_opponent(summary, team):
+    competitions = ((summary.get("header") or {}).get("competitions") or [])
+
+    if not competitions or not isinstance(competitions[0], dict):
+        return ""
+
+    competitors = []
+
+    for side in competitions[0].get("competitors") or []:
+        if not isinstance(side, dict):
+            continue
+        competitors.append({
+            "abbreviation": (side.get("team") or {}).get("abbreviation"),
+            "homeAway": side.get("homeAway"),
+        })
+
+    return _label_from_competitors(competitors, team)
+
+
+def _box_stats(summary, espn_id):
+    espn_id = _digits(espn_id)
+    by_name = {}
+    teams = ((summary or {}).get("boxscore") or {}).get("players") or []
+
+    for team in teams:
+        if not isinstance(team, dict):
+            continue
+        for group in team.get("statistics") or []:
+            if not isinstance(group, dict):
+                continue
+            keys = group.get("keys") or []
+            for athlete in group.get("athletes") or []:
+                if not isinstance(athlete, dict):
+                    continue
+                if _digits((athlete.get("athlete") or {}).get("id")) != espn_id:
+                    continue
+                values = athlete.get("stats") or []
+                for index, key in enumerate(keys):
+                    if index >= len(values):
+                        break
+                    _put_stat(by_name, key, values[index])
+
+    return by_name
+
+
+def _put_stat(by_name, key, value):
+    key = str(key or "")
+    text = str(value or "").strip()
+
+    if "/" in key and "/" in text:
+        left_key, right_key = key.split("/", 1)
+        left_val, right_val = text.split("/", 1)
+        for part_key, part_val in ((left_key, left_val), (right_key, right_val)):
+            cleaned = _clean_number(part_val)
+            if cleaned != "":
+                by_name[str(part_key)] = cleaned
+        return
+
+    cleaned = _clean_number(text)
+
+    if cleaned != "":
+        by_name[key] = cleaned
+
+
+def _college_search_hit(item):
+    if not isinstance(item, dict):
+        return None
+
+    if str(item.get("league") or "").lower() != "college-football":
+        return None
+
+    if str(item.get("sport") or "").lower() != "football":
+        return None
+
+    if item.get("isRetired") is True or item.get("isActive") is False:
+        return None
+
+    position = str(
+        ((item.get("position") or {}).get("abbreviation") or "")
+    ).upper()
+    position = "K" if position == "PK" else position
+
+    if position not in COLLEGE_POSITIONS:
+        return None
+
+    espn_id = _digits(item.get("id"))
+    name = " ".join(str(item.get("displayName") or "").split())
+
+    if not espn_id or not name:
+        return None
+
+    parts = name.split(" ", 1)
+
+    return {
+        "id": f"cfb:{espn_id}",
+        "name": name,
+        "first": parts[0],
+        "last": parts[1] if len(parts) > 1 else "",
+        "team": _search_team(item),
+        "position": position,
+        "espn_id": espn_id,
+        "league": "cfb",
+    }
+
+
+def _public_card(player):
+    if not isinstance(player, dict):
+        return None
+
+    player_id = str(player.get("id") or "").strip()
+    name = " ".join(str(player.get("name") or "").split())
+
+    if not player_id or not name:
+        return None
+
+    league = _player_league(player)
+    team = str(player.get("team") or "").strip().upper()
+
+    if league == "nfl":
+        from nfl.player_directory import normalize_team
+        team = normalize_team(team)
+
+    position = str(player.get("position") or "").upper()
+    position = "K" if position == "PK" else position
+    espn_id = _digits(player.get("espn_id"))
+
+    if not espn_id and player_id.startswith("cfb:"):
+        espn_id = _digits(player_id.split(":", 1)[1])
+
+    return {
+        "id": player_id,
+        "name": name,
+        "first": str(player.get("first") or "").strip(),
+        "last": str(player.get("last") or "").strip(),
+        "team": team,
+        "position": position,
+        "espn_id": espn_id,
+        "league": league,
+    }
+
+
+def _player_league(player):
+    league = str((player or {}).get("league") or "").strip().lower()
+
+    if league in {"cfb", "college", "college-football"}:
+        return "cfb"
+
+    if str((player or {}).get("id") or "").startswith("cfb:"):
+        return "cfb"
+
+    return "nfl"
+
+
+def _feed(league):
+    return FEEDS.get(_player_league({"league": league}), "nfl")
+
+
+def _overview_url(espn_id, league):
+    return (
+        "https://site.web.api.espn.com/apis/common/v3/sports/"
+        f"football/{_feed(league)}/athletes/{espn_id}/overview"
+    )
+
+
+def _headshot_url(espn_id, league):
+    return (
+        "https://a.espncdn.com/i/headshots/"
+        f"{_feed(league)}/players/full/{espn_id}.png"
+    )
+
+
+def _summary_url(event_id, league):
+    return (
+        "https://site.api.espn.com/apis/site/v2/sports/football/"
+        f"{_feed(league)}/summary?event={event_id}"
+    )
 
 
 def _digits(value):

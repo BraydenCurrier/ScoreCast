@@ -13,6 +13,8 @@ from players.cards import (
     game_context,
     game_stat_groups,
     refresh_player_cards,
+    search_college_players,
+    stored_card_players,
     ticker_player_cards,
 )
 from players.renderer import (
@@ -451,6 +453,19 @@ class PlayerCardRenderTests(unittest.TestCase):
         self.assertIn(GREY, _colors(image, META_Y, META_Y + 5, image.width - 20))
         self.assertIn(YELLOW, _colors(image, HERO_Y, HERO_Y + 7, TEXT_X))
 
+    def test_a_college_card_uses_the_college_color(self):
+        image = _render(PlayerCard(
+            player_id="cfb:5079720",
+            name="Jeremiah Smith",
+            first="Jeremiah",
+            last="Smith",
+            team="OSU",
+            position="WR",
+            league="cfb",
+        ))
+
+        self.assertIn((200, 30, 30), _colors(image, 8, 22, 4))
+
 
 class PlayerCardRefreshTests(unittest.TestCase):
     def setUp(self):
@@ -598,10 +613,210 @@ class PlayerCardRefreshTests(unittest.TestCase):
             cards = ticker_player_cards()
 
         self.assertEqual(fetched.call_count, 1)
-        overview.assert_called_once_with("4870795")
+        overview.assert_called_once_with("4870795", "nfl")
         self.assertEqual(cards[0].espn_id, "4870795")
         self.assertEqual(cards[0].stats[0], ("67", "REC YD"))
         self.assertEqual(cards[0].headshot, "/tmp/lemon.png")
+
+    def test_a_college_player_uses_the_live_box_score(self):
+        settings = {
+            "player_cards": {
+                "enabled": True,
+                "players": [{
+                    "id": "cfb:5220473",
+                    "name": "Jackson Gutierrez",
+                    "first": "Jackson",
+                    "last": "Gutierrez",
+                    "team": "NAVY",
+                    "position": "QB",
+                    "espn_id": "5220473",
+                    "league": "cfb",
+                }],
+            }
+        }
+        overview = {
+            "nextGame": {
+                "league": {
+                    "events": [{
+                        "id": "401859185",
+                        "shortName": "ND VS NAVY",
+                        "status": "pre",
+                    }],
+                },
+            },
+            "gameLog": {
+                "events": {
+                    "old": {
+                        "id": "old",
+                        "gameDate": "2026-10-01T00:00:00Z",
+                        "atVs": "vs",
+                        "opponent": {"abbreviation": "TEMP"},
+                    },
+                },
+                "statistics": [{
+                    "names": ["passingYards", "passingTouchdowns"],
+                    "events": [{
+                        "eventId": "old",
+                        "stats": ["40", "0"],
+                    }],
+                }],
+            },
+        }
+        summary = {
+            "header": {
+                "competitions": [{
+                    "status": {"type": {"state": "in"}},
+                    "competitors": [
+                        {
+                            "homeAway": "home",
+                            "possession": True,
+                            "team": {"abbreviation": "NAVY"},
+                        },
+                        {
+                            "homeAway": "away",
+                            "possession": False,
+                            "team": {"abbreviation": "ND"},
+                        },
+                    ],
+                }],
+            },
+            "boxscore": {
+                "players": [{
+                    "statistics": [{
+                        "keys": [
+                            "completions/passingAttempts",
+                            "passingYards",
+                            "passingTouchdowns",
+                            "interceptions",
+                        ],
+                        "athletes": [{
+                            "athlete": {"id": "5220473"},
+                            "stats": ["11/16", "210", "2", "0"],
+                        }],
+                    }, {
+                        "keys": ["rushingYards"],
+                        "athletes": [{
+                            "athlete": {"id": "5220473"},
+                            "stats": ["18"],
+                        }],
+                    }],
+                }],
+            },
+        }
+
+        with patch("players.cards.get_settings", return_value=settings), \
+                patch("players.cards._fetch_overview", return_value=overview) as fetched, \
+                patch("players.cards._game_summary", return_value=summary) as game, \
+                patch("players.cards.ensure_headshot", return_value="/tmp/navy.png"):
+            refresh_player_cards()
+            cards = ticker_player_cards()
+
+        fetched.assert_called_once_with("5220473", "cfb")
+        game.assert_called_once_with("401859185", "cfb")
+        self.assertEqual(cards[0].league, "cfb")
+        self.assertEqual(
+            cards[0].stats[:4],
+            (
+                ("210", "PASS YD"),
+                ("11-16", "CMP"),
+                ("2", "TD"),
+                ("0", "INT"),
+            ),
+        )
+        self.assertIn(("18", "RUSH YD"), cards[0].stats)
+        self.assertEqual(cards[0].opponent, "VS ND")
+        self.assertEqual(cards[0].game_state, "live")
+        self.assertEqual(cards[0].on_field, "on")
+
+    def test_college_search_keeps_skill_players(self):
+        payload = {
+            "items": [
+                {
+                    "id": "5079720",
+                    "displayName": "Jeremiah Smith",
+                    "league": "college-football",
+                    "sport": "football",
+                    "position": {"abbreviation": "WR"},
+                    "teamRelationships": [
+                        {"core": {"abbreviation": "OSU"}},
+                    ],
+                },
+                {
+                    "id": "5280780",
+                    "displayName": "Jeremiah Smith",
+                    "league": "college-football",
+                    "sport": "football",
+                    "position": {"abbreviation": "LB"},
+                    "teamRelationships": [
+                        {"core": {"abbreviation": "LT"}},
+                    ],
+                },
+                {
+                    "id": "1",
+                    "displayName": "Jeremiah Smith",
+                    "league": "nfl",
+                    "sport": "football",
+                    "position": {"abbreviation": "WR"},
+                },
+            ],
+        }
+
+        class Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return payload
+
+        with patch("players.cards.requests.get", return_value=Response()):
+            found = search_college_players("Jeremiah Smith")
+
+        self.assertEqual(found, [{
+            "id": "cfb:5079720",
+            "name": "Jeremiah Smith",
+            "first": "Jeremiah",
+            "last": "Smith",
+            "team": "OSU",
+            "position": "WR",
+            "espn_id": "5079720",
+            "league": "cfb",
+        }])
+
+    def test_college_cards_are_saved_beside_nfl_players(self):
+        with patch(
+            "nfl.player_directory.get_player",
+            return_value={
+                "id": "4046",
+                "name": "Patrick Mahomes",
+                "first": "Patrick",
+                "last": "Mahomes",
+                "team": "KC",
+                "position": "QB",
+                "espn_id": "3139477",
+            },
+        ):
+            saved = stored_card_players(
+                ["4046", "cfb:5079720"],
+                [
+                    {"league": "nfl"},
+                    {
+                        "league": "cfb",
+                        "name": "Jeremiah Smith",
+                        "first": "Jeremiah",
+                        "last": "Smith",
+                        "team": "OSU",
+                        "position": "WR",
+                        "espn_id": "5079720",
+                    },
+                ],
+                [],
+            )
+
+        self.assertEqual(saved[0]["id"], "4046")
+        self.assertEqual(saved[0]["league"], "nfl")
+        self.assertEqual(saved[1]["league"], "cfb")
+        self.assertEqual(saved[1]["team"], "OSU")
+        self.assertEqual(saved[1]["espn_id"], "5079720")
 
     def test_headshot_is_stored_as_a_small_png(self):
         blob = io.BytesIO()

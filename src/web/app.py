@@ -73,7 +73,11 @@ from nfl.player_directory import (
     search_players,
     watched_nfl_players,
 )
-from players.cards import MAX_PLAYER_CARDS
+from players.cards import (
+    MAX_PLAYER_CARDS,
+    search_college_players,
+    stored_card_players,
+)
 from fantasy.api import (
     connect_sleeper_user,
     get_cached_avatar,
@@ -968,7 +972,7 @@ def page_styles():
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="{font_href}" media="print" onload="this.media='all'">
     <noscript><link rel="stylesheet" href="{font_href}"></noscript>
-    <link rel="stylesheet" href="/static/app.css?v=34">
+    <link rel="stylesheet" href="/static/app.css?v=35">
     """ + """
     <script>
     (function () {
@@ -2364,9 +2368,12 @@ def _profiles_cards_html(saved_message="", error=""):
 @app.route("/games")
 @login_required
 def games():
+    from modes.engine import mode_locked_ids
+
     settings = get_settings()
     hidden = set(settings.get("hidden_games", []))
     selected_ids = selected_sports_ids(settings)
+    locked_ids = set(mode_locked_ids(latest_games, settings))
     league_filters = {
         "selected",
         "favorites",
@@ -2416,9 +2423,17 @@ def games():
     for game, league_key, league_label, favorite_game in display_games:
         game_id = get_game_id(game)
 
-        checked = (
-            "checked"
-            if game_id in selected_ids
+        mode_locked = game_id in locked_ids
+        checked = "checked" if game_id in selected_ids or mode_locked else ""
+        locked_input = " disabled" if mode_locked else ""
+        locked_hold = (
+            f'<input type="hidden" name="game" value="{escape(game_id, quote=True)}">'
+            if mode_locked
+            else ""
+        )
+        mode_badge = (
+            '<span class="mode-lock">Mode</span>'
+            if mode_locked
             else ""
         )
 
@@ -2467,6 +2482,7 @@ def games():
                     <span class="score-league-wrap">
                         <span class="score-league">{league_label}</span>
                         {star_html}
+                        {mode_badge}
                     </span>
                     <span class="score-status {live_class}">{safe_status}</span>
                 </div>
@@ -2507,6 +2523,7 @@ def games():
                     <span class="score-league-wrap">
                         <span class="score-league">{league_label}</span>
                         {star_html}
+                        {mode_badge}
                     </span>
                     <span class="score-status {live_class}">{safe_status}</span>
                 </div>
@@ -2559,7 +2576,8 @@ def games():
         game_row_parts.append(f"""
         <div class="game-row-container" draggable="true" data-search="{safe_search}" data-id="{safe_game_id}" data-league="{league_key}" data-top25="{"true" if is_top_25 else "false"}" data-live="{"true" if is_live else "false"}" data-favorite="{"true" if favorite_game else "false"}"{row_style}>
             <label class="game-row">
-                <input type="checkbox" name="game" value="{safe_game_id}" {checked}>
+                <input type="checkbox" name="game" value="{safe_game_id}" {checked}{locked_input}>
+                {locked_hold}
                 <div class="scoreboard">
                     {scoreboard}
                 </div>
@@ -2594,8 +2612,8 @@ def games():
                     Only checked games scroll on the board.
                     New games stay off until you select them.
                     Changes apply as soon as you tap a game.
-                    Modes, under More, can add and remove cards
-                    on a schedule.
+                    A game checked by a mode stays on until you
+                    turn that mode off.
                 </div>
                 <input
                     class="search-input"
@@ -2859,7 +2877,7 @@ def games():
                     'input[type="checkbox"][name="game"]'
                 );
 
-                if (checkbox) {{
+                if (checkbox && !checkbox.disabled) {{
                     checkbox.checked = false;
                 }}
             }});
@@ -3632,6 +3650,18 @@ def modes_page():
     )
 
 
+def _save_mode_block(settings, block):
+    from modes.engine import apply_mode_selection
+
+    current = dict(settings)
+    current["modes"] = block
+    patch = apply_mode_selection(latest_games, current)
+    if patch:
+        update_settings(patch)
+    else:
+        update_settings({"modes": block})
+
+
 @app.route("/modes/toggle", methods=["POST"])
 @login_required
 def toggle_mode():
@@ -3650,7 +3680,7 @@ def toggle_mode():
             return jsonify(payload), 400
         return redirect(url_for("modes_page", error=str(error)))
 
-    update_settings({"modes": block})
+    _save_mode_block(settings, block)
     return autosave_response(url_for("modes_page"), {"reload": True})
 
 
@@ -3672,6 +3702,7 @@ def save_mode():
             "focus_after": request.form.get("focus_after"),
             "hide_outside": request.form.get("hide_outside") == "on",
             "favorites_only": request.form.get("favorites_only") == "on",
+            "cfb_top25": request.form.get("cfb_top25") == "on",
         })
         block = set_mode_enabled(
             {"modes": block},
@@ -3681,7 +3712,7 @@ def save_mode():
     except ValueError as error:
         return redirect(url_for("modes_page", error=str(error)))
 
-    update_settings({"modes": block})
+    _save_mode_block(settings, block)
     return redirect(url_for("modes_page"))
 
 
@@ -3690,12 +3721,11 @@ def save_mode():
 def delete_mode():
     from modes.engine import delete_custom_mode
 
-    update_settings({
-        "modes": delete_custom_mode(
-            get_settings(),
-            request.form.get("mode_id"),
-        ),
-    })
+    settings = get_settings()
+    _save_mode_block(
+        settings,
+        delete_custom_mode(settings, request.form.get("mode_id")),
+    )
     return redirect(url_for("modes_page"))
 
 
@@ -4822,16 +4852,33 @@ def players_page():
         player_name = escape(str(player.get("name") or ""))
         player_team = escape(str(player.get("team") or ""))
         player_position = escape(str(player.get("position") or ""))
+        raw_league = (
+            "cfb"
+            if str(player.get("league") or "") == "cfb"
+            or str(player.get("id") or "").startswith("cfb:")
+            else "nfl"
+        )
+        league_label = "College" if raw_league == "cfb" else "NFL"
+        player_league = escape(raw_league, quote=True)
+        player_name_value = escape(str(player.get("name") or ""), quote=True)
+        player_team_value = escape(str(player.get("team") or ""), quote=True)
+        player_position_value = escape(str(player.get("position") or ""), quote=True)
+        player_espn = escape(str(player.get("espn_id") or ""), quote=True)
+        player_first = escape(str(player.get("first") or ""), quote=True)
+        player_last = escape(str(player.get("last") or ""), quote=True)
         player_card_rows += f"""
                     <div
                         class="player-watch-row"
                         data-player-id="{player_id}"
                     >
-                        <input
-                            type="hidden"
-                            name="card_player_ids"
-                            value="{player_id}"
-                        >
+                        <input type="hidden" name="card_player_ids" value="{player_id}">
+                        <input type="hidden" name="card_player_league" value="{player_league}">
+                        <input type="hidden" name="card_player_name" value="{player_name_value}">
+                        <input type="hidden" name="card_player_team" value="{player_team_value}">
+                        <input type="hidden" name="card_player_position" value="{player_position_value}">
+                        <input type="hidden" name="card_player_espn" value="{player_espn}">
+                        <input type="hidden" name="card_player_first" value="{player_first}">
+                        <input type="hidden" name="card_player_last" value="{player_last}">
                         <div class="player-pos">
                             {player_position}
                         </div>
@@ -4840,7 +4887,7 @@ def players_page():
                                 {player_name}
                             </div>
                             <div class="details">
-                                {player_team} · {player_position}
+                                {player_team} · {player_position} · {league_label}
                             </div>
                         </div>
                         <button
@@ -5143,7 +5190,7 @@ def players_page():
                     </label>
 
                     <p class="player-help">
-                        Search the NFL roster and add up to
+                        Search NFL or college football and add up to
                         {MAX_PLAYER_CARDS} players. The line is
                         the game in progress, or the last one
                         they played. A live game is marked,
@@ -5162,7 +5209,7 @@ def players_page():
                             class="search-input"
                             id="card_player_search"
                             type="search"
-                            placeholder="Add a player to the board..."
+                            placeholder="Add an NFL or college player..."
                             autocomplete="off"
                         >
                         <div
@@ -5738,10 +5785,13 @@ def players_page():
                 row.className = "player-watch-row";
                 row.dataset.playerId = playerId;
 
-                const hidden = document.createElement("input");
-                hidden.type = "hidden";
-                hidden.name = "card_player_ids";
-                hidden.value = playerId;
+                function cardField(fieldName, value) {{
+                    const input = document.createElement("input");
+                    input.type = "hidden";
+                    input.name = fieldName;
+                    input.value = value || "";
+                    return input;
+                }}
 
                 const pos = document.createElement("div");
                 pos.className = "player-pos";
@@ -5754,11 +5804,14 @@ def players_page():
                 name.textContent = player.name || "";
                 const details = document.createElement("div");
                 details.className = "details";
-                details.textContent = (
-                    (player.team || "")
-                    + " · "
-                    + (player.position || "")
-                ).replace(/^ · /, "");
+                const leagueLabel = player.league === "cfb" ? "College" : "NFL";
+                details.textContent = [
+                    player.team || "",
+                    player.position || "",
+                    leagueLabel
+                ].filter(function (part) {{
+                    return part;
+                }}).join(" · ");
                 info.appendChild(name);
                 info.appendChild(details);
 
@@ -5768,7 +5821,14 @@ def players_page():
                 remove.textContent = "Remove";
                 remove.setAttribute("data-remove-card", playerId);
 
-                row.appendChild(hidden);
+                row.appendChild(cardField("card_player_ids", playerId));
+                row.appendChild(cardField("card_player_league", player.league || "nfl"));
+                row.appendChild(cardField("card_player_name", player.name || ""));
+                row.appendChild(cardField("card_player_team", player.team || ""));
+                row.appendChild(cardField("card_player_position", player.position || ""));
+                row.appendChild(cardField("card_player_espn", player.espn_id || ""));
+                row.appendChild(cardField("card_player_first", player.first || ""));
+                row.appendChild(cardField("card_player_last", player.last || ""));
                 row.appendChild(pos);
                 row.appendChild(info);
                 row.appendChild(remove);
@@ -5809,15 +5869,30 @@ def players_page():
                 }}
 
                 cardSearchTimer = window.setTimeout(function () {{
-                    fetch(
+                    const nflUrl = (
                         "/api/alerts/players/search?q="
                         + encodeURIComponent(query)
-                    )
-                        .then(function (response) {{
+                    );
+                    Promise.all([
+                        fetch(nflUrl).then(function (response) {{
                             return response.json();
+                        }}).catch(function () {{
+                            return {{}};
+                        }}),
+                        fetch(nflUrl + "&league=cfb").then(function (response) {{
+                            return response.json();
+                        }}).catch(function () {{
+                            return {{}};
                         }})
-                        .then(function (payload) {{
-                            const results = (payload && payload.results) || [];
+                    ]).then(function (payloads) {{
+                            const nfl = ((payloads[0] && payloads[0].results) || []).map(
+                                function (player) {{
+                                    player.league = player.league || "nfl";
+                                    return player;
+                                }}
+                            );
+                            const college = (payloads[1] && payloads[1].results) || [];
+                            const results = nfl.concat(college);
                             cardResults.innerHTML = "";
 
                             if (!results.length) {{
@@ -5838,11 +5913,16 @@ def players_page():
                                 title.textContent = player.name || "";
                                 const meta = document.createElement("div");
                                 meta.className = "details";
-                                meta.textContent = (
-                                    (player.team || "")
-                                    + " · "
-                                    + (player.position || "")
-                                ).replace(/^ · /, "");
+                                const resultLeague = player.league === "cfb"
+                                    ? "College"
+                                    : "NFL";
+                                meta.textContent = [
+                                    player.team || "",
+                                    player.position || "",
+                                    resultLeague
+                                ].filter(function (part) {{
+                                    return part;
+                                }}).join(" · ");
                                 button.appendChild(title);
                                 button.appendChild(meta);
                                 button.addEventListener("click", function () {{
@@ -5884,10 +5964,34 @@ def save_player_cards():
     if isinstance(current, dict):
         previous = current.get("players") or []
 
-    players = hydrate_watched_players(
-        request.form.getlist("card_player_ids"),
-        previous=previous,
-    )[:MAX_PLAYER_CARDS]
+    ids = request.form.getlist("card_player_ids")
+    leagues = request.form.getlist("card_player_league")
+    names = request.form.getlist("card_player_name")
+    teams = request.form.getlist("card_player_team")
+    positions = request.form.getlist("card_player_position")
+    espn_ids = request.form.getlist("card_player_espn")
+    firsts = request.form.getlist("card_player_first")
+    lasts = request.form.getlist("card_player_last")
+    def posted_value(values, index):
+        if index >= len(values):
+            return ""
+        return values[index]
+
+    posted = [
+        {
+            "id": player_id,
+            "league": posted_value(leagues, index),
+            "name": posted_value(names, index),
+            "team": posted_value(teams, index),
+            "position": posted_value(positions, index),
+            "espn_id": posted_value(espn_ids, index),
+            "first": posted_value(firsts, index),
+            "last": posted_value(lasts, index),
+        }
+        for index, player_id in enumerate(ids)
+    ]
+
+    players = stored_card_players(ids, posted, previous)
 
     update_settings({
         "player_cards": {
@@ -5908,6 +6012,11 @@ def api_alert_player_search():
         .strip()
         .lower()
     )
+
+    if league == "cfb":
+        return jsonify({
+            "results": search_college_players(query),
+        })
 
     if league != "nfl":
         return jsonify({
@@ -8741,11 +8850,16 @@ def save_games():
         if not _is_stock_id(game_id)
     ]
 
+    from modes.engine import mode_locked_ids
+
     visible_games = list(dict.fromkeys(
         game_id
         for game_id in request.form.getlist("game")
         if game_id in sport_ids
     ))
+    for game_id in mode_locked_ids(latest_games, settings):
+        if game_id in sport_ids and game_id not in visible_games:
+            visible_games.append(game_id)
 
     hidden_sports = [
         game_id

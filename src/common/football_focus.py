@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Callable
 import re
 import time
@@ -45,6 +46,8 @@ class FootballFocusStyle:
     show_ranks: bool = False
     # College overtime has no game clock. NFL overtime does.
     untimed_overtime: bool = False
+    # Count down halftime from the end-of-half mark.
+    halftime_clock: bool = False
 
 
 # =========================================================
@@ -809,6 +812,26 @@ def _draw_scheduled(image, draw, game, settings, style):
 # Live scoreboard
 # =========================================================
 
+def _halftime_clock(game, now=None):
+    """Minutes left in a normal halftime, counted from ESPN's end-of-half mark."""
+    raw = str(getattr(game, "halftime_started_at", "") or "").strip()
+    length = _safe_int(getattr(game, "halftime_seconds", 0))
+    if not raw or length <= 0:
+        return ""
+    try:
+        started = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    if now is None:
+        now = datetime.now(timezone.utc)
+    remaining = length - int((now - started).total_seconds())
+    remaining = max(0, min(length, remaining))
+    minutes, seconds = divmod(remaining, 60)
+    return f"{minutes}:{seconds:02d}"
+
+
 def _quarter_label(game):
     if _is_halftime(game):
         return "HALFTIME"
@@ -1136,7 +1159,12 @@ def _draw_live_center(draw, game, style):
     clock = "" if untimed else str(getattr(game, "clock", "") or "").strip()
 
     if is_halftime:
-        print_4x5_centered(draw, "HALFTIME", cx, 13, CLOCK_AMBER)
+        clock = _halftime_clock(game) if style.halftime_clock else ""
+        if clock:
+            print_4x5_centered(draw, "HALFTIME", cx, 3, CLOCK_AMBER)
+            print_gfx_5x7_centered(draw, clock, cx, 11, CLOCK_AMBER)
+        else:
+            print_4x5_centered(draw, "HALFTIME", cx, 13, CLOCK_AMBER)
         return
 
     reviewing = bool(getattr(game, "play_under_review", False))

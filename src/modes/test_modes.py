@@ -8,10 +8,13 @@ from stocks.models import StockQuote
 
 from modes.page import render_modes_page
 from modes.engine import (
+    apply_mode_selection,
     delete_custom_mode,
     market_is_open,
     mode_focus_games,
+    mode_locked_ids,
     mode_ticker,
+    mode_token,
     save_custom_mode,
     set_mode_enabled,
 )
@@ -27,6 +30,16 @@ MONDAY = datetime(2026, 10, 26, 15, 0, tzinfo=timezone.utc)
 MARKET_OPEN = datetime(2026, 10, 27, 14, 30, tzinfo=timezone.utc)
 MARKET_CLOSED = datetime(2026, 10, 27, 21, 0, tzinfo=timezone.utc)
 SATURDAY = datetime(2026, 10, 24, 15, 0, tzinfo=timezone.utc)
+
+
+class CollegeFootballGame:
+    def __init__(self, status, event_id, away_rank=None, home_rank=None):
+        self.status = status
+        self.event_id = event_id
+        self.away = "TEX"
+        self.home = "UGA"
+        self.away_rank = away_rank
+        self.home_rank = home_rank
 
 
 class HockeyGame:
@@ -276,7 +289,164 @@ class ModeScheduleTests(unittest.TestCase):
         self.assertIn('action="/modes/save"', html)
         self.assertIn("Add mode", html)
         self.assertIn('name="sport" value="stocks"', html)
+        self.assertIn('name="cfb_top25"', html)
         self.assertIn(">Off<", html)
+
+    def test_mode_token_does_not_change_every_minute(self):
+        settings = _settings("nba-tonight")
+
+        with patch(
+            "modes.engine.get_local_timezone",
+            return_value=ZoneInfo("America/Chicago"),
+        ):
+            first = mode_token(
+                settings,
+                datetime(2026, 10, 27, 16, 0, tzinfo=timezone.utc),
+            )
+            five_minutes_later = mode_token(
+                settings,
+                datetime(2026, 10, 27, 16, 5, tzinfo=timezone.utc),
+            )
+            after_open = mode_token(
+                settings,
+                datetime(2026, 10, 27, 23, 0, tzinfo=timezone.utc),
+            )
+
+        self.assertEqual(first, five_minutes_later)
+        self.assertNotEqual(first, after_open)
+
+    def test_a_mode_checks_and_unchecks_the_scores_list(self):
+        ranked = CollegeFootballGame("STATUS_SCHEDULED", "ranked", 8, None)
+        unranked = CollegeFootballGame("STATUS_SCHEDULED", "open", None, None)
+        nfl = _nfl("STATUS_SCHEDULED", EARLY, "early")
+        settings = {
+            "selected_games": ["nfl:early"],
+            "hidden_games": [],
+            "game_order": ["nfl:early"],
+            "modes": {
+                "enabled": ["cfb-saturday"],
+                "custom": [],
+                "held": [],
+            },
+            "favorite_teams": {},
+        }
+
+        with patch(
+            "modes.engine.get_local_timezone",
+            return_value=ZoneInfo("America/Chicago"),
+        ):
+            added = apply_mode_selection(
+                [ranked, unranked, nfl],
+                settings,
+                datetime(2026, 10, 31, 16, 0, tzinfo=timezone.utc),
+            )
+            settings.update(added)
+            again = apply_mode_selection(
+                [ranked, unranked, nfl],
+                settings,
+                datetime(2026, 10, 31, 16, 30, tzinfo=timezone.utc),
+            )
+            restored = apply_mode_selection(
+                [ranked, unranked, nfl],
+                settings,
+                datetime(2026, 11, 2, 16, 0, tzinfo=timezone.utc),
+            )
+
+        self.assertIn("cfb:ranked", added["selected_games"])
+        self.assertNotIn("cfb:open", added["selected_games"])
+        self.assertIn("nfl:early", added["selected_games"])
+        self.assertIn("cfb:open", added["hidden_games"])
+        self.assertIsNone(again)
+        self.assertNotIn("cfb:ranked", restored["selected_games"])
+        self.assertIn("nfl:early", restored["selected_games"])
+
+    def test_mode_checks_stay_until_the_mode_is_turned_off(self):
+        mine = CollegeFootballGame("STATUS_SCHEDULED", "mine", 3, None)
+        ranked = CollegeFootballGame("STATUS_SCHEDULED", "ranked", 8, None)
+        nfl = _nfl("STATUS_SCHEDULED", EARLY, "early")
+        games = [mine, ranked, nfl]
+        when = datetime(2026, 10, 31, 16, 0, tzinfo=timezone.utc)
+        settings = {
+            "selected_games": ["cfb:mine", "nfl:early"],
+            "hidden_games": [],
+            "game_order": ["cfb:mine", "nfl:early"],
+            "modes": {
+                "enabled": ["cfb-saturday"],
+                "custom": [],
+                "held": [],
+            },
+            "favorite_teams": {},
+        }
+
+        with patch(
+            "modes.engine.get_local_timezone",
+            return_value=ZoneInfo("America/Chicago"),
+        ):
+            added = apply_mode_selection(games, settings, when)
+            settings.update(added)
+            locked = mode_locked_ids(games, settings, when)
+            turned_off = {
+                **settings,
+                "modes": {**settings["modes"], "enabled": []},
+            }
+            released = apply_mode_selection(games, turned_off, when)
+
+        self.assertEqual(locked, ["cfb:mine", "cfb:ranked"])
+        self.assertIn("cfb:mine", released["selected_games"])
+        self.assertNotIn("cfb:ranked", released["selected_games"])
+        self.assertIn("nfl:early", released["selected_games"])
+        self.assertEqual(released["modes"]["enabled"], [])
+        self.assertEqual(released["modes"]["held"], [])
+
+    def test_college_saturday_skips_unranked_games(self):
+        ranked = CollegeFootballGame("STATUS_SCHEDULED", "ranked", 8, None)
+        unranked = CollegeFootballGame("STATUS_SCHEDULED", "open", None, None)
+
+        with patch(
+            "modes.engine.get_local_timezone",
+            return_value=ZoneInfo("America/Chicago"),
+        ):
+            shown = mode_ticker(
+                [ranked, unranked],
+                [],
+                [],
+                _settings("cfb-saturday"),
+                datetime(2026, 10, 31, 16, 0, tzinfo=timezone.utc),
+            )
+
+        self.assertEqual(shown, [ranked])
+
+    def test_top_25_keeps_only_ranked_college_games(self):
+        ranked = CollegeFootballGame("STATUS_IN_PROGRESS", "ranked", 4, None)
+        unranked = CollegeFootballGame("STATUS_IN_PROGRESS", "open", None, None)
+        stored = save_custom_mode(_settings(), {
+            "name": "Ranked Saturday",
+            "days": ["5"],
+            "sports": ["cfb"],
+            "phases": ["live"],
+            "cfb_top25": True,
+        })
+        settings = {"modes": stored, "favorite_teams": {}}
+        settings["modes"] = set_mode_enabled(
+            settings,
+            stored["custom"][0]["id"],
+            True,
+        )
+        self.assertTrue(settings["modes"]["custom"][0]["cfb_top25"])
+
+        with patch(
+            "modes.engine.get_local_timezone",
+            return_value=ZoneInfo("America/Chicago"),
+        ):
+            shown = mode_ticker(
+                [ranked, unranked],
+                [],
+                [],
+                settings,
+                datetime(2026, 10, 31, 18, 0, tzinfo=timezone.utc),
+            )
+
+        self.assertEqual(shown, [ranked])
 
     def test_a_mode_needs_a_name_and_something_to_show(self):
         with self.assertRaises(ValueError):

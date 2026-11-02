@@ -17,7 +17,7 @@ from PIL import Image, ImageDraw
 from common.matrix import PANEL_REFRESH_HZ, create_matrix
 from common.game_ids import game_id as shared_game_id
 from common.game_ids import game_is_shown
-from common.settings import get_developer_settings, get_settings
+from common.settings import get_developer_settings, get_settings, update_settings
 from common.timezone import ensure_network_timezone, start_timezone_refresh, timezone_status
 from common.splash import render_idle_splash
 from common.ticker_scroll import (
@@ -103,7 +103,7 @@ SPORT_DISPLAY_ORDER = (
     "fantasy",
 )
 
-from modes.engine import mode_focus_games, mode_ticker, mode_token
+from modes.engine import apply_mode_selection, focus_games_for_board
 from players.cards import (
     player_cards_revision,
     refresh_player_cards,
@@ -155,6 +155,7 @@ _card_cache = {}
 _prerendered_cards = {}
 _prerendered_lock = threading.Lock()
 _visible_games_cache = []
+_mode_focus_games = []
 _cache_signature = None
 _built_games_revision = None
 _built_settings_signature = None
@@ -177,6 +178,7 @@ _sport_intervals = {}
 _schedule_revision = None
 _schedule_mark = None
 _bets_fetched_at = 0.0
+_mode_synced_at = 0.0
 
 SPORT_FETCHERS = {
     "mlb": get_live_mlb,
@@ -904,7 +906,6 @@ def card_settings_signature(settings):
             if isinstance(player, dict)
         ),
         player_cards_revision(),
-        mode_token(settings),
     )
 
 
@@ -959,22 +960,15 @@ def rebuild_visible_games_if_needed(settings):
         return _visible_games_cache
 
     ordered_games = apply_saved_order(current_games, settings)
-    manual_games = get_visible_games(ordered_games, settings)
     bets_settings = settings.get("bets") or {}
     leading_cards = []
     if bets_settings.get("ticker_enabled", True):
         leading_cards.extend(ticker_tickets())
     leading_cards.extend(ticker_player_cards())
-    scheduled = mode_ticker(
-        ordered_games,
-        manual_games,
-        leading_cards,
-        settings,
-    )
-    if scheduled is None:
-        visible_games = leading_cards + manual_games
-    else:
-        visible_games = scheduled
+    visible_games = get_visible_games(ordered_games, settings)
+    _mode_focus_games[:] = focus_games_for_board(visible_games, settings)
+    if leading_cards:
+        visible_games = leading_cards + visible_games
 
     live_keys = {
         card_cache_key(game, settings, logo_signature)
@@ -1154,10 +1148,26 @@ def run_refresh_subprocess(settings, previous_games, due_sports):
     return pickle.loads(completed.stdout)
 
 
+def _sync_mode_selection(games):
+    global _mode_synced_at
+
+    try:
+        patch = apply_mode_selection(games, get_settings())
+        if patch:
+            update_settings(patch)
+    except Exception as error:
+        print("Mode selection failed:", error)
+
+    _mode_synced_at = time.monotonic()
+
+
 def refresh_games_background(due_sports, refresh_bets):
     global _refresh_in_progress, _bets_fetched_at
 
     try:
+        with _games_lock:
+            previous_games = _games.copy()
+        _sync_mode_selection(previous_games)
         if get_developer_settings().get("test_games"):
             publish_games(sample_games())
             mark_sports_fetched(SPORT_FETCHERS, time.monotonic())
@@ -1180,6 +1190,7 @@ def refresh_games_background(due_sports, refresh_bets):
             )
             _install_prerendered_cards(payload.get("cards") or [])
             publish_games(payload.get("games") or [])
+            _sync_mode_selection(payload.get("games") or [])
             now = time.monotonic()
             failed = set(payload.get("errors") or {})
             mark_sports_fetched(
@@ -1661,7 +1672,8 @@ if __name__ == "__main__":
         if not _refresh_in_progress:
             due_sports = sports_due(now, settings)
             refresh_bets = bets_refresh_due(now, settings)
-            if due_sports or refresh_bets:
+            sync_modes = now - _mode_synced_at >= 15
+            if due_sports or refresh_bets or sync_modes:
                 _refresh_in_progress = True
 
                 threading.Thread(
@@ -1709,38 +1721,10 @@ if __name__ == "__main__":
             continue
 
         focus_settings = get_focus_settings(settings)
-        modes_enabled = bool(
-            (settings.get("modes") or {}).get("enabled")
-        )
-        if focus_settings.get("enabled") or modes_enabled:
+        focus_games = list(_mode_focus_games)
+        if not focus_games and focus_settings.get("enabled"):
             with _games_lock:
                 focus_source_games = _games.copy()
-        else:
-            focus_source_games = []
-
-        if modes_enabled and focus_source_games:
-            ordered_games = apply_saved_order(
-                focus_source_games,
-                settings,
-            )
-            manual_games = get_visible_games(
-                ordered_games,
-                settings,
-            )
-            bets_settings = settings.get("bets") or {}
-            leading_cards = []
-            if bets_settings.get("ticker_enabled", True):
-                leading_cards.extend(ticker_tickets())
-            leading_cards.extend(ticker_player_cards())
-            focus_games = mode_focus_games(
-                ordered_games,
-                settings,
-                manual_games=manual_games,
-                leading=leading_cards,
-            )
-        else:
-            focus_games = []
-        if not focus_games and focus_settings.get("enabled"):
             focus_games = get_focus_games(
                 focus_source_games,
                 settings,

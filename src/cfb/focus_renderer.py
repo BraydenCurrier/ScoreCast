@@ -15,6 +15,7 @@ CFB_FOCUS_STYLE = FootballFocusStyle(
     draw_broadcast_logo=draw_broadcast_logo,
     show_ranks=True,
     untimed_overtime=True,
+    halftime_clock=True,
 )
 
 

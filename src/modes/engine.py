@@ -13,7 +13,7 @@ import json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from common.game_ids import game_id, sport_for_game
+from common.game_ids import game_id, is_stock_id, sport_for_game
 from common.timezone import get_local_timezone
 
 
@@ -86,6 +86,7 @@ def _mode(
     live_only_after="",
     focus_after="",
     favorites_only=False,
+    cfb_top25=False,
 ):
     return {
         "id": mode_id,
@@ -104,6 +105,7 @@ def _mode(
         "live_only_after": live_only_after,
         "focus_after": focus_after,
         "favorites_only": bool(favorites_only),
+        "cfb_top25": bool(cfb_top25),
     }
 
 
@@ -142,15 +144,16 @@ PRESETS = (
     _mode(
         "cfb-saturday",
         "College Saturday",
-        "Saturday college games. Early kickoffs stay from the "
-        "preview through the final. Later games appear when "
-        "they start. Finished games come off.",
+        "Saturday games with a Top 25 team. Early kickoffs "
+        "stay from the preview through the final. Later games "
+        "appear when they start. Finished games come off.",
         days=(5,),
         start="10:00",
         end="23:59",
         sports=("cfb",),
         phases=("pregame", "live"),
         live_only_after="16:00",
+        cfb_top25=True,
     ),
     _mode(
         "nba-tonight",
@@ -202,7 +205,16 @@ def mode_settings(settings):
         cleaned = _clean_custom(raw)
         if cleaned is not None:
             custom.append(cleaned)
-    return {"enabled": enabled[:24], "custom": custom[:MAX_CUSTOM_MODES]}
+    held = []
+    for raw in block.get("held") or []:
+        text = str(raw or "").strip()
+        if text and text not in held:
+            held.append(text)
+    return {
+        "enabled": enabled[:24],
+        "custom": custom[:MAX_CUSTOM_MODES],
+        "held": held,
+    }
 
 
 def all_modes(settings):
@@ -221,15 +233,15 @@ def enabled_modes(settings):
 
 
 def mode_token(settings, now=None):
-    """Changes when the schedule changes, so the ticker rebuilds."""
+    """Changes when a mode window opens or closes, not every minute."""
     instant = _instant(now)
-    local = instant.astimezone(get_local_timezone())
     stored = mode_settings(settings)
-    payload = json.dumps(stored, sort_keys=True, default=str)
-    return (
-        f"{payload}|{local.strftime('%Y%m%d%H%M')}|"
-        f"{int(market_is_open(instant))}"
+    windows = tuple(
+        (mode["id"], int(_window_open(mode, instant)))
+        for mode in enabled_modes(settings)
     )
+    payload = json.dumps(stored, sort_keys=True, default=str)
+    return f"{payload}|{windows}|{int(market_is_open(instant))}"
 
 
 def market_is_open(instant):
@@ -240,6 +252,173 @@ def market_is_open(instant):
         return False
     minutes = eastern.hour * 60 + eastern.minute
     return (9 * 60 + 30) <= minutes < (16 * 60)
+
+
+def apply_mode_selection(games, settings, now=None):
+    """Check and uncheck the Scores list for the modes that are on.
+
+    Returns a settings patch, or None when the list is already right.
+    Games the user checked stay checked. A mode only adds and removes
+    the games it is responsible for. Those stay checked until the mode
+    is turned off or its window closes, and then only the mode's games
+    come off.
+    """
+    instant = _instant(now)
+    stored = mode_settings(settings)
+    held = _held_map(stored.get("held") or [])
+    controlled, hiding = _active_sports(settings, instant)
+    active = set(controlled) | set(hiding)
+    by_sport = {}
+
+    for game in games or []:
+        by_sport.setdefault(sport_for_game(game), []).append(game)
+
+    if not active and not held:
+        return None
+
+    selected = _id_list((settings or {}).get("selected_games"))
+    hidden = _id_list((settings or {}).get("hidden_games"))
+    order = _id_list((settings or {}).get("game_order"))
+    selected_set = {item for item in selected if not is_stock_id(item)}
+    hidden_set = set(hidden)
+
+    for sport in list(held):
+        if sport in active:
+            continue
+        _restore_sport(
+            sport,
+            held.pop(sport),
+            by_sport.get(sport, []),
+            selected_set,
+            hidden_set,
+        )
+
+    for sport, owners in controlled.items():
+        _take_sport(
+            sport,
+            owners,
+            by_sport.get(sport, []),
+            held,
+            selected,
+            selected_set,
+            hidden_set,
+            instant,
+            settings,
+            show=True,
+        )
+
+    for sport in hiding:
+        _take_sport(
+            sport,
+            [],
+            by_sport.get(sport, []),
+            held,
+            selected,
+            selected_set,
+            hidden_set,
+            instant,
+            settings,
+            show=False,
+        )
+
+    new_selected = [item for item in selected if item in selected_set]
+    for item in selected_set:
+        if item not in new_selected:
+            new_selected.append(item)
+
+    new_hidden = [item for item in hidden if item in hidden_set]
+    for item in hidden_set:
+        if item not in new_hidden:
+            new_hidden.append(item)
+
+    seen = set()
+    new_order = []
+    for item in order + new_selected + new_hidden:
+        if item and item not in seen:
+            seen.add(item)
+            new_order.append(item)
+
+    new_held = _held_list(held)
+    if (
+        new_selected == [item for item in selected if not is_stock_id(item)]
+        and new_hidden == hidden
+        and new_held == list(stored.get("held") or [])
+        and new_order == order
+    ):
+        return None
+
+    return {
+        "selected_games": new_selected,
+        "hidden_games": new_hidden,
+        "game_order": new_order,
+        "modes": _modes_block(stored, held=new_held),
+    }
+
+
+def mode_locked_ids(games, settings, now=None):
+    """Ids a mode currently has checked. These cannot be cleared."""
+    instant = _instant(now)
+    controlled, _hiding = _active_sports(settings, instant)
+    locked = []
+    seen = set()
+
+    for sport, owners in controlled.items():
+        if sport == "stocks":
+            continue
+        for game in games or []:
+            if sport_for_game(game) != sport:
+                continue
+            if not any(
+                _allows(mode, game, instant, settings)
+                for mode in owners
+            ):
+                continue
+            identifier = game_id(game)
+            if identifier in seen:
+                continue
+            seen.add(identifier)
+            locked.append(identifier)
+
+    return locked
+
+
+def focus_games_for_board(visible_games, settings, now=None):
+    """Focus from the games already selected for the scroll."""
+    instant = _instant(now)
+    chosen = []
+    seen = set()
+
+    for mode in enabled_modes(settings):
+        if not _window_open(mode, instant):
+            continue
+        for game in _focus_picks(mode, visible_games, instant, settings):
+            identifier = game_id(game)
+            if identifier in seen:
+                continue
+            seen.add(identifier)
+            chosen.append(game)
+
+    if chosen:
+        return chosen
+
+    open_modes = [
+        mode for mode in enabled_modes(settings)
+        if _window_open(mode, instant)
+    ]
+    if not open_modes:
+        return []
+
+    games = [
+        game for game in visible_games or []
+        if sport_for_game(game) in TEAM_SPORTS
+    ]
+    if len(games) != 1 or sport_for_game(games[0]) not in FOCUS_SPORTS:
+        return []
+
+    sport = sport_for_game(games[0])
+    if any(sport in set(mode.get("sports") or []) for mode in open_modes):
+        return games
+    return []
 
 
 def mode_focus_games(
@@ -365,6 +544,8 @@ def describe_mode(mode):
         )
     if mode.get("favorites_only"):
         parts.append("Only favorite teams.")
+    if mode.get("cfb_top25"):
+        parts.append("College football is limited to Top 25 games.")
     if mode.get("kind") == "overlay":
         parts.append("Outside these hours, those items come off the board.")
     return " ".join(part for part in parts if part)
@@ -401,22 +582,23 @@ def save_custom_mode(settings, fields, mode_id=""):
     }:
         raise ValueError(f"You can save up to {MAX_CUSTOM_MODES} modes.")
     custom.append(mode)
-    return {"enabled": stored["enabled"], "custom": custom}
+    return _modes_block(stored, custom=custom)
 
 
 def delete_custom_mode(settings, mode_id):
     stored = mode_settings(settings)
     mode_id = str(mode_id or "").strip()
-    return {
-        "enabled": [
+    return _modes_block(
+        stored,
+        enabled=[
             item for item in stored["enabled"]
             if item != mode_id
         ],
-        "custom": [
+        custom=[
             mode for mode in stored["custom"]
             if mode["id"] != mode_id
         ],
-    }
+    )
 
 
 def set_mode_enabled(settings, mode_id, enabled):
@@ -429,7 +611,15 @@ def set_mode_enabled(settings, mode_id, enabled):
     selected = [item for item in stored["enabled"] if item != mode_id]
     if enabled:
         selected.append(mode_id)
-    return {"enabled": selected, "custom": stored["custom"]}
+    return _modes_block(stored, enabled=selected)
+
+
+def _modes_block(stored, enabled=None, custom=None, held=None):
+    return {
+        "enabled": stored["enabled"] if enabled is None else enabled,
+        "custom": stored["custom"] if custom is None else custom,
+        "held": stored.get("held") or [] if held is None else held,
+    }
 
 
 def _mode_from_fields(fields, mode_id):
@@ -481,6 +671,7 @@ def _mode_from_fields(fields, mode_id):
         "live_only_after": _clean_clock(fields.get("live_only_after")),
         "focus_after": _clean_clock(fields.get("focus_after")),
         "favorites_only": bool(fields.get("favorites_only")),
+        "cfb_top25": bool(fields.get("cfb_top25")),
     }
 
 
@@ -500,6 +691,7 @@ def _clean_custom(raw):
                 "focus_after": raw.get("focus_after"),
                 "hide_outside": raw.get("kind") == "overlay",
                 "favorites_only": raw.get("favorites_only"),
+                "cfb_top25": raw.get("cfb_top25"),
             },
             raw.get("id"),
         )
@@ -546,6 +738,8 @@ def _allows(mode, game, instant, settings):
     if mode.get("favorites_only") and sport in TEAM_SPORTS:
         if not _is_favorite(game, settings, sport):
             return False
+    if sport == "cfb" and mode.get("cfb_top25") and not _is_top25(game):
+        return False
     if sport not in TEAM_SPORTS:
         return True
 
@@ -561,6 +755,149 @@ def _allows(mode, game, instant, settings):
     if kickoff is None:
         return True
     return kickoff < cutoff
+
+
+def _active_sports(settings, instant):
+    controlled = {}
+    hiding = set()
+
+    for mode in enabled_modes(settings):
+        sports = [
+            sport for sport in mode.get("sports") or []
+            if sport not in LEADING_SPORTS and sport in SPORT_IDS
+        ]
+        if _window_open(mode, instant):
+            for sport in sports:
+                controlled.setdefault(sport, []).append(mode)
+        elif mode.get("kind") == "overlay":
+            hiding.update(sports)
+
+    hiding -= set(controlled)
+    return controlled, hiding
+
+
+def _take_sport(
+    sport,
+    owners,
+    games,
+    held,
+    selected,
+    selected_set,
+    hidden_set,
+    instant,
+    settings,
+    show,
+):
+    ids = [game_id(game) for game in games]
+    if sport not in held:
+        if sport == "stocks":
+            held[sport] = [item for item in ids if item in hidden_set]
+        else:
+            held[sport] = [
+                item for item in selected
+                if _id_sport(item) == sport
+            ]
+
+    if sport == "stocks":
+        for item in ids:
+            if show:
+                hidden_set.discard(item)
+            else:
+                hidden_set.add(item)
+        return
+
+    if show:
+        desired = {
+            game_id(game)
+            for game in games
+            if any(
+                _allows(mode, game, instant, settings)
+                for mode in owners
+            )
+        }
+    else:
+        desired = set()
+
+    for item in ids:
+        if item in desired:
+            selected_set.add(item)
+            hidden_set.discard(item)
+        else:
+            selected_set.discard(item)
+            hidden_set.add(item)
+
+
+def _restore_sport(sport, saved, games, selected_set, hidden_set):
+    saved_set = set(saved)
+    ids = [game_id(game) for game in games]
+
+    if sport == "stocks":
+        for item in ids:
+            if item in saved_set:
+                hidden_set.add(item)
+            else:
+                hidden_set.discard(item)
+        return
+
+    for item in ids:
+        if item in saved_set:
+            selected_set.add(item)
+            hidden_set.discard(item)
+        else:
+            selected_set.discard(item)
+            hidden_set.add(item)
+    for item in list(selected_set):
+        if _id_sport(item) == sport and item not in saved_set:
+            selected_set.discard(item)
+    selected_set.update(saved_set)
+
+
+def _held_map(items):
+    found = {}
+    for item in items or []:
+        text = str(item or "")
+        if text.startswith("held:"):
+            sport = text.split(":", 1)[1]
+            if sport:
+                found.setdefault(sport, [])
+            continue
+        sport = _id_sport(text)
+        if not sport:
+            continue
+        found.setdefault(sport, [])
+        if text not in found[sport]:
+            found[sport].append(text)
+    return found
+
+
+def _held_list(held):
+    items = []
+    for sport in sorted(held):
+        items.append(f"held:{sport}")
+        for item in held[sport]:
+            if item not in items:
+                items.append(item)
+    return items
+
+
+def _id_list(values):
+    if isinstance(values, str):
+        values = [values]
+    found = []
+    for item in values or []:
+        text = str(item or "").strip()
+        if text and text not in found:
+            found.append(text)
+    return found
+
+
+def _id_sport(identifier):
+    text = str(identifier or "")
+    if text.startswith("stocks:"):
+        return "stocks"
+    if ":" not in text:
+        return ""
+    return text.split(":", 1)[0]
 
 
 def _single_game_focus(all_games, manual_games, leading, settings, instant):
@@ -602,6 +939,8 @@ def _focus_picks(mode, games, instant, settings):
             continue
         if mode.get("favorites_only") and not _is_favorite(game, settings, sport):
             continue
+        if sport == "cfb" and mode.get("cfb_top25") and not _is_top25(game):
+            continue
         kickoff = _kickoff_minutes(game, zone)
         if kickoff is None or kickoff < threshold:
             continue
@@ -636,6 +975,20 @@ def game_phase(game):
     ):
         return "pregame"
     return "live"
+
+
+def _is_top25(game):
+    for rank in (
+        getattr(game, "away_rank", None),
+        getattr(game, "home_rank", None),
+    ):
+        try:
+            number = int(rank)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= number <= 25:
+            return True
+    return False
 
 
 def _is_favorite(game, settings, sport):

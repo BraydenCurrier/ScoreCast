@@ -40,9 +40,9 @@ def render_modes_page(styles, header, settings, error=""):
     <div class="page">
         {header}
         <p class="hint">
-            Turn a mode on and it adds or removes cards by the clock
-            and by what is live. Anything it does not mention stays
-            the way you set it on Scores. A night game can take the
+            Turn a mode on and it checks games on Scores. Those
+            checks stay on until you turn the mode off. Anything it
+            does not mention stays the way you set it. A night game can take the
             whole screen while it is live. So can the last game a
             mode leaves scrolling, for the NFL, college football,
             MLB, and the NBA.
@@ -160,6 +160,13 @@ def _create_form():
             <input type="checkbox" name="favorites_only" value="on">
             <span>Favorite teams only</span>
         </label>
+        <label class="live-filter">
+            <input type="checkbox" name="cfb_top25" value="on">
+            <span>College football: Top 25 only</span>
+        </label>
+        <p class="hint">
+            A college game stays on when either team is in the AP Top 25.
+        </p>
         <label class="live-filter">
             <input type="checkbox" name="hide_outside" value="on">
             <span>Take these off the board outside these hours</span>
