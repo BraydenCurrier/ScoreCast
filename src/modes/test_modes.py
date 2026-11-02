@@ -162,6 +162,39 @@ class ModeScheduleTests(unittest.TestCase):
         self.assertEqual(_ids(shown), ["nba", "SPY", "night"])
         self.assertEqual(focus, [self.night])
 
+    def test_focus_board_uses_the_score_from_the_latest_refresh(self):
+        import main
+
+        stale = _nfl("STATUS_IN_PROGRESS", NIGHT, "night", "GB", "CHI")
+        stale.away_score = 3
+        fresh = _nfl("STATUS_IN_PROGRESS", NIGHT, "night", "GB", "CHI")
+        fresh.away_score = 10
+        settings = _settings("nfl-sunday")
+        settings["selected_games"] = ["nfl:night"]
+        settings["hidden_games"] = []
+        settings["game_order"] = ["nfl:night"]
+
+        previous_games = list(main._games)
+        previous_revision = main._games_revision
+        previous_focus = list(main._mode_focus_games)
+        previous_focus_revision = main._mode_focus_revision
+        previous_focus_settings = main._mode_focus_settings
+        try:
+            main._mode_focus_games[:] = [stale]
+            main._mode_focus_revision = None
+            main._mode_focus_settings = None
+            main._games = [fresh]
+            main._games_revision = previous_revision + 1
+            main.sync_mode_focus_games(settings, SUNDAY_NIGHT)
+            self.assertIs(main._mode_focus_games[0], fresh)
+            self.assertEqual(main._mode_focus_games[0].away_score, 10)
+        finally:
+            main._games = previous_games
+            main._games_revision = previous_revision
+            main._mode_focus_games[:] = previous_focus
+            main._mode_focus_revision = previous_focus_revision
+            main._mode_focus_settings = previous_focus_settings
+
     def test_monday_leaves_the_manual_board_alone(self):
         self.assertIsNone(mode_ticker(
             self.all_games,

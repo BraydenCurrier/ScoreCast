@@ -156,6 +156,8 @@ _prerendered_cards = {}
 _prerendered_lock = threading.Lock()
 _visible_games_cache = []
 _mode_focus_games = []
+_mode_focus_revision = None
+_mode_focus_settings = None
 _cache_signature = None
 _built_games_revision = None
 _built_settings_signature = None
@@ -907,6 +909,36 @@ def card_settings_signature(settings):
         ),
         player_cards_revision(),
     )
+
+
+def sync_mode_focus_games(settings, now=None):
+    """Point the focus board at the latest published games.
+
+    The focus loop does not rebuild the ticker, so without this the
+    full-screen game keeps the objects from the last scroll rebuild.
+    """
+    global _mode_focus_revision, _mode_focus_settings
+
+    settings_signature = card_settings_signature(settings)
+
+    with _games_lock:
+        revision = _games_revision
+        if (
+            revision == _mode_focus_revision
+            and settings_signature == _mode_focus_settings
+        ):
+            return
+        current_games = list(_games)
+
+    ordered_games = apply_saved_order(current_games, settings)
+    visible_games = get_visible_games(ordered_games, settings)
+    _mode_focus_games[:] = focus_games_for_board(
+        visible_games,
+        settings,
+        now,
+    )
+    _mode_focus_revision = revision
+    _mode_focus_settings = settings_signature
 
 
 def publish_games(games):
@@ -1721,6 +1753,7 @@ if __name__ == "__main__":
             continue
 
         focus_settings = get_focus_settings(settings)
+        sync_mode_focus_games(settings)
         focus_games = list(_mode_focus_games)
         if not focus_games and focus_settings.get("enabled"):
             with _games_lock:
