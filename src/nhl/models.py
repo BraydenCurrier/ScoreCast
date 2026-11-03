@@ -34,6 +34,7 @@ class HockeyGame:
     home_sog: int | None = None
     possession: str = ""
     power_play: str = ""
+    power_play_clock: str = ""
     strength: str = ""
     away_so_goals: int | None = None
     home_so_goals: int | None = None
@@ -41,4 +42,10 @@ class HockeyGame:
     home_goalie: str = ""
     away_save_pct: str = ""
     home_save_pct: str = ""
+    away_lineup: tuple = ()
+    home_lineup: tuple = ()
     event_id: str = ""
+    last_play_name: str = ""
+    last_play_label: str = ""
+    last_play_goal: bool = False
+    empty_net: bool = False

@@ -3,6 +3,7 @@ import unittest
 from PIL import Image
 
 from nba.api import (
+    _board_abbr,
     _bonus_flags,
     _core_play_player,
     _details_from_payload,
@@ -147,6 +148,24 @@ class NbaPlayLineTests(unittest.TestCase):
 
 
 class NbaScoreboardParseTests(unittest.TestCase):
+    def test_utah_is_shown_as_three_letters(self):
+        home = {"id": "26", "team": {"id": "26", "abbreviation": "UTAH"}}
+        away = {"id": "13", "team": {"id": "13", "abbreviation": "LAL"}}
+        _text, _kind, team, *_rest = _last_play(
+            {
+                "lastPlay": {
+                    "text": "shot",
+                    "type": {"text": "Shot"},
+                    "team": {"id": "26"},
+                },
+            },
+            home,
+            away,
+        )
+
+        self.assertEqual(_board_abbr("UTAH"), "UTA")
+        self.assertEqual(team, "UTA")
+
     def test_leader_quarters_and_last_play(self):
         competitor = {
             "id": "10",

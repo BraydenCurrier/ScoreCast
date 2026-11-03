@@ -188,19 +188,27 @@ def _draw_puck(draw, x, y):
     draw.point((x + 1, y + 2), fill=WHITE)
 
 
+def _power_mark(game):
+    clocks = str(getattr(game, "power_play_clock", "") or "").split()
+    if clocks:
+        return f"PP {clocks[0]}"
+    return "PP"
+
+
 def _draw_situation_marks(draw, game, offset_x):
     possession = str(game.possession or "").upper()
     power_play = str(game.power_play or "").upper()
+    mark = _power_mark(game)
 
     if power_play == str(game.away).upper():
-        print_4x5(draw, "PP", 2 + offset_x, CLOCK_Y + 1, ORANGE)
+        print_4x5(draw, mark, 2 + offset_x, CLOCK_Y + 1, ORANGE)
     elif possession == str(game.away).upper() and not is_intermission(game):
         _draw_puck(draw, 2 + offset_x, CLOCK_Y + 1)
 
     if power_play == str(game.home).upper():
         print_4x5_right(
             draw,
-            "PP",
+            mark,
             CARD_WIDTH - 2 + offset_x,
             CLOCK_Y + 1,
             ORANGE,

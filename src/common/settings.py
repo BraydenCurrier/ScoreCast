@@ -144,6 +144,7 @@ DEFAULT_SETTINGS = {
         "cfb_game_ids": [],
         "mlb_game_ids": [],
         "nba_game_ids": [],
+        "nhl_game_ids": [],
         "rotation_seconds": 30,
     },
 

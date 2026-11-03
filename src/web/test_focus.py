@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from mlb.models import BaseballGame
 from nfl.models import FootballGame
+from nhl.models import HockeyGame
 
 import web.app as appmod
 
@@ -67,6 +68,7 @@ class FocusPageTests(unittest.TestCase):
 
         self.assertIn('id="focus_league"', html)
         self.assertIn('value="nba"', html)
+        self.assertIn('value="nhl"', html)
         self.assertIn('value="mlb" selected', html)
         self.assertIn('name="focus_mlb_game"', html)
         self.assertIn("NYY", html)
@@ -102,6 +104,35 @@ class FocusPageTests(unittest.TestCase):
         self.assertNotIn("cfb_game_ids", focus)
         self.assertTrue(focus["enabled"])
         self.assertEqual(focus["rotation_seconds"], 45)
+
+
+    def test_nhl_is_a_focus_league(self):
+        hockey = HockeyGame(
+            away="DAL",
+            home="COL",
+            status="Live",
+            start_time="",
+            date="",
+            away_score=1,
+            home_score=0,
+        )
+        settings = {
+            "focus_mode": {
+                "enabled": True,
+                "nhl_game_ids": [],
+                "rotation_seconds": 30,
+            }
+        }
+        with appmod.app.test_request_context("/focus?league=nhl"):
+            with patch.object(appmod, "get_settings", return_value=settings), \
+                 patch.object(appmod, "latest_games", [_nfl(), hockey]):
+                html = appmod.focus_page.__wrapped__()
+
+        self.assertIn('value="nhl" selected', html)
+        self.assertIn('name="focus_nhl_game"', html)
+        self.assertIn("DAL", html)
+        self.assertIn("COL", html)
+        self.assertNotIn('name="focus_nfl_game"', html)
 
 
 if __name__ == "__main__":

@@ -207,6 +207,7 @@ FOCUS_LEAGUES = [
     ("cfb", "College Football"),
     ("mlb", "MLB"),
     ("nba", "NBA"),
+    ("nhl", "NHL"),
 ]
 
 FOCUS_LEAGUE_HINTS = {
@@ -222,6 +223,10 @@ FOCUS_LEAGUE_HINTS = {
     "nba": (
         "Live games show the quarter, clock, last play, "
         "who's on the court, timeouts, bonus, and possession."
+    ),
+    "nhl": (
+        "Live games show the period, clock, last play, shots, "
+        "power-play time, goalies, and who has the puck."
     ),
 }
 
@@ -3301,6 +3306,7 @@ def focus_page():
         "cfb": "CFB",
         "mlb": "MLB",
         "nba": "NBA",
+        "nhl": "NHL",
     }[league_key]
     game_rows = _focus_game_rows(
         latest_games,
@@ -3360,7 +3366,7 @@ def focus_page():
                 <div class="hint"
                      style="margin-bottom: 14px;">
                     Replace the normal ticker with a
-                    full-screen NFL, CFB, MLB, or NBA scoreboard.
+                    full-screen NFL, CFB, MLB, NBA, or NHL scoreboard.
                 </div>
 
                 <label class="game-row">

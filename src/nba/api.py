@@ -17,6 +17,12 @@ from common.timezone import format_local_date, format_local_time
 from nba.models import BasketballGame
 
 
+# The Jazz abbreviation is four letters. The scorecard is built for three.
+_ABBR = {
+    "UTAH": "UTA",
+}
+
+
 NBA_SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/"
     "basketball/nba/scoreboard"
@@ -82,6 +88,15 @@ def _team_id_from_ref(node):
     return match.group(1) if match else ""
 
 
+def _board_abbr(value):
+    text = str(value or "").strip().upper()
+    return _ABBR.get(text, text)
+
+
+def _nba_abbr(competitor):
+    return _board_abbr(team_abbr(competitor))
+
+
 def _abbr_for_team_id(team_id, home, away):
     for competitor in (home, away):
         if not isinstance(competitor, dict):
@@ -91,7 +106,7 @@ def _abbr_for_team_id(team_id, home, away):
             str((competitor.get("team") or {}).get("id") or ""),
         }
         if team_id and team_id in ids:
-            return team_abbr(competitor)
+            return _nba_abbr(competitor)
     return ""
 
 
@@ -120,7 +135,7 @@ def _details_from_payload(situation, play, home, away):
         away,
     )
     if not possession:
-        possession = possession_abbr(situation, home, away)
+        possession = _board_abbr(possession_abbr(situation, home, away))
     return {
         "possession": possession,
         "away_timeouts": timeouts_remaining(situation, "away", cap=7),
@@ -369,7 +384,7 @@ def _last_play(situation, home, away):
             str((competitor.get("team") or {}).get("id") or ""),
         }
         if team_id and team_id in ids:
-            team = team_abbr(competitor)
+            team = _nba_abbr(competitor)
             break
 
     athlete = ""
@@ -502,8 +517,8 @@ def get_today_games():
             if competitor["homeAway"] == "home"
         )
 
-        away_team = team_abbr(away)
-        home_team = team_abbr(home)
+        away_team = _nba_abbr(away)
+        home_team = _nba_abbr(home)
         situation = competition.get("situation") or {}
 
         away_wins, away_losses = get_record(away)
@@ -520,7 +535,7 @@ def get_today_games():
             last_play_team_id,
         ) = _last_play(situation, home, away)
         away_in_bonus, home_in_bonus = _bonus_flags(situation)
-        possession = possession_abbr(situation, home, away)
+        possession = _board_abbr(possession_abbr(situation, home, away))
         away_timeouts = timeouts_remaining(situation, "away", cap=7)
         home_timeouts = timeouts_remaining(situation, "home", cap=7)
         away_lineup = ()

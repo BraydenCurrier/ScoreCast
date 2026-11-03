@@ -75,15 +75,19 @@ def final_label(game):
 
 
 def draw_team_logo(image, team_abbreviation, x_start, y_start, settings):
+    # The board prints UTA. The bundled Jazz file is still UTAH.png.
+    logo_id = team_abbreviation
+    if str(team_abbreviation or "").strip().upper() == "UTA":
+        logo_id = "UTAH"
     variant = get_selected_logo_variant(
         settings,
         "nba",
-        team_abbreviation,
+        logo_id,
     )
     return draw_logo(
         destination=image,
         league="nba",
-        identifier=team_abbreviation,
+        identifier=logo_id,
         x=x_start,
         y=y_start,
         variant=variant,
@@ -141,21 +145,11 @@ def _draw_timeouts(draw, x, y, remaining, *, align="left"):
             draw.rectangle(box, outline=used)
 
 
-def _draw_possession_pip(draw, x, y):
-    draw.polygon(
-        [(x + 2, y), (x + 4, y + 3), (x, y + 3)],
-        fill=YELLOW,
-    )
-
-
 def _draw_live_marks(draw, game, offset_x):
-    possession = str(game.possession or "").upper()
     bonus = str(game.bonus or "").upper()
 
     if bonus == str(game.away).upper():
         print_4x5(draw, "BN", 2 + offset_x, CLOCK_Y, ORANGE)
-    elif possession == str(game.away).upper():
-        _draw_possession_pip(draw, 2 + offset_x, CLOCK_Y + 1)
 
     if bonus == str(game.home).upper():
         print_4x5_right(
@@ -165,8 +159,6 @@ def _draw_live_marks(draw, game, offset_x):
             CLOCK_Y,
             ORANGE,
         )
-    elif possession == str(game.home).upper():
-        _draw_possession_pip(draw, CARD_WIDTH - 7 + offset_x, CLOCK_Y + 1)
 
     _draw_timeouts(
         draw,
