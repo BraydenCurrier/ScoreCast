@@ -39,7 +39,7 @@ def render_setup_display(width=384, height=32) -> Image.Image:
     image = Image.new("RGB", (width, height), NAVY)
     draw = ImageDraw.Draw(image)
 
-    if phase == PHASE_HOTSPOT:
+    if phase == PHASE_HOTSPOT or state.get("recovery_hotspot"):
         ssid = str(state.get("ssid") or "GAMELINE")
         password = hotspot_password()
         size = draw_qr(image, wifi_payload(ssid, password), x=1, y=1)

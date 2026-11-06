@@ -14,6 +14,7 @@ from players.cards import (
     game_stat_groups,
     refresh_player_cards,
     search_college_players,
+    search_nba_players,
     stored_card_players,
     ticker_player_cards,
 )
@@ -466,6 +467,19 @@ class PlayerCardRenderTests(unittest.TestCase):
 
         self.assertIn((200, 30, 30), _colors(image, 8, 22, 4))
 
+    def test_an_nba_card_uses_the_nba_color(self):
+        image = _render(PlayerCard(
+            player_id="nba:4065648",
+            name="Jayson Tatum",
+            first="Jayson",
+            last="Tatum",
+            team="BOS",
+            position="F",
+            league="nba",
+        ))
+
+        self.assertIn((0, 122, 51), _colors(image, 8, 22, 4))
+
 
 class PlayerCardRefreshTests(unittest.TestCase):
     def setUp(self):
@@ -817,6 +831,182 @@ class PlayerCardRefreshTests(unittest.TestCase):
         self.assertEqual(saved[1]["league"], "cfb")
         self.assertEqual(saved[1]["team"], "OSU")
         self.assertEqual(saved[1]["espn_id"], "5079720")
+
+    def test_an_nba_player_uses_the_live_box_score(self):
+        settings = {
+            "player_cards": {
+                "enabled": True,
+                "players": [{
+                    "id": "nba:4065648",
+                    "name": "Jayson Tatum",
+                    "first": "Jayson",
+                    "last": "Tatum",
+                    "team": "BOS",
+                    "position": "F",
+                    "espn_id": "4065648",
+                    "league": "nba",
+                }],
+            }
+        }
+        overview = {
+            "nextGame": {
+                "league": {
+                    "events": [{
+                        "id": "401909924",
+                        "shortName": "MIL @ BOS",
+                        "status": "in",
+                        "competitors": [
+                            {"abbreviation": "MIL", "homeAway": "away"},
+                            {"abbreviation": "BOS", "homeAway": "home"},
+                        ],
+                    }],
+                },
+            },
+        }
+        summary = {
+            "header": {
+                "competitions": [{
+                    "status": {"type": {"state": "in"}},
+                    "competitors": [
+                        {
+                            "homeAway": "home",
+                            "team": {"abbreviation": "BOS"},
+                        },
+                        {
+                            "homeAway": "away",
+                            "team": {"abbreviation": "MIL"},
+                        },
+                    ],
+                }],
+            },
+            "boxscore": {
+                "players": [{
+                    "statistics": [{
+                        "keys": [
+                            "points",
+                            "rebounds",
+                            "assists",
+                            "fieldGoalsMade-fieldGoalsAttempted",
+                        ],
+                        "athletes": [{
+                            "athlete": {"id": "4065648"},
+                            "active": True,
+                            "stats": ["32", "9", "6", "11-18"],
+                        }],
+                    }],
+                }],
+            },
+        }
+
+        with patch("players.cards.get_settings", return_value=settings), \
+                patch("players.cards._fetch_overview", return_value=overview) as fetched, \
+                patch("players.cards._game_summary", return_value=summary) as game, \
+                patch("players.cards.ensure_headshot", return_value="/tmp/tatum.png"):
+            refresh_player_cards()
+            cards = ticker_player_cards()
+
+        fetched.assert_called_once_with("4065648", "nba")
+        game.assert_any_call("401909924", "nba")
+        self.assertEqual(cards[0].league, "nba")
+        self.assertEqual(
+            cards[0].stats,
+            (
+                ("32", "PTS"),
+                ("9", "REB"),
+                ("6", "AST"),
+                ("11-18", "FG"),
+            ),
+        )
+        self.assertEqual(cards[0].opponent, "VS MIL")
+        self.assertEqual(cards[0].game_state, "live")
+        self.assertEqual(cards[0].on_field, "on")
+
+    def test_nba_search_keeps_roster_players(self):
+        payload = {
+            "items": [
+                {
+                    "id": "4065648",
+                    "displayName": "Jayson Tatum",
+                    "league": "nba",
+                    "sport": "basketball",
+                    "position": {"abbreviation": "F"},
+                    "teamRelationships": [
+                        {"core": {"abbreviation": "BOS"}},
+                    ],
+                },
+                {
+                    "id": "1",
+                    "displayName": "Jayson Tatum",
+                    "league": "nba",
+                    "sport": "basketball",
+                    "position": {"abbreviation": "C"},
+                    "isActive": False,
+                },
+                {
+                    "id": "2",
+                    "displayName": "Jayson Tatum",
+                    "league": "college-basketball",
+                    "sport": "basketball",
+                    "position": {"abbreviation": "F"},
+                },
+            ],
+        }
+
+        class Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return payload
+
+        with patch("players.cards.requests.get", return_value=Response()):
+            found = search_nba_players("Jayson Tatum")
+
+        self.assertEqual(found, [{
+            "id": "nba:4065648",
+            "name": "Jayson Tatum",
+            "first": "Jayson",
+            "last": "Tatum",
+            "team": "BOS",
+            "position": "F",
+            "espn_id": "4065648",
+            "league": "nba",
+        }])
+
+    def test_nba_cards_are_saved_beside_football_players(self):
+        with patch(
+            "nfl.player_directory.get_player",
+            return_value={
+                "id": "4046",
+                "name": "Patrick Mahomes",
+                "first": "Patrick",
+                "last": "Mahomes",
+                "team": "KC",
+                "position": "QB",
+                "espn_id": "3139477",
+            },
+        ):
+            saved = stored_card_players(
+                ["4046", "nba:4065648"],
+                [
+                    {"league": "nfl"},
+                    {
+                        "league": "nba",
+                        "name": "Jayson Tatum",
+                        "first": "Jayson",
+                        "last": "Tatum",
+                        "team": "UTAH",
+                        "position": "F",
+                        "espn_id": "4065648",
+                    },
+                ],
+                [],
+            )
+
+        self.assertEqual(saved[0]["league"], "nfl")
+        self.assertEqual(saved[1]["league"], "nba")
+        self.assertEqual(saved[1]["team"], "UTA")
+        self.assertEqual(saved[1]["id"], "nba:4065648")
 
     def test_headshot_is_stored_as_a_small_png(self):
         blob = io.BytesIO()

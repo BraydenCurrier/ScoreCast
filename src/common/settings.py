@@ -30,6 +30,7 @@ DEFAULT_SETTINGS = {
         "nfl": [],
         "cfb": [],
         "nba": [],
+        "cbb": [],
         "nhl": [],
         "soccer": [],
     },
@@ -89,6 +90,10 @@ DEFAULT_SETTINGS = {
         "selected_conferences": ["80"],
     },
 
+    "cbb": {
+        "selected_conferences": ["50"],
+    },
+
     "soccer": {
         "selected_leagues": [
             "eng.1",
@@ -144,6 +149,7 @@ DEFAULT_SETTINGS = {
         "cfb_game_ids": [],
         "mlb_game_ids": [],
         "nba_game_ids": [],
+        "cbb_game_ids": [],
         "nhl_game_ids": [],
         "rotation_seconds": 30,
     },

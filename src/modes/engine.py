@@ -24,6 +24,7 @@ SPORT_CHOICES = (
     ("nfl", "NFL"),
     ("cfb", "College football"),
     ("nba", "NBA"),
+    ("cbb", "College basketball"),
     ("nhl", "NHL"),
     ("mlb", "MLB"),
     ("soccer", "Soccer"),
@@ -35,8 +36,8 @@ SPORT_CHOICES = (
 )
 SPORT_IDS = {key for key, _label in SPORT_CHOICES}
 SPORT_LABELS = dict(SPORT_CHOICES)
-TEAM_SPORTS = {"nfl", "cfb", "nba", "nhl", "mlb", "soccer"}
-FOCUS_SPORTS = {"nfl", "cfb", "nba", "mlb"}
+TEAM_SPORTS = {"nfl", "cfb", "nba", "cbb", "nhl", "mlb", "soccer"}
+FOCUS_SPORTS = {"nfl", "cfb", "nba", "cbb", "mlb"}
 PHASES = ("pregame", "live", "final")
 LEADING_SPORTS = {"players", "bets"}
 
@@ -172,7 +173,7 @@ PRESETS = (
         "The board keeps only games that are in progress "
         "across the major leagues. Previews and finals stay off.",
         days=(0, 1, 2, 3, 4, 5, 6),
-        sports=("nfl", "cfb", "nba", "nhl", "mlb", "soccer"),
+        sports=("nfl", "cfb", "nba", "cbb", "nhl", "mlb", "soccer"),
         phases=("live",),
     ),
     _mode(

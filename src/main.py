@@ -55,6 +55,11 @@ from nba.api import get_today_games as get_live_nba
 from nba.focus_renderer import render_nba_focus
 from nba.nba_renderer import render_game_strip_onto as draw_nba_strip
 
+from cbb.api import get_today_games as get_live_cbb
+from cbb.renderer import CARD_STRIP as CBB_CARD_WIDTH
+from cbb.renderer import render_game_strip_onto as draw_cbb_strip
+from nba.focus_renderer import render_cbb_focus
+
 from nhl.api import get_today_games as get_live_nhl
 from nhl.focus_renderer import render_nhl_focus
 from nhl.nhl_renderer import render_game_strip_onto as draw_nhl_strip
@@ -74,6 +79,7 @@ from mlb.test_data import TEST_GAMES_MLB
 from nfl.test_data import TEST_GAMES_NFL
 from cfb.test_data import TEST_GAMES_CFB
 from nba.test_data import TEST_GAMES_NBA
+from cbb.test_data import TEST_GAMES_CBB
 from nhl.test_data import TEST_GAMES_NHL
 from soccer.test_data import TEST_GAMES_SOCCER
 from pga.test_data import TEST_GAMES_PGA
@@ -85,6 +91,7 @@ TEST_GAMES_BY_SPORT = {
     "nfl": TEST_GAMES_NFL,
     "cfb": TEST_GAMES_CFB,
     "nba": TEST_GAMES_NBA,
+    "cbb": TEST_GAMES_CBB,
     "nhl": TEST_GAMES_NHL,
     "soccer": TEST_GAMES_SOCCER,
     "pga": TEST_GAMES_PGA,
@@ -97,6 +104,7 @@ SPORT_DISPLAY_ORDER = (
     "nfl",
     "cfb",
     "nba",
+    "cbb",
     "nhl",
     "soccer",
     "pga",
@@ -188,6 +196,7 @@ SPORT_FETCHERS = {
     "nfl": get_live_nfl,
     "cfb": get_live_cfb,
     "nba": get_live_nba,
+    "cbb": get_live_cbb,
     "nhl": get_live_nhl,
     "soccer": get_live_soccer,
     "pga": get_live_pga,
@@ -517,6 +526,9 @@ def is_nfl_game(game):
 def is_nba_game(game):
     return game.__class__.__name__ == "BasketballGame"
 
+def is_cbb_game(game):
+    return game.__class__.__name__ == "CollegeBasketballGame"
+
 def is_nhl_game(game):
     return game.__class__.__name__ == "HockeyGame"
 
@@ -541,6 +553,9 @@ def get_sport(game):
 
     if is_nfl_game(game):
         return "nfl"
+
+    if is_cbb_game(game):
+        return "cbb"
 
     if is_nba_game(game):
         return "nba"
@@ -585,6 +600,8 @@ def get_game_width(game):
         return int(getattr(game, "width", None) or BET_TICKER_WIDTH)
     if is_player_card(game):
         return player_card_width(game)
+    if is_cbb_game(game):
+        return CBB_CARD_WIDTH
 
     return DEFAULT_CARD_WIDTH
 
@@ -596,6 +613,8 @@ def get_game_step(game):
 def draw_game(image, draw, game, x, settings):
     if is_cfb_game(game):
         draw_cfb_strip(image, draw, game, x, settings)
+    elif is_cbb_game(game):
+        draw_cbb_strip(image, draw, game, x, settings)
     elif is_nba_game(game):
         draw_nba_strip(image, draw, game, x, settings)
     elif is_nfl_game(game):
@@ -743,6 +762,7 @@ def get_focus_games(
         + _id_list("cfb_game_ids")
         + _id_list("mlb_game_ids")
         + _id_list("nba_game_ids")
+        + _id_list("cbb_game_ids")
         + _id_list("nhl_game_ids")
     )
 
@@ -760,6 +780,7 @@ def get_focus_games(
                 or is_cfb_game(game)
                 or is_mlb_game(game)
                 or is_nba_game(game)
+                or is_cbb_game(game)
                 or is_nhl_game(game)
             )
             and game_id(game)
@@ -1837,6 +1858,11 @@ if __name__ == "__main__":
                 )
             elif is_mlb_game(focus_game):
                 focus_frame = render_mlb_focus(
+                    focus_game,
+                    settings,
+                )
+            elif is_cbb_game(focus_game):
+                focus_frame = render_cbb_focus(
                     focus_game,
                     settings,
                 )

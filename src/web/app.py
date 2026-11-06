@@ -75,7 +75,9 @@ from nfl.player_directory import (
 )
 from players.cards import (
     MAX_PLAYER_CARDS,
+    search_cbb_players,
     search_college_players,
+    search_nba_players,
     stored_card_players,
 )
 from fantasy.api import (
@@ -197,6 +199,17 @@ CFB_CONFERENCE_OPTIONS = [
     ("17", "Mountain West"),
 ]
 
+CBB_CONFERENCE_OPTIONS = [
+    ("50", "Top 25"),
+    ("23", "SEC"),
+    ("7", "Big Ten"),
+    ("2", "ACC"),
+    ("8", "Big 12"),
+    ("4", "Big East"),
+    ("62", "American"),
+    ("0", "All games"),
+]
+
 SOCCER_LEAGUE_OPTIONS = [
     (league_id, league_name)
     for league_id, league_name in SOCCER_LEAGUES.items()
@@ -207,6 +220,7 @@ FOCUS_LEAGUES = [
     ("cfb", "College Football"),
     ("mlb", "MLB"),
     ("nba", "NBA"),
+    ("cbb", "College Basketball"),
     ("nhl", "NHL"),
 ]
 
@@ -223,6 +237,10 @@ FOCUS_LEAGUE_HINTS = {
     "nba": (
         "Live games show the quarter, clock, last play, "
         "who's on the court, timeouts, bonus, and possession."
+    ),
+    "cbb": (
+        "Same full-screen card as the NBA. "
+        "Choose conferences on the Games page."
     ),
     "nhl": (
         "Live games show the period, clock, last play, shots, "
@@ -246,6 +264,10 @@ FAVORITE_LEAGUES = [
     (
         "nba",
         "NBA"
+    ),
+    (
+        "cbb",
+        "College Basketball"
     ),
     (
         "nhl",
@@ -1135,6 +1157,47 @@ def page_styles():
       window.autosaveForm(form, 0);
     });
 
+    function handleCbbConferenceChange(changedCheckbox) {
+      var allGames = document.querySelector(
+        'input[name="cbb_conferences"][value="0"]'
+      );
+      var others = Array.from(
+        document.querySelectorAll(
+          'input[name="cbb_conferences"]:not([value="0"])'
+        )
+      );
+
+      if (changedCheckbox.value === "0" && changedCheckbox.checked) {
+        others.forEach(function (checkbox) {
+          checkbox.checked = false;
+        });
+        return;
+      }
+
+      if (
+        changedCheckbox.value !== "0"
+        && changedCheckbox.checked
+        && allGames
+      ) {
+        allGames.checked = false;
+      }
+
+      var anySelected = Array.from(
+        document.querySelectorAll(
+          'input[name="cbb_conferences"]:checked'
+        )
+      ).length > 0;
+
+      if (!anySelected && allGames) {
+        var top25 = document.querySelector(
+          'input[name="cbb_conferences"][value="50"]'
+        );
+        if (top25) {
+          top25.checked = true;
+        }
+      }
+    }
+
     function handleCfbConferenceChange(changedCheckbox) {
       var allFbs = document.querySelector(
         'input[name="cfb_conferences"][value="80"]'
@@ -1436,6 +1499,9 @@ def get_game_league(game):
     if class_name == "StockQuote":
         return "stocks", "Stocks"
     
+    if class_name == "CollegeBasketballGame":
+        return "cbb", "CBB"
+
     if class_name == "BasketballGame":
         return "nba", "NBA"
     
@@ -1457,6 +1523,7 @@ def get_game_id(game):
 _WEB_COLOR_LEAGUES = {
     "nfl": "nfl.colors",
     "cfb": "cfb.colors",
+    "cbb": "cbb.colors",
     "mlb": "mlb.colors",
     "nhl": "nhl.colors",
 }
@@ -1667,6 +1734,9 @@ def favorite_star_html(is_favorite):
 
 
 def get_favorite_team_options(league_key):
+    if league_key == "cbb":
+        from cfb.colors import TEAM_COLORS
+        return sorted(TEAM_COLORS)
     try:
         return get_teams_with_logos(league_key)
     except (ValueError, OSError):
@@ -2227,6 +2297,42 @@ def _cfb_conference_rows(settings):
     return rows
 
 
+def _cbb_conference_rows(settings):
+    selected = {
+        str(group_id)
+        for group_id in settings.get("cbb", {}).get(
+            "selected_conferences",
+            ["50"],
+        )
+    }
+
+    rows = ""
+    for group_id, conference_name in CBB_CONFERENCE_OPTIONS:
+        checked = "checked" if group_id in selected else ""
+        if group_id == "0":
+            detail = "Show every men's game today"
+        elif group_id == "50":
+            detail = "Show games with a ranked team"
+        else:
+            detail = "Show games involving this conference"
+        rows += f"""
+        <label class="game-row">
+            <input
+                type="checkbox"
+                name="cbb_conferences"
+                value="{group_id}"
+                onchange="handleCbbConferenceChange(this)"
+                {checked}
+            >
+            <div class="game-info">
+                <div class="matchup">{escape(conference_name)}</div>
+                <div class="details">{detail}</div>
+            </div>
+        </label>
+        """
+    return rows
+
+
 def _soccer_league_rows(settings):
     selected = {
         str(league_id)
@@ -2269,6 +2375,20 @@ def _normalized_cfb_conferences(values):
         selected = ["80"]
     if "80" in selected:
         selected = ["80"]
+    return selected
+
+
+def _normalized_cbb_conferences(values):
+    valid_ids = {group_id for group_id, _ in CBB_CONFERENCE_OPTIONS}
+    selected = [
+        group_id
+        for group_id in values
+        if group_id in valid_ids
+    ]
+    if not selected:
+        selected = ["50"]
+    if "0" in selected:
+        selected = ["0"]
     return selected
 
 
@@ -2389,6 +2509,7 @@ def games():
         "top25",
         "soccer",
         "nba",
+        "cbb",
         "nhl",
         "pga",
         "fantasy",
@@ -2639,6 +2760,7 @@ def games():
                         {league_option("top25", "Top 25")}
                         {league_option("soccer", "Soccer")}
                         {league_option("nba", "NBA")}
+                        {league_option("cbb", "CBB")}
                         {league_option("nhl", "NHL")}
                         {league_option("pga", "PGA")}
                         {league_option("fantasy", "Fantasy")}
@@ -2680,6 +2802,24 @@ def games():
                     Games from those conferences show up here.
                 </div>
                 {_cfb_conference_rows(settings)}
+            </div>
+        </form>
+
+        <form
+            method="POST"
+            action="/save_cbb_conferences"
+            id="cbb_panel"
+            class="league-setup-card"
+            data-autosave="1"
+            hidden
+        >
+            <div class="card">
+                <div class="card-title">College Basketball</div>
+                <div class="hint" style="margin-bottom: 12px;">
+                    Top 25 is the default. Pick conferences,
+                    or all games.
+                </div>
+                {_cbb_conference_rows(settings)}
             </div>
         </form>
 
@@ -2820,6 +2960,7 @@ def games():
         function syncLeaguePanels() {{
             const selectedFilter = getCurrentLeagueFilter();
             const cfbPanel = document.getElementById("cfb_panel");
+            const cbbPanel = document.getElementById("cbb_panel");
             const soccerPanel = document.getElementById("soccer_panel");
 
             if (cfbPanel) {{
@@ -2827,6 +2968,10 @@ def games():
                     selectedFilter === "cfb"
                     || selectedFilter === "top25"
                 );
+            }}
+
+            if (cbbPanel) {{
+                cbbPanel.hidden = selectedFilter !== "cbb";
             }}
 
             if (soccerPanel) {{
@@ -3306,6 +3451,7 @@ def focus_page():
         "cfb": "CFB",
         "mlb": "MLB",
         "nba": "NBA",
+        "cbb": "CBB",
         "nhl": "NHL",
     }[league_key]
     game_rows = _focus_game_rows(
@@ -3366,7 +3512,7 @@ def focus_page():
                 <div class="hint"
                      style="margin-bottom: 14px;">
                     Replace the normal ticker with a
-                    full-screen NFL, CFB, MLB, NBA, or NHL scoreboard.
+                    full-screen NFL, CFB, CBB, MLB, NBA, or NHL scoreboard.
                 </div>
 
                 <label class="game-row">
@@ -4858,13 +5004,21 @@ def players_page():
         player_name = escape(str(player.get("name") or ""))
         player_team = escape(str(player.get("team") or ""))
         player_position = escape(str(player.get("position") or ""))
-        raw_league = (
-            "cfb"
-            if str(player.get("league") or "") == "cfb"
-            or str(player.get("id") or "").startswith("cfb:")
-            else "nfl"
-        )
-        league_label = "College" if raw_league == "cfb" else "NFL"
+        player_key = str(player.get("id") or "")
+        saved_league = str(player.get("league") or "")
+        if saved_league == "cbb" or player_key.startswith("cbb:"):
+            raw_league = "cbb"
+        elif saved_league == "nba" or player_key.startswith("nba:"):
+            raw_league = "nba"
+        elif saved_league == "cfb" or player_key.startswith("cfb:"):
+            raw_league = "cfb"
+        else:
+            raw_league = "nfl"
+        league_label = {
+            "nba": "NBA",
+            "cbb": "CBB",
+            "cfb": "CFB",
+        }.get(raw_league, "NFL")
         player_league = escape(raw_league, quote=True)
         player_name_value = escape(str(player.get("name") or ""), quote=True)
         player_team_value = escape(str(player.get("team") or ""), quote=True)
@@ -4876,6 +5030,7 @@ def players_page():
                     <div
                         class="player-watch-row"
                         data-player-id="{player_id}"
+                        data-league="{player_league}"
                     >
                         <input type="hidden" name="card_player_ids" value="{player_id}">
                         <input type="hidden" name="card_player_league" value="{player_league}">
@@ -5196,26 +5351,31 @@ def players_page():
                     </label>
 
                     <p class="player-help">
-                        Search NFL or college football and add up to
-                        {MAX_PLAYER_CARDS} players. The line is
-                        the game in progress, or the last one
-                        they played. A live game is marked,
-                        and shows whether that player is on
-                        the field. Quarterbacks show
-                        passing yards, completions, touchdowns,
-                        and interceptions. Runners show rushing
-                        yards, carries, touchdowns, and catches.
-                        Receivers show receiving yards, catches,
-                        touchdowns, and targets. Kickers show
-                        field goals, extra points, and the long make.
+                        Pick a league, then search. The board holds
+                        {MAX_PLAYER_CARDS} cards. NFL and college
+                        show the game line for quarterbacks, runners,
+                        receivers, and kickers. NBA and college
+                        basketball show points, rebounds, assists,
+                        and field goals. The line
+                        is the game in progress, or the last one
+                        they played. A live game is marked.
+                        Football shows who is on the field, and
+                        basketball shows who is on the court.
                     </p>
+
+                    <div class="sport-pills" id="card-league-pills">
+                        <button type="button" class="sport-pill active" data-league="nfl">NFL</button>
+                        <button type="button" class="sport-pill" data-league="cfb">CFB</button>
+                        <button type="button" class="sport-pill" data-league="nba">NBA</button>
+                        <button type="button" class="sport-pill" data-league="cbb">CBB</button>
+                    </div>
 
                     <div class="stock-search player-search">
                         <input
                             class="search-input"
                             id="card_player_search"
                             type="search"
-                            placeholder="Add an NFL or college player..."
+                            placeholder="Search NFL players..."
                             autocomplete="off"
                         >
                         <div
@@ -5753,8 +5913,34 @@ def players_page():
                 );
             }}
 
+            const cardLeagueLabels = {{
+                nfl: "NFL",
+                cfb: "CFB",
+                nba: "NBA",
+                cbb: "CBB"
+            }};
+            let cardLeague = "nfl";
+
             function refreshCardEmpty() {{
-                cardEmpty.hidden = cardIds().length > 0;
+                const rows = cardList.querySelectorAll(".player-watch-row");
+                let visible = 0;
+
+                rows.forEach(function (row) {{
+                    const show = (row.dataset.league || "nfl") === cardLeague;
+                    row.style.display = show ? "" : "none";
+                    if (show) {{
+                        visible += 1;
+                    }}
+                }});
+
+                cardEmpty.hidden = visible > 0;
+                if (!visible) {{
+                    cardEmpty.textContent = (
+                        "No "
+                        + (cardLeagueLabels[cardLeague] || "league")
+                        + " cards yet."
+                    );
+                }}
             }}
 
             function saveCards() {{
@@ -5790,6 +5976,7 @@ def players_page():
                 const row = document.createElement("div");
                 row.className = "player-watch-row";
                 row.dataset.playerId = playerId;
+                row.dataset.league = player.league || "nfl";
 
                 function cardField(fieldName, value) {{
                     const input = document.createElement("input");
@@ -5810,7 +5997,13 @@ def players_page():
                 name.textContent = player.name || "";
                 const details = document.createElement("div");
                 details.className = "details";
-                const leagueLabel = player.league === "cfb" ? "College" : "NFL";
+                const leagueLabels = {{
+                    cfb: "CFB",
+                    nba: "NBA",
+                    cbb: "CBB",
+                    nfl: "NFL"
+                }};
+                const leagueLabel = leagueLabels[player.league] || "NFL";
                 details.textContent = [
                     player.team || "",
                     player.position || "",
@@ -5864,6 +6057,37 @@ def players_page():
                 saveCards();
             }});
 
+            const cardPills = document.getElementById("card-league-pills");
+
+            function cardPlaceholders() {{
+                return {{
+                    nfl: "Search NFL players...",
+                    cfb: "Search college players...",
+                    nba: "Search NBA players...",
+                    cbb: "Search college basketball..."
+                }};
+            }}
+
+            if (cardPills) {{
+                cardPills.addEventListener("click", function (event) {{
+                    const pill = event.target.closest(".sport-pill");
+
+                    if (!pill) {{
+                        return;
+                    }}
+
+                    cardLeague = pill.dataset.league || "nfl";
+                    cardPills.querySelectorAll(".sport-pill").forEach(function (item) {{
+                        item.classList.toggle("active", item === pill);
+                    }});
+                    cardSearch.placeholder = cardPlaceholders()[cardLeague];
+                    cardResults.hidden = true;
+                    cardResults.innerHTML = "";
+                    cardSearch.value = "";
+                    refreshCardEmpty();
+                }});
+            }}
+
             cardSearch.addEventListener("input", function () {{
                 const query = cardSearch.value.trim();
                 window.clearTimeout(cardSearchTimer);
@@ -5874,31 +6098,28 @@ def players_page():
                     return;
                 }}
 
+                const league = cardLeague;
                 cardSearchTimer = window.setTimeout(function () {{
-                    const nflUrl = (
+                    fetch(
                         "/api/alerts/players/search?q="
                         + encodeURIComponent(query)
-                    );
-                    Promise.all([
-                        fetch(nflUrl).then(function (response) {{
+                        + "&league="
+                        + encodeURIComponent(league)
+                    )
+                        .then(function (response) {{
                             return response.json();
-                        }}).catch(function () {{
-                            return {{}};
-                        }}),
-                        fetch(nflUrl + "&league=cfb").then(function (response) {{
-                            return response.json();
-                        }}).catch(function () {{
-                            return {{}};
                         }})
-                    ]).then(function (payloads) {{
-                            const nfl = ((payloads[0] && payloads[0].results) || []).map(
+                        .then(function (payload) {{
+                            if (league !== cardLeague) {{
+                                return;
+                            }}
+
+                            const results = ((payload && payload.results) || []).map(
                                 function (player) {{
-                                    player.league = player.league || "nfl";
+                                    player.league = player.league || league;
                                     return player;
                                 }}
                             );
-                            const college = (payloads[1] && payloads[1].results) || [];
-                            const results = nfl.concat(college);
                             cardResults.innerHTML = "";
 
                             if (!results.length) {{
@@ -5919,13 +6140,10 @@ def players_page():
                                 title.textContent = player.name || "";
                                 const meta = document.createElement("div");
                                 meta.className = "details";
-                                const resultLeague = player.league === "cfb"
-                                    ? "College"
-                                    : "NFL";
                                 meta.textContent = [
                                     player.team || "",
                                     player.position || "",
-                                    resultLeague
+                                    cardLeagueLabels[player.league] || "NFL"
                                 ].filter(function (part) {{
                                     return part;
                                 }}).join(" · ");
@@ -6022,6 +6240,16 @@ def api_alert_player_search():
     if league == "cfb":
         return jsonify({
             "results": search_college_players(query),
+        })
+
+    if league == "nba":
+        return jsonify({
+            "results": search_nba_players(query),
+        })
+
+    if league == "cbb":
+        return jsonify({
+            "results": search_cbb_players(query),
         })
 
     if league != "nfl":
@@ -6493,6 +6721,7 @@ LOGO_LEAGUE_LABELS = {
     "nfl": "NFL",
     "cfb": "College Football",
     "nba": "NBA",
+    "cbb": "College Basketball",
     "nhl": "NHL",
     "soccer": "Soccer",
 }
@@ -8909,6 +9138,19 @@ def save_cfb_conferences():
         },
     })
     return autosave_response("/games?league=cfb")
+
+
+@app.route("/save_cbb_conferences", methods=["POST"])
+@login_required
+def save_cbb_conferences():
+    update_settings({
+        "cbb": {
+            "selected_conferences": _normalized_cbb_conferences(
+                request.form.getlist("cbb_conferences")
+            ),
+        },
+    })
+    return autosave_response("/games?league=cbb")
 
 
 @app.route("/save_soccer_leagues", methods=["POST"])

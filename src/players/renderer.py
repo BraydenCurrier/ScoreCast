@@ -56,9 +56,19 @@ def render_game_strip_onto(image, draw, game, offset_x, settings):
 def _plate_color(game):
     team = getattr(game, "team", "")
 
-    if str(getattr(game, "league", "") or "") == "cfb":
+    league = str(getattr(game, "league", "") or "")
+
+    if league == "cfb":
         from cfb.colors import team_color as college_color
         return college_color(team)
+
+    if league == "nba":
+        from nba.colors import team_color as nba_color
+        return nba_color(team)
+
+    if league == "cbb":
+        from cbb.colors import team_color as college_basketball_color
+        return college_basketball_color(team)
 
     return team_color(team)
 

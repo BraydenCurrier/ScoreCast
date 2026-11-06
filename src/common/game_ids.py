@@ -8,6 +8,7 @@ CLASS_TO_SPORT = {
     "CfbGame": "cfb",
     "CollegeFootballGame": "cfb",
     "BasketballGame": "nba",
+    "CollegeBasketballGame": "cbb",
     "HockeyGame": "nhl",
     "SoccerGame": "soccer",
     "GolfTournament": "pga",

@@ -21,9 +21,18 @@ CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 STATS_OK_SECONDS = 60
 LIVE_REFRESH_SECONDS = 20
 COLLEGE_POSITIONS = {"QB", "RB", "WR", "TE", "K"}
+NBA_POSITIONS = {"PG", "SG", "SF", "PF", "C", "G", "F"}
 FEEDS = {
     "nfl": "nfl",
     "cfb": "college-football",
+    "nba": "nba",
+    "cbb": "mens-college-basketball",
+}
+SPORTS = {
+    "nfl": "football",
+    "cfb": "football",
+    "nba": "basketball",
+    "cbb": "basketball",
 }
 STATS_FAIL_SECONDS = 120
 REQUEST_TIMEOUT = (4, 8)
@@ -418,7 +427,7 @@ def _this_game(payload, position, team):
     )
 
 
-def _latest_logged_game(payload, position):
+def _latest_logged_game(payload, position, league="nfl"):
     log = payload.get("gameLog") or {}
     events = _events_newest_first(log.get("events"))
 
@@ -437,7 +446,7 @@ def _latest_logged_game(payload, position):
                     continue
                 by_name.update(_zip_stats(names, row.get("stats") or []))
 
-        groups = _groups_for_position(position, by_name)
+        groups = _groups_for_position(position, by_name, league)
 
         if groups:
             return groups, _logged_opponent(event)
@@ -640,6 +649,17 @@ def _load_player(player):
                     game_state,
                     on_field,
                 )
+            elif league in {"nba", "cbb"}:
+                stats, opponent, game_state, on_field = _nba_current_game(
+                    payload,
+                    espn_id,
+                    player.get("team"),
+                    stats,
+                    opponent,
+                    game_state,
+                    on_field,
+                    league,
+                )
         except Exception as error:
             ok = False
             print(
@@ -665,7 +685,11 @@ def _espn_id_for(player):
         return espn_id
 
     raw_id = str((player or {}).get("id") or "")
-    if raw_id.startswith("cfb:"):
+    if (
+        raw_id.startswith("cfb:")
+        or raw_id.startswith("nba:")
+        or raw_id.startswith("cbb:")
+    ):
         return _digits(raw_id.split(":", 1)[1])
 
     name = " ".join(str(player.get("name") or "").split())
@@ -717,7 +741,7 @@ def _search_espn_id(name, team, league="nfl"):
             continue
         if str(item.get("league") or "").lower() != _feed(league):
             continue
-        if str(item.get("sport") or "").lower() != "football":
+        if str(item.get("sport") or "").lower() != _sport(league):
             continue
         if str(item.get("displayName") or "").casefold() != name.casefold():
             continue
@@ -762,7 +786,10 @@ def _fetch_overview(espn_id, league="nfl"):
     return response.json()
 
 
-def _groups_for_position(position, by_name):
+def _groups_for_position(position, by_name, league="nfl"):
+    if league in {"nba", "cbb"}:
+        return _nba_groups(by_name)
+
     position = str(position or "").upper()
 
     def pick(*keys):
@@ -831,6 +858,31 @@ def _groups_for_position(position, by_name):
     return tuple(item for item in chosen if item)
 
 
+def _nba_groups(by_name):
+    """Points, rebounds, assists, and the field-goal line for one game."""
+    by_name = by_name if isinstance(by_name, dict) else {}
+
+    def pick(*keys):
+        for key in keys:
+            value = by_name.get(key)
+            if value:
+                return value
+        return ""
+
+    def keep(value, label):
+        if not value:
+            return None
+        return (value, label)
+
+    chosen = (
+        keep(pick("points"), "PTS"),
+        keep(pick("rebounds", "totalRebounds"), "REB"),
+        keep(pick("assists"), "AST"),
+        keep(pick("fieldGoalsMade-fieldGoalsAttempted"), "FG"),
+    )
+    return tuple(item for item in chosen if item)
+
+
 def _clean_number(value):
     text = str(value or "").strip().replace(",", "")
 
@@ -876,8 +928,22 @@ def _save_headshot(content, path):
         image.save(path, "PNG")
 
 
+def search_nba_players(query, limit=8):
+    """NBA players from the ESPN search."""
+    return _search_league_players(query, "nba", limit)
+
+
+def search_cbb_players(query, limit=8):
+    """College basketball players from the ESPN search."""
+    return _search_league_players(query, "cbb", limit)
+
+
 def search_college_players(query, limit=8):
     """College skill players from the ESPN search."""
+    return _search_league_players(query, "cfb", limit)
+
+
+def _search_league_players(query, league, limit):
     text = " ".join(str(query or "").split())
 
     if len(text) < 2:
@@ -896,13 +962,23 @@ def search_college_players(query, limit=8):
         response.raise_for_status()
         payload = response.json()
     except Exception as error:
-        print(f"College player search failed ({text}): {error}")
+        label = {"nba": "NBA", "cbb": "College basketball"}.get(
+            league,
+            "College",
+        )
+        print(f"{label} player search failed ({text}): {error}")
         return []
 
     found = []
+    if league == "nba":
+        hit = _nba_search_hit
+    elif league == "cbb":
+        hit = _cbb_search_hit
+    else:
+        hit = _college_search_hit
 
     for item in payload.get("items") or []:
-        card = _college_search_hit(item)
+        card = hit(item)
         if card is None:
             continue
         found.append(card)
@@ -1001,6 +1077,67 @@ def _college_current_game(
     return line, label, state, field
 
 
+def _nba_current_game(
+    payload,
+    espn_id,
+    team,
+    stats,
+    opponent,
+    game_state,
+    on_field,
+    league="nba",
+):
+    """Use the box score for a live or finished game, otherwise the last log."""
+    event = _overview_event(payload)
+    summary = _game_summary(event.get("id"), league)
+    state = _summary_state(summary) or _event_state(event)
+
+    if state in {"live", "final"}:
+        label = (
+            _summary_opponent(summary, team)
+            or _opponent_label(event, team)
+            or opponent
+        )
+        box = _box_stats(summary, espn_id)
+        line = _nba_groups(box) if box else ()
+        court = _on_court(summary, espn_id) if state == "live" else ""
+        return line, label, state, court
+
+    line, label = _latest_logged_game(payload, "", league)
+    if line:
+        return line, label, "", ""
+
+    return stats, opponent, game_state, on_field
+
+
+def _on_court(summary, espn_id):
+    """Whether this player is in the live lineup."""
+    espn_id = _digits(espn_id)
+    found = False
+    active = False
+    teams = ((summary or {}).get("boxscore") or {}).get("players") or []
+
+    for team in teams:
+        if not isinstance(team, dict):
+            continue
+        for group in team.get("statistics") or []:
+            if not isinstance(group, dict):
+                continue
+            for athlete in group.get("athletes") or []:
+                if not isinstance(athlete, dict):
+                    continue
+                if _digits((athlete.get("athlete") or {}).get("id")) != espn_id:
+                    continue
+                found = True
+                if athlete.get("active") is True:
+                    active = True
+
+    if not found:
+        return ""
+
+    return "on" if active else "off"
+
+
 def _summary_state(summary):
     if not isinstance(summary, dict):
         return ""
@@ -1093,6 +1230,88 @@ def _put_stat(by_name, key, value):
         by_name[key] = cleaned
 
 
+def _nba_search_hit(item):
+    if not isinstance(item, dict):
+        return None
+
+    if str(item.get("league") or "").lower() != "nba":
+        return None
+
+    if str(item.get("sport") or "").lower() != "basketball":
+        return None
+
+    if item.get("isRetired") is True or item.get("isActive") is False:
+        return None
+
+    position = str(
+        ((item.get("position") or {}).get("abbreviation") or "")
+    ).upper()
+    position = position.split("/")[0].split("-")[0].strip()
+
+    if position not in NBA_POSITIONS:
+        return None
+
+    espn_id = _digits(item.get("id"))
+    name = " ".join(str(item.get("displayName") or "").split())
+
+    if not espn_id or not name:
+        return None
+
+    parts = name.split(" ", 1)
+
+    return {
+        "id": f"nba:{espn_id}",
+        "name": name,
+        "first": parts[0],
+        "last": parts[1] if len(parts) > 1 else "",
+        "team": _nba_team(_search_team(item)),
+        "position": position,
+        "espn_id": espn_id,
+        "league": "nba",
+    }
+
+
+def _cbb_search_hit(item):
+    if not isinstance(item, dict):
+        return None
+
+    if str(item.get("league") or "").lower() != "mens-college-basketball":
+        return None
+
+    if str(item.get("sport") or "").lower() != "basketball":
+        return None
+
+    if item.get("isRetired") is True or item.get("isActive") is False:
+        return None
+
+    position = str(
+        ((item.get("position") or {}).get("abbreviation") or "")
+    ).upper()
+    position = position.split("/")[0].split("-")[0].strip()
+
+    if position not in NBA_POSITIONS:
+        return None
+
+    espn_id = _digits(item.get("id"))
+    name = " ".join(str(item.get("displayName") or "").split())
+
+    if not espn_id or not name:
+        return None
+
+    parts = name.split(" ", 1)
+
+    return {
+        "id": f"cbb:{espn_id}",
+        "name": name,
+        "first": parts[0],
+        "last": parts[1] if len(parts) > 1 else "",
+        "team": _search_team(item),
+        "position": position,
+        "espn_id": espn_id,
+        "league": "cbb",
+    }
+
+
 def _college_search_hit(item):
     if not isinstance(item, dict):
         return None
@@ -1150,12 +1369,18 @@ def _public_card(player):
     if league == "nfl":
         from nfl.player_directory import normalize_team
         team = normalize_team(team)
+    elif league == "nba":
+        team = _nba_team(team)
 
     position = str(player.get("position") or "").upper()
     position = "K" if position == "PK" else position
     espn_id = _digits(player.get("espn_id"))
 
-    if not espn_id and player_id.startswith("cfb:"):
+    if not espn_id and (
+        player_id.startswith("cfb:")
+        or player_id.startswith("nba:")
+        or player_id.startswith("cbb:")
+    ):
         espn_id = _digits(player_id.split(":", 1)[1])
 
     return {
@@ -1172,24 +1397,42 @@ def _public_card(player):
 
 def _player_league(player):
     league = str((player or {}).get("league") or "").strip().lower()
+    player_id = str((player or {}).get("id") or "")
 
-    if league in {"cfb", "college", "college-football"}:
-        return "cfb"
+    if (
+        league in {"cbb", "mens-college-basketball", "college-basketball"}
+        or player_id.startswith("cbb:")
+    ):
+        return "cbb"
 
-    if str((player or {}).get("id") or "").startswith("cfb:"):
+    if league in {"nba", "basketball"} or player_id.startswith("nba:"):
+        return "nba"
+
+    if league in {"cfb", "college", "college-football"} or player_id.startswith("cfb:"):
         return "cfb"
 
     return "nfl"
+
+
+def _nba_team(team):
+    text = str(team or "").strip().upper()
+    if text == "UTAH":
+        return "UTA"
+    return text
 
 
 def _feed(league):
     return FEEDS.get(_player_league({"league": league}), "nfl")
 
 
+def _sport(league):
+    return SPORTS.get(_player_league({"league": league}), "football")
+
+
 def _overview_url(espn_id, league):
     return (
         "https://site.web.api.espn.com/apis/common/v3/sports/"
-        f"football/{_feed(league)}/athletes/{espn_id}/overview"
+        f"{_sport(league)}/{_feed(league)}/athletes/{espn_id}/overview"
     )
 
 
@@ -1202,8 +1445,8 @@ def _headshot_url(espn_id, league):
 
 def _summary_url(event_id, league):
     return (
-        "https://site.api.espn.com/apis/site/v2/sports/football/"
-        f"{_feed(league)}/summary?event={event_id}"
+        "https://site.api.espn.com/apis/site/v2/sports/"
+        f"{_sport(league)}/{_feed(league)}/summary?event={event_id}"
     )
 
 

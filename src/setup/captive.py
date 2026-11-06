@@ -47,7 +47,12 @@ def is_captive_probe() -> bool:
 
 
 def captive_portal_url() -> str:
-    return f"http://{AP_ADDRESS}/setup/wifi"
+    from setup.state import current_setup_path
+
+    path = current_setup_path() or "/setup/wifi"
+    if not str(path).startswith("/"):
+        path = "/setup/wifi"
+    return f"http://{AP_ADDRESS}{path}"
 
 
 def captive_portal_response():

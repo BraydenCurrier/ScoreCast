@@ -88,16 +88,18 @@ def _team_id_from_ref(node):
     return match.group(1) if match else ""
 
 
-def _board_abbr(value):
+def _board_abbr(value, league="nba"):
     text = str(value or "").strip().upper()
+    if league == "cbb":
+        return text
     return _ABBR.get(text, text)
 
 
-def _nba_abbr(competitor):
-    return _board_abbr(team_abbr(competitor))
+def _nba_abbr(competitor, league="nba"):
+    return _board_abbr(team_abbr(competitor), league)
 
 
-def _abbr_for_team_id(team_id, home, away):
+def _abbr_for_team_id(team_id, home, away, league="nba"):
     for competitor in (home, away):
         if not isinstance(competitor, dict):
             continue
@@ -106,7 +108,7 @@ def _abbr_for_team_id(team_id, home, away):
             str((competitor.get("team") or {}).get("id") or ""),
         }
         if team_id and team_id in ids:
-            return _nba_abbr(competitor)
+            return _nba_abbr(competitor, league)
     return ""
 
 
@@ -125,21 +127,23 @@ def _fetch_json(url):
     return data
 
 
-def _details_from_payload(situation, play, home, away):
+def _details_from_payload(situation, play, home, away, league="nba"):
     """Timeouts, bonus, and ball possession from the core situation feed."""
     situation = situation if isinstance(situation, dict) else {}
     play = play if isinstance(play, dict) else {}
+    timeout_cap = 4 if league == "cbb" else 7
     possession = _abbr_for_team_id(
         _team_id_from_ref(play.get("possessionTeam")),
         home,
         away,
+        league,
     )
     if not possession:
-        possession = _board_abbr(possession_abbr(situation, home, away))
+        possession = _board_abbr(possession_abbr(situation, home, away), league)
     return {
         "possession": possession,
-        "away_timeouts": timeouts_remaining(situation, "away", cap=7),
-        "home_timeouts": timeouts_remaining(situation, "home", cap=7),
+        "away_timeouts": timeouts_remaining(situation, "away", cap=timeout_cap),
+        "home_timeouts": timeouts_remaining(situation, "home", cap=timeout_cap),
         "away_in_bonus": _side_in_bonus(situation.get("awayFouls")),
         "home_in_bonus": _side_in_bonus(situation.get("homeFouls")),
     }
@@ -213,11 +217,18 @@ def _core_play_player(play, home, away):
     }
 
 
-def _recent_plays(event_id):
+def _league_slug(league):
+    if str(league or "") == "cbb":
+        return "mens-college-basketball"
+    return "nba"
+
+
+def _recent_plays(event_id, league="nba"):
     """The newest plays, oldest first. The last item is the current play."""
+    slug = _league_slug(league)
     url = (
-        "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/"
-        f"events/{event_id}/competitions/{event_id}/plays?limit=8"
+        "https://sports.core.api.espn.com/v2/sports/basketball/"
+        f"leagues/{slug}/events/{event_id}/competitions/{event_id}/plays?limit=8"
     )
     page = _fetch_json(url)
     page_count = safe_int(page.get("pageCount"), 1) or 1
@@ -229,20 +240,22 @@ def _recent_plays(event_id):
     ]
 
 
-def _live_details(event_id, home, away):
+def _live_details(event_id, home, away, league="nba"):
     event_id = str(event_id or "").strip()
     if not event_id:
         return {}
     try:
         situation = _fetch_json(
-            CORE_SITUATION_URL.format(event_id=event_id)
+            CORE_SITUATION_URL.format(
+                event_id=event_id,
+            ).replace("/leagues/nba/", f"/leagues/{_league_slug(league)}/")
         )
     except (requests.RequestException, ValueError, json.JSONDecodeError):
         return {}
 
     plays = []
     try:
-        plays = _recent_plays(event_id)
+        plays = _recent_plays(event_id, league)
     except (requests.RequestException, ValueError, json.JSONDecodeError):
         plays = []
 
@@ -258,7 +271,7 @@ def _live_details(event_id, home, away):
             if play:
                 plays = [play]
 
-    details = _details_from_payload(situation, play, home, away)
+    details = _details_from_payload(situation, play, home, away, league)
     if play.get("text"):
         details["latest_text"] = str(play.get("text") or "").strip()
         details["latest_kind"] = str((play.get("type") or {}).get("text") or "").strip()
@@ -295,14 +308,17 @@ def _competitor_team_id(competitor):
     return str(team.get("id") or competitor.get("id") or "").strip()
 
 
-def _on_court(event_id, competitor):
+def _on_court(event_id, competitor, league="nba"):
     event_id = str(event_id or "").strip()
     team_id = _competitor_team_id(competitor)
     if not event_id or not team_id:
         return ()
     try:
         roster = _fetch_json(
-            CORE_ROSTER_URL.format(event_id=event_id, team_id=team_id)
+            CORE_ROSTER_URL.format(
+                event_id=event_id,
+                team_id=team_id,
+            ).replace("/leagues/nba/", f"/leagues/{_league_slug(league)}/")
         )
     except (requests.RequestException, ValueError, json.JSONDecodeError):
         return ()
@@ -428,14 +444,14 @@ def _player_line_from_stats(payload):
     }
 
 
-def _fetch_player_line(event_id, team_id, athlete_id):
+def _fetch_player_line(event_id, team_id, athlete_id, league="nba"):
     try:
         payload = _fetch_json(
             CORE_PLAYER_STATS_URL.format(
                 event_id=event_id,
                 team_id=team_id,
                 athlete_id=athlete_id,
-            )
+            ).replace("/leagues/nba/", f"/leagues/{_league_slug(league)}/")
         )
     except (requests.RequestException, ValueError, json.JSONDecodeError):
         return None
@@ -445,7 +461,7 @@ def _fetch_player_line(event_id, team_id, athlete_id):
     return line
 
 
-def _tracked_player(event_id, athlete_id, team_id, name, team_abbr_name):
+def _tracked_player(event_id, athlete_id, team_id, name, team_abbr_name, league="nba"):
     """Stats for the newest play that named a player."""
     event_id = str(event_id or "").strip()
     cached = _recent_players.get(event_id)
@@ -464,7 +480,12 @@ def _tracked_player(event_id, athlete_id, team_id, name, team_abbr_name):
     else:
         return None
 
-    line = _fetch_player_line(event_id, chosen["team_id"], chosen["id"])
+    line = _fetch_player_line(
+        event_id,
+        chosen["team_id"],
+        chosen["id"],
+        league,
+    )
     if line is None:
         return cached
     chosen = {
@@ -496,7 +517,15 @@ def get_record(team):
 
 
 def get_today_games():
-    data = fetch_nba_scoreboard()
+    return games_from_scoreboard(fetch_nba_scoreboard(), "nba")
+
+
+def games_from_scoreboard(data, league="nba"):
+    if league == "cbb":
+        from cbb.models import CollegeBasketballGame
+        model = CollegeBasketballGame
+    else:
+        model = BasketballGame
 
     games = []
 
@@ -517,8 +546,9 @@ def get_today_games():
             if competitor["homeAway"] == "home"
         )
 
-        away_team = _nba_abbr(away)
-        home_team = _nba_abbr(home)
+        away_team = _nba_abbr(away, league)
+        home_team = _nba_abbr(home, league)
+        timeout_cap = 4 if league == "cbb" else 7
         situation = competition.get("situation") or {}
 
         away_wins, away_losses = get_record(away)
@@ -535,9 +565,9 @@ def get_today_games():
             last_play_team_id,
         ) = _last_play(situation, home, away)
         away_in_bonus, home_in_bonus = _bonus_flags(situation)
-        possession = _board_abbr(possession_abbr(situation, home, away))
-        away_timeouts = timeouts_remaining(situation, "away", cap=7)
-        home_timeouts = timeouts_remaining(situation, "home", cap=7)
+        possession = _board_abbr(possession_abbr(situation, home, away), league)
+        away_timeouts = timeouts_remaining(situation, "away", cap=timeout_cap)
+        home_timeouts = timeouts_remaining(situation, "home", cap=timeout_cap)
         away_lineup = ()
         home_lineup = ()
         play_player = ""
@@ -564,7 +594,7 @@ def get_today_games():
             clock = ""
 
         if state == "in":
-            details = _live_details(event.get("id"), home, away)
+            details = _live_details(event.get("id"), home, away, league)
             if details.get("possession"):
                 possession = details["possession"]
             if details.get("away_timeouts") is not None:
@@ -573,8 +603,8 @@ def get_today_games():
                 home_timeouts = details["home_timeouts"]
             away_in_bonus = away_in_bonus or details.get("away_in_bonus", False)
             home_in_bonus = home_in_bonus or details.get("home_in_bonus", False)
-            away_lineup = _on_court(event.get("id"), away)
-            home_lineup = _on_court(event.get("id"), home)
+            away_lineup = _on_court(event.get("id"), away, league)
+            home_lineup = _on_court(event.get("id"), home, league)
             if details.get("latest_text"):
                 last_play_text = details["latest_text"]
                 last_play_type = details.get("latest_kind") or last_play_type
@@ -597,6 +627,7 @@ def get_today_games():
                 last_play_team_id,
                 core_play.get("name") or last_play_athlete,
                 core_play.get("team") or last_play_team,
+                league,
             )
             if tracked:
                 play_player = tracked.get("name", "")
@@ -621,7 +652,7 @@ def get_today_games():
                 quarter = 4
 
         games.append(
-            BasketballGame(
+            model(
                 away=away_team,
                 home=home_team,
 

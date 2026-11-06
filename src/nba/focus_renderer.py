@@ -1,3 +1,5 @@
+import contextvars
+
 from PIL import Image, ImageDraw
 
 from common.broadcast import draw_broadcast_logo
@@ -17,8 +19,25 @@ from common.fonts import (
     print_gfx_5x7_centered,
 )
 from common.settings import get_developer_settings
-from nba.colors import team_color
-from nba.nba_renderer import draw_team_logo, final_label, is_final, is_halftime, is_scheduled, quarter_label
+from nba.colors import team_color as _nba_team_color
+from nba.nba_renderer import draw_team_logo as _nba_draw_team_logo
+from nba.nba_renderer import final_label, is_final, is_halftime, is_scheduled, quarter_label
+
+_focus_league = contextvars.ContextVar("basketball_focus_league", default="nba")
+
+
+def team_color(team):
+    if _focus_league.get() == "cbb":
+        from cbb.colors import team_color as college_color
+        return college_color(team)
+    return _nba_team_color(team)
+
+
+def draw_team_logo(image, team, x, y, settings):
+    if _focus_league.get() == "cbb":
+        from cbb.renderer import draw_team_logo as draw_college_logo
+        return draw_college_logo(image, team, x, y, settings)
+    return _nba_draw_team_logo(image, team, x, y, settings)
 
 
 FOCUS_WIDTH = 384
@@ -225,14 +244,22 @@ def _anchors(is_home):
     return logo_x, text_x, True
 
 
-def _timeout_width():
-    return TIMEOUT_MAX * TIMEOUT_PIP_W + (TIMEOUT_MAX - 1) * TIMEOUT_PIP_GAP
+def _timeout_slots(game):
+    try:
+        slots = int(getattr(game, "timeout_slots", TIMEOUT_MAX))
+    except (TypeError, ValueError):
+        slots = TIMEOUT_MAX
+    return max(1, min(TIMEOUT_MAX, slots))
 
 
-def _draw_timeouts(draw, x, y, remaining):
-    remaining = max(0, min(TIMEOUT_MAX, _safe_int(remaining, 0)))
+def _timeout_width(slots=TIMEOUT_MAX):
+    return slots * TIMEOUT_PIP_W + (slots - 1) * TIMEOUT_PIP_GAP
+
+
+def _draw_timeouts(draw, x, y, remaining, slots=TIMEOUT_MAX):
+    remaining = max(0, min(slots, _safe_int(remaining, 0)))
     step = TIMEOUT_PIP_W + TIMEOUT_PIP_GAP
-    for index in range(TIMEOUT_MAX):
+    for index in range(slots):
         bx = x + index * step
         box = [bx, y, bx + TIMEOUT_PIP_W - 1, y + TIMEOUT_PIP_H - 1]
         if index < remaining:
@@ -274,7 +301,7 @@ def _team_in_bonus(game, team, is_home):
     return bool(getattr(game, flag, False))
 
 
-def _draw_status_row(draw, text_x, *, align_right, timeouts, in_bonus):
+def _draw_status_row(draw, text_x, *, align_right, timeouts, in_bonus, slots=TIMEOUT_MAX):
     label = "BONUS"
     label_w = get_4x5_width(label)
     label_color = BONUS_ORANGE if in_bonus else BONUS_OFF
@@ -285,14 +312,14 @@ def _draw_status_row(draw, text_x, *, align_right, timeouts, in_bonus):
         print_4x5(draw, label, label_x, STATUS_Y, label_color)
         return
 
-    pip_w = _timeout_width()
+    pip_w = _timeout_width(slots)
     if align_right:
         pip_x = text_x - pip_w
         label_x = pip_x - gap - label_w
     else:
         pip_x = text_x
         label_x = pip_x + pip_w + gap
-    _draw_timeouts(draw, pip_x, pip_y, timeouts)
+    _draw_timeouts(draw, pip_x, pip_y, timeouts, slots)
     print_4x5(draw, label, label_x, STATUS_Y, label_color)
 
 
@@ -407,6 +434,7 @@ def _draw_team_column(
             align_right=align_right,
             timeouts=timeouts,
             in_bonus=in_bonus,
+            slots=_timeout_slots(game),
         )
 
 
@@ -606,10 +634,23 @@ def _draw_live_or_final(image, draw, game, settings):
 
 
 def render_nba_focus(game, settings):
-    image = Image.new("RGB", (FOCUS_WIDTH, FOCUS_HEIGHT), BLACK)
-    draw = ImageDraw.Draw(image)
-    if is_scheduled(game):
-        _draw_scheduled(image, draw, game, settings)
-    else:
-        _draw_live_or_final(image, draw, game, settings)
-    return image
+    league = (
+        "cbb"
+        if game.__class__.__name__ == "CollegeBasketballGame"
+        else "nba"
+    )
+    token = _focus_league.set(league)
+    try:
+        image = Image.new("RGB", (FOCUS_WIDTH, FOCUS_HEIGHT), BLACK)
+        draw = ImageDraw.Draw(image)
+        if is_scheduled(game):
+            _draw_scheduled(image, draw, game, settings)
+        else:
+            _draw_live_or_final(image, draw, game, settings)
+        return image
+    finally:
+        _focus_league.reset(token)
+
+
+def render_cbb_focus(game, settings):
+    return render_nba_focus(game, settings)
