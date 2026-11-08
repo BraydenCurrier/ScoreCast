@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from common.game_ids import game_id, is_stock_id, sport_for_game
-from common.timezone import get_local_timezone
+from common.timezone import get_local_timezone, hour_clock
 
 
 EASTERN = ZoneInfo("America/New_York")
@@ -1069,6 +1069,8 @@ def _clock_text(value):
         return ""
     hour = minutes // 60
     minute = minutes % 60
+    if hour_clock() == "24":
+        return f"{hour}:{minute:02d}"
     suffix = "AM" if hour < 12 else "PM"
     shown = hour % 12 or 12
     return f"{shown}:{minute:02d} {suffix}"

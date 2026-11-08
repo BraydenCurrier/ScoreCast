@@ -19,6 +19,7 @@ from common.game_ids import game_id as shared_game_id
 from common.game_ids import game_is_shown
 from common.settings import get_developer_settings, get_settings, update_settings
 from common.timezone import ensure_network_timezone, start_timezone_refresh, timezone_status
+from common.weather import start_weather_refresh
 from common.splash import render_idle_splash
 from common.ticker_scroll import (
     build_strip,
@@ -1447,6 +1448,7 @@ if __name__ == "__main__":
     ).start()
 
     start_timezone_refresh()
+    start_weather_refresh()
 
     failed_sports = set()
     if setup_holds_display():

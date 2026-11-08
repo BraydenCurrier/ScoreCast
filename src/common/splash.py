@@ -17,7 +17,8 @@ from common.fonts import (
     print_gfx_5x7_centered,
     print_gfx_7x11,
 )
-from common.timezone import get_local_timezone
+from common.timezone import clock_face, get_local_timezone
+from common.weather import standby_weather
 
 
 NAVY = (11, 17, 32)
@@ -98,7 +99,7 @@ def render_idle_splash(width, height, caption="", games=None):
 
     A caption (used while scores are updating) keeps the centered
     wordmark. The empty board shows the clock, date, and link status,
-    with live games cycling on a line under the clock.
+    with weather or live games on a line under the clock.
     """
     caption = str(caption or "").strip().upper()
     if caption:
@@ -259,12 +260,20 @@ def _join_situation(label, clock):
     return label or clock
 
 
-def _current_slide(games):
+def _bottom_item(games):
+    """The line under the clock. Live games take turns there.
+
+    Weather does not join that rotation. A live score would hide it
+    for most of the minute. Weather sits above the clock instead,
+    and uses this line only when nothing is in progress.
+    """
     slides = _live_slides(games)
     if not slides:
         return None
+    if len(slides) == 1:
+        return ("game", slides[0])
     index = int(time.monotonic() // LIVE_HOLD_SECONDS) % len(slides)
-    return slides[index]
+    return ("game", slides[index])
 
 
 def _render_standby(width, height, games=None):
@@ -280,31 +289,54 @@ def _render_standby(width, height, games=None):
 
     _standby_cache["checked_at"] = now_mono
     clock = datetime.now(_display_zone())
+    time_text, period = clock_face(clock, seconds=True)
     bars, kind = _link_snapshot()
-    slide = _current_slide(games)
+    weather = standby_weather()
+    bottom = _bottom_item(games)
+    if bottom is None and weather:
+        bottom = ("weather", weather)
+    above = weather if bottom and bottom[0] == "game" else None
     key = (
         width,
         height,
-        clock.strftime("%Y-%m-%d %-I:%M:%S %p"),
+        time_text,
+        period,
         bars,
         kind,
-        slide,
+        bottom,
+        above,
     )
     if key == _standby_cache["key"] and isinstance(cached_image, Image.Image):
         return cached_image
 
-    image = _draw_standby(width, height, clock, bars, slide)
+    image = _draw_standby(
+        width,
+        height,
+        clock,
+        bars,
+        bottom,
+        above,
+        time_text,
+        period,
+    )
     _standby_cache["key"] = key
     _standby_cache["image"] = image
     return image
 
 
-def _draw_standby(width, height, clock, bars, slide=None):
+def _draw_standby(
+    width,
+    height,
+    clock,
+    bars,
+    bottom=None,
+    above=None,
+    time_text="",
+    period="",
+):
     image = Image.new("RGB", (width, height), NAVY)
     draw = ImageDraw.Draw(image)
 
-    time_text = clock.strftime("%-I:%M:%S")
-    period = clock.strftime("%p")
     date_text = clock.strftime("%a %b %-d").upper()
 
     clock_y = max(0, (height - 11) // 2)
@@ -314,8 +346,8 @@ def _draw_standby(width, height, clock, bars, slide=None):
     mark_right = _draw_mark(draw, margin, center_y)
 
     time_width = _clock_width(time_text)
-    period_width = get_4x5_width(period)
-    group_gap = 5
+    period_width = get_4x5_width(period) if period else 0
+    group_gap = 5 if period else 0
     group_width = time_width + group_gap + period_width
     group_x = (width - group_width) // 2
     min_group_x = mark_right + 12
@@ -323,22 +355,45 @@ def _draw_standby(width, height, clock, bars, slide=None):
         group_x = min_group_x
 
     _draw_clock(draw, time_text, group_x, clock_y, WHITE)
-    print_4x5(
-        draw,
-        period,
-        group_x + time_width + group_gap,
-        clock_y,
-        MUTED,
-    )
-    if slide is not None:
-        _draw_live_line(
+    if period:
+        print_4x5(
             draw,
-            slide,
-            group_x + group_width // 2,
+            period,
+            group_x + time_width + group_gap,
+            clock_y,
+            MUTED,
+        )
+    center_x = group_x + group_width // 2
+    if above is not None:
+        _draw_weather_line(
+            draw,
+            above,
+            center_x,
             clock_y,
             height,
             width,
+            y=max(0, clock_y - 8),
         )
+    if bottom is not None:
+        kind, payload = bottom
+        if kind == "weather":
+            _draw_weather_line(
+                draw,
+                payload,
+                center_x,
+                clock_y,
+                height,
+                width,
+            )
+        else:
+            _draw_live_line(
+                draw,
+                payload,
+                center_x,
+                clock_y,
+                height,
+                width,
+            )
 
     date_width = get_4x5_width(date_text)
     signal_x = width - margin - _SIGNAL_WIDTH
@@ -349,6 +404,31 @@ def _draw_standby(width, height, clock, bars, slide=None):
         _draw_signal(draw, signal_x, clock_y, bars)
 
     return image
+
+
+def _draw_weather_line(draw, weather, center_x, clock_y, height, width, y=None):
+    place, temperature, condition = weather
+    parts = []
+    if place:
+        parts.append((place, MUTED))
+    parts.append((f"{temperature}°", CYAN))
+    if condition:
+        parts.append((condition, WHITE))
+    gap = 6
+    widths = [get_4x5_width(text) for text, _color in parts]
+    total = sum(widths) + gap * (len(parts) - 1)
+    if place and total > width - 4:
+        parts = parts[1:]
+        widths = widths[1:]
+        total = sum(widths) + gap * (max(0, len(parts) - 1))
+    x = max(2, center_x - total // 2)
+    if x + total > width - 2:
+        x = max(2, width - 2 - total)
+    if y is None:
+        y = min(clock_y + 14, height - 5)
+    for text, color in parts:
+        print_4x5(draw, text, x, y, color)
+        x += get_4x5_width(text) + gap
 
 
 def _draw_live_line(draw, slide, center_x, clock_y, height, width):

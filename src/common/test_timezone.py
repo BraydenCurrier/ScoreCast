@@ -11,11 +11,13 @@ from zoneinfo import ZoneInfo
 from common import timezone as timezone_module
 from common.timezone import (
     clear_timezone_cache,
+    clock_face,
     detect_timezone_name,
     ensure_network_timezone,
     format_local_date,
     format_local_time,
     get_local_timezone,
+    normalize_hour_clock,
     normalize_timezone_setting,
     timezone_from_detection_body,
     timezone_status,
@@ -99,6 +101,31 @@ class TimezoneTests(unittest.TestCase):
                 )
         finally:
             self._restore_tz(old_tz)
+
+    def test_hour_clock_changes_kickoff_and_the_status_line(self):
+        stamp = "2026-10-22T18:00:00Z"
+        with self._settings({
+            "timezone": "America/Chicago",
+            "hour_clock": "24",
+        }):
+            self.assertEqual(format_local_time(stamp), "13:00")
+            detail = timezone_status()["detail"]
+            self.assertNotIn("AM", detail)
+            self.assertNotIn("PM", detail)
+            self.assertEqual(
+                clock_face(__import__("datetime").datetime(
+                    2026, 10, 22, 21, 4, 5,
+                    tzinfo=ZoneInfo("America/Chicago"),
+                ), seconds=True),
+                ("21:04:05", ""),
+            )
+        with self._settings({
+            "timezone": "America/Chicago",
+            "hour_clock": "12",
+        }):
+            self.assertEqual(format_local_time(stamp), "1:00")
+        self.assertEqual(normalize_hour_clock("24-hour"), "24")
+        self.assertEqual(normalize_hour_clock("nope"), "12")
 
     def test_invalid_setting_falls_back_to_automatic(self):
         self.assertEqual(

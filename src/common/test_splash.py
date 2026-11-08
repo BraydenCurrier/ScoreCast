@@ -7,10 +7,22 @@ from zoneinfo import ZoneInfo
 from common import splash
 
 
+def _pixels(image):
+    data = getattr(image, "get_flattened_data", None) or image.getdata
+    return list(data())
+
+
 def _bottom_band(image):
     width, height = image.size
-    pixels = list(image.get_flattened_data())
+    pixels = _pixels(image)
     return pixels[(height - 8) * width:]
+
+
+def _above_clock(image):
+    width, height = image.size
+    pixels = _pixels(image)
+    top = max(0, (height - 11) // 2)
+    return pixels[:top * width]
 
 
 def _Game(kind, away, home, status, away_score, home_score, **fields):
@@ -44,13 +56,20 @@ class SplashTests(unittest.TestCase):
             {"bars": 0, "kind": "off", "at": 0.0}
         )
         _Clock.second = 7
+        self._weather = patch.object(
+            splash,
+            "standby_weather",
+            return_value=None,
+        )
+        self._weather.start()
+        self.addCleanup(self._weather.stop)
 
     def test_updating_caption_stays_a_wordmark(self):
         image = splash.render_idle_splash(384, 32, "UPDATING")
         self.assertEqual(image.size, (384, 32))
         self.assertIs(splash.render_idle_splash(384, 32, "updating"), image)
-        self.assertIn(splash.CYAN, image.get_flattened_data())
-        self.assertNotIn(splash.WHITE, image.get_flattened_data())
+        self.assertIn(splash.CYAN, _pixels(image))
+        self.assertNotIn(splash.WHITE, _pixels(image))
 
     def test_empty_board_shows_clock_date_and_signal(self):
         splash._link_cache.update(
@@ -67,7 +86,7 @@ class SplashTests(unittest.TestCase):
             image = splash.render_idle_splash(384, 32)
 
         self.assertEqual(image.size, (384, 32))
-        pixels = set(image.get_flattened_data())
+        pixels = set(_pixels(image))
         self.assertIn(splash.NAVY, pixels)
         self.assertIn(splash.WHITE, pixels)
         self.assertIn(splash.CYAN, pixels)
@@ -96,8 +115,8 @@ class SplashTests(unittest.TestCase):
 
         self.assertIsNot(full, offline)
         self.assertGreater(
-            list(full.get_flattened_data()).count(splash.CYAN),
-            list(offline.get_flattened_data()).count(splash.CYAN),
+            _pixels(full).count(splash.CYAN),
+            _pixels(offline).count(splash.CYAN),
         )
 
     def test_seconds_tick_without_rebuilding_the_same_second(self):
@@ -161,8 +180,8 @@ class SplashTests(unittest.TestCase):
             second = splash.render_idle_splash(384, 32, games=games)
 
         self.assertEqual(first.size, (384, 32))
-        self.assertIn(splash.MUTED, first.get_flattened_data())
-        self.assertIn(splash.WHITE, first.get_flattened_data())
+        self.assertIn(splash.MUTED, _pixels(first))
+        self.assertIn(splash.WHITE, _pixels(first))
         first_line = _bottom_band(first)
         second_line = _bottom_band(second)
         self.assertIn(splash.CYAN, first_line)
@@ -213,7 +232,86 @@ class SplashTests(unittest.TestCase):
             ),
         ):
             image = splash.render_idle_splash(384, 32, games=games)
-        self.assertIn(splash.MUTED, image.get_flattened_data())
+        self.assertIn(splash.MUTED, _pixels(image))
+
+    def test_weather_holds_the_line_when_nothing_is_live(self):
+        splash._link_cache.update(
+            {"bars": 4, "kind": "wifi", "at": time.monotonic()}
+        )
+        weather = ("AUSTIN", "72", "CLEAR")
+        with (
+            patch.object(splash, "datetime", _Clock),
+            patch.object(
+                splash,
+                "_display_zone",
+                return_value=ZoneInfo("UTC"),
+            ),
+            patch.object(splash, "standby_weather", return_value=weather),
+        ):
+            image = splash.render_idle_splash(384, 32)
+            self.assertIsNone(splash._bottom_item([]))
+        self.assertIn(splash.CYAN, _bottom_band(image))
+        self.assertIn(splash.WHITE, _bottom_band(image))
+
+    def test_weather_sits_above_the_clock_while_games_rotate(self):
+        games = [
+            _Game("BasketballGame", "BOS", "LAL", "LIVE", 108, 99),
+            _Game("FootballGame", "GB", "DET", "LIVE", 14, 14),
+        ]
+        weather = ("AUSTIN", "72", "CLEAR")
+        splash._link_cache.update(
+            {"bars": 4, "kind": "wifi", "at": time.monotonic()}
+        )
+
+        def frame(now):
+            splash._standby_cache.update(
+                {"image": None, "key": None, "checked_at": 0.0}
+            )
+            with (
+                patch.object(splash, "datetime", _Clock),
+                patch.object(
+                    splash,
+                    "_display_zone",
+                    return_value=ZoneInfo("UTC"),
+                ),
+                patch.object(splash, "standby_weather", return_value=weather),
+                patch.object(splash.time, "monotonic", return_value=now),
+            ):
+                return splash.render_idle_splash(384, 32, games=games)
+
+        first = frame(0)
+        second = frame(4)
+        self.assertNotEqual(_bottom_band(first), _bottom_band(second))
+        self.assertIn(splash.WHITE, _above_clock(first))
+        self.assertIn(splash.CYAN, _above_clock(first))
+        self.assertIn(splash.WHITE, _above_clock(second))
+        self.assertNotIn(splash.WHITE, _above_clock(
+            splash.render_idle_splash(384, 32)
+        ))
+
+    def test_twenty_four_hour_clock_drops_am_pm(self):
+        splash._link_cache.update(
+            {"bars": 4, "kind": "wifi", "at": time.monotonic()}
+        )
+
+        def render(fmt):
+            splash._standby_cache.update(
+                {"image": None, "key": None, "checked_at": 0.0}
+            )
+            with (
+                patch.object(splash, "datetime", _Clock),
+                patch.object(
+                    splash,
+                    "_display_zone",
+                    return_value=ZoneInfo("America/Chicago"),
+                ),
+                patch("common.timezone.hour_clock", return_value=fmt),
+            ):
+                return splash.render_idle_splash(384, 32)
+
+        twelve = render("12")
+        twenty_four = render("24")
+        self.assertNotEqual(_pixels(twelve), _pixels(twenty_four))
 
     def test_quality_maps_onto_four_bars(self):
         self.assertEqual(splash._bars_for_quality(None), 4)

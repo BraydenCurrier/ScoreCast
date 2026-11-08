@@ -143,11 +143,45 @@ def _parse_local_datetime(value):
     return utc_dt.astimezone(get_local_timezone())
 
 
+def normalize_hour_clock(value) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"24", "24h", "24-hour"}:
+        return "24"
+    return "12"
+
+
+def hour_clock(settings=None) -> str:
+    """'12' or '24'. A bad or missing value stays on 12-hour."""
+    if settings is None:
+        try:
+            settings = get_settings()
+        except Exception:
+            return "12"
+    if not isinstance(settings, dict):
+        return "12"
+    return normalize_hour_clock(settings.get("hour_clock"))
+
+
+def clock_face(moment, *, seconds: bool = False) -> tuple[str, str]:
+    """Time text and an AM/PM marker.
+
+    The marker is empty when the clock is 24-hour.
+    """
+    use_24 = hour_clock() == "24"
+    if seconds:
+        pattern = "%-H:%M:%S" if use_24 else "%-I:%M:%S"
+    else:
+        pattern = "%-H:%M" if use_24 else "%-I:%M"
+    period = "" if use_24 else moment.strftime("%p")
+    return moment.strftime(pattern), period
+
+
 def format_local_time(value):
     local_dt = _parse_local_datetime(value)
     if local_dt is None:
         return str(value or "")
-    return local_dt.strftime("%-I:%M")
+    text, _period = clock_face(local_dt)
+    return text
 
 
 def format_local_date(value):
@@ -162,7 +196,8 @@ def timezone_status() -> dict[str, str]:
     cached = _cached_name()
     zone = get_local_timezone()
     name = getattr(zone, "key", str(zone))
-    clock = datetime.now(zone).strftime("%-I:%M %p")
+    text, period = clock_face(datetime.now(zone))
+    clock = f"{text} {period}".strip()
     label = timezone_label(name)
 
     if manual:

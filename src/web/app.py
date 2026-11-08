@@ -16,10 +16,16 @@ from common.game_ids import game_id as shared_game_id
 from common.game_ids import selected_sports_ids
 from common.settings import get_developer_settings, get_settings, update_settings
 from common.timezone import (
+    normalize_hour_clock,
     normalize_timezone_setting,
     timezone_choice_groups,
     timezone_label,
     timezone_status,
+)
+from common.weather import (
+    normalize_weather_location,
+    request_weather_refresh,
+    weather_status,
 )
 from common.system_stats import collect_system_stats
 from common.users import (
@@ -1136,7 +1142,7 @@ def page_styles():
       if (!isAutosaveForm(form) || shouldSkipAutosave(target)) {
         return;
       }
-      if (target.name === "username" || target.name === "season" || target.name === "espn_leagues" || target.name === "espn_cookies") {
+      if (target.name === "username" || target.name === "season" || target.name === "espn_leagues" || target.name === "espn_cookies" || target.name === "weather_location") {
         return;
       }
       if (
@@ -7509,6 +7515,13 @@ def settings_page():
         settings.get("timezone", "auto")
     )
     timezone_detail = timezone_status()["detail"]
+    hour_clock_setting = normalize_hour_clock(settings.get("hour_clock"))
+    hour_12_selected = " selected" if hour_clock_setting == "12" else ""
+    hour_24_selected = " selected" if hour_clock_setting == "24" else ""
+    weather_location = normalize_weather_location(
+        (settings.get("weather") or {}).get("location")
+    )
+    weather_detail = weather_status()["detail"]
 
     user = current_user()
     is_root = bool(user and user["role"] == "root")
@@ -7871,6 +7884,51 @@ def settings_page():
                         The Pi system timezone is not used.
                     </div>
                     {_timezone_picker_script()}
+                </div>
+
+                <div class="control">
+                    <div class="control-top">
+                        <label for="hour_clock">Clock</label>
+                    </div>
+
+                    <select
+                        id="hour_clock"
+                        name="hour_clock"
+                        class="select-input"
+                    >
+                        <option value="12"{hour_12_selected}>12-hour</option>
+                        <option value="24"{hour_24_selected}>24-hour</option>
+                    </select>
+
+                    <div class="hint">
+                        The standby clock and game start times use this.
+                    </div>
+                </div>
+
+                <div class="control">
+                    <div class="control-top">
+                        <label for="weather_location">Weather location</label>
+                    </div>
+
+                    <input
+                        class="search-input"
+                        id="weather_location"
+                        name="weather_location"
+                        type="text"
+                        maxlength="80"
+                        autocomplete="off"
+                        placeholder="City or ZIP"
+                        value="{escape(weather_location, quote=True)}"
+                    >
+
+                    <div class="hint" id="weather_hint">
+                        {escape(weather_detail)}
+                    </div>
+                    <div class="hint">
+                        Leave this blank to use the network location.
+                        A city, region, or ZIP overrides that.
+                        The clock standby shows the temperature in Fahrenheit.
+                    </div>
                 </div>
             </div>
 
@@ -8616,6 +8674,39 @@ def settings_page():
             }});
         }}
 
+        const weatherInput = document.getElementById("weather_location");
+        const weatherHint = document.getElementById("weather_hint");
+        function loadWeatherHint() {{
+            if (!weatherHint) {{
+                return;
+            }}
+            fetch("/api/weather", {{
+                credentials: "same-origin",
+            }}).then(function (response) {{
+                if (!response.ok) {{
+                    return null;
+                }}
+                return response.json();
+            }}).then(function (status) {{
+                if (status && status.detail) {{
+                    weatherHint.textContent = status.detail;
+                }}
+            }}).catch(function () {{}});
+        }}
+        if (weatherInput && weatherHint) {{
+            weatherInput.addEventListener("change", function () {{
+                weatherHint.textContent = weatherInput.value.trim()
+                    ? "Looking up that place…"
+                    : "Looking up this network…";
+                [600, 1800, 4000].forEach(function (delay) {{
+                    window.setTimeout(loadWeatherHint, delay);
+                }});
+            }});
+            if (!weatherInput.value) {{
+                window.setTimeout(loadWeatherHint, 1500);
+            }}
+        }}
+
         function setStatTone(id, value, warnAt, hotAt) {{
             const card = document.getElementById(id);
             if (!card) {{
@@ -9245,6 +9336,22 @@ def save_settings():
             request.form.get("timezone")
         )
 
+    if "hour_clock" in request.form:
+        payload["hour_clock"] = normalize_hour_clock(
+            request.form.get("hour_clock")
+        )
+
+    location_changed = False
+    if "weather_location" in request.form:
+        location = normalize_weather_location(
+            request.form.get("weather_location")
+        )
+        previous = normalize_weather_location(
+            (get_settings().get("weather") or {}).get("location")
+        )
+        payload["weather"] = {"location": location}
+        location_changed = location != previous
+
     user = current_user()
     if user and user["role"] == "root" and request.form.get("developer_form") == "1":
         payload["developer"] = {
@@ -9257,6 +9364,8 @@ def save_settings():
         }
 
     update_settings(payload)
+    if location_changed:
+        request_weather_refresh()
 
     return autosave_response("/settings")
 
@@ -9291,6 +9400,12 @@ def set_developer_access():
 @login_required
 def api_timezone():
     return jsonify(timezone_status())
+
+
+@app.route("/api/weather")
+@login_required
+def api_weather():
+    return jsonify(weather_status())
 
 
 @lru_cache(maxsize=1)

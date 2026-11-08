@@ -18,6 +18,7 @@ SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 
 DEFAULT_SETTINGS = {
     "timezone": "auto",
+    "hour_clock": "12",
     "scroll_speed": 30.0,
     "brightness": 40,
     "refresh_interval": 30,
@@ -157,6 +158,10 @@ DEFAULT_SETTINGS = {
     "bets": {
         "ticker_enabled": True,
         "notifications_enabled": True,
+    },
+
+    "weather": {
+        "location": "",
     },
 
     "developer": {
