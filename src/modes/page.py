@@ -43,9 +43,10 @@ def render_modes_page(styles, header, settings, error=""):
             Turn a mode on and it checks games on Scores. Those
             checks stay on until you turn the mode off. Anything it
             does not mention stays the way you set it. A night game can take the
-            whole screen while it is live. So can the last game a
-            mode leaves scrolling, for the NFL, college football,
-            MLB, and the NBA.
+            whole screen while it is live. The board also fills the
+            screen when the only card showing is one NFL, college
+            football, MLB, or NBA game. A stock, bet, player card,
+            or any other game keeps it scrolling.
         </p>
         {error_html}
         {cards}
@@ -155,6 +156,16 @@ def _create_form():
         <p class="hint">
             A live NFL, college, NBA, or MLB game that starts then
             takes the whole board. Leave it blank to keep scrolling.
+        </p>
+        <label class="live-filter">
+            <input type="checkbox" name="important" value="on">
+            <span>Important games only</span>
+        </label>
+        <p class="hint">
+            Live games stay up when they are close, in scoring
+            range, or a favorite is playing. A quiet blowout stays
+            off until it gets interesting. This works for every
+            league the mode includes.
         </p>
         <label class="live-filter">
             <input type="checkbox" name="favorites_only" value="on">

@@ -11,6 +11,7 @@ from modes.engine import (
     apply_mode_selection,
     delete_custom_mode,
     market_is_open,
+    focus_games_for_board,
     mode_focus_games,
     mode_locked_ids,
     mode_ticker,
@@ -236,10 +237,55 @@ class ModeScheduleTests(unittest.TestCase):
             self.all_games,
             settings,
             SUNDAY_MORNING,
-            manual_games=[self.stock],
         )
 
         self.assertEqual(focus, [self.early])
+
+    def test_another_card_keeps_the_single_mode_game_scrolling(self):
+        self.late.status = "STATUS_FINAL"
+        self.night.status = "STATUS_FINAL"
+        settings = _settings("nfl-sunday")
+
+        class BetTicket:
+            def __init__(self):
+                self.ticket_id = "bet-1"
+
+        class PlayerCard:
+            def __init__(self):
+                self.player_id = "player-1"
+
+        with_stock = mode_focus_games(
+            self.all_games,
+            settings,
+            SUNDAY_MORNING,
+            manual_games=[self.stock],
+        )
+        with_bet = mode_focus_games(
+            self.all_games,
+            settings,
+            SUNDAY_MORNING,
+            leading=[BetTicket()],
+        )
+        with_player = mode_focus_games(
+            self.all_games,
+            settings,
+            SUNDAY_MORNING,
+            leading=[PlayerCard()],
+        )
+        on_the_board = focus_games_for_board(
+            [self.stock, self.early],
+            settings,
+            SUNDAY_MORNING,
+        )
+
+        self.assertEqual(with_stock, [])
+        self.assertEqual(with_bet, [])
+        self.assertEqual(with_player, [])
+        self.assertEqual(on_the_board, [])
+        self.assertEqual(
+            focus_games_for_board([self.early], settings, SUNDAY_MORNING),
+            [self.early],
+        )
 
     def test_two_games_keep_scrolling(self):
         settings = _settings("nfl-sunday")
@@ -319,6 +365,8 @@ class ModeScheduleTests(unittest.TestCase):
         self.assertIn("NBA Tonight", html)
         self.assertIn("Live Only", html)
         self.assertIn("NFL Prime Time", html)
+        self.assertIn("NFL Redzone", html)
+        self.assertIn('name="important"', html)
         self.assertIn('action="/modes/save"', html)
         self.assertIn("Add mode", html)
         self.assertIn('name="sport" value="stocks"', html)
@@ -480,6 +528,96 @@ class ModeScheduleTests(unittest.TestCase):
             )
 
         self.assertEqual(shown, [ranked])
+
+    def test_nfl_redzone_keeps_the_games_worth_cutting_to(self):
+        blowout = _nfl("STATUS_IN_PROGRESS", EARLY, "blowout", "DAL", "NYG")
+        blowout.quarter = 2
+        blowout.away_score = 28
+        blowout.home_score = 3
+        blowout.possession = "DAL"
+        blowout.yardline_side = "DAL"
+        blowout.yardline_number = 30
+
+        close_late = _nfl("STATUS_IN_PROGRESS", EARLY, "close", "KC", "BUF")
+        close_late.quarter = 4
+        close_late.away_score = 17
+        close_late.home_score = 14
+        close_late.possession = "KC"
+        close_late.yardline_side = "KC"
+        close_late.yardline_number = 40
+
+        redzone = _nfl("STATUS_IN_PROGRESS", EARLY, "red", "SF", "SEA")
+        redzone.quarter = 1
+        redzone.away_score = 21
+        redzone.home_score = 0
+        redzone.possession = "SF"
+        redzone.yardline_side = "SEA"
+        redzone.yardline_number = 12
+
+        favorite = _nfl("STATUS_IN_PROGRESS", EARLY, "fav", "PHI", "DET")
+        favorite.quarter = 2
+        favorite.away_score = 24
+        favorite.home_score = 0
+        favorite.possession = "PHI"
+        favorite.yardline_side = "PHI"
+        favorite.yardline_number = 25
+
+        settings = _settings("nfl-redzone", favorites={"nfl": ["PHI"]})
+        shown = mode_ticker(
+            [blowout, close_late, redzone, favorite],
+            [],
+            [],
+            settings,
+            SUNDAY_LATE,
+        )
+
+        self.assertEqual(_ids(shown), ["red", "fav", "close"])
+        self.assertIsNone(
+            mode_ticker(
+                [blowout, close_late, redzone, favorite],
+                [],
+                [],
+                settings,
+                MONDAY,
+            )
+        )
+
+    def test_important_games_option_works_for_another_league(self):
+        tight = BasketballGame("STATUS_IN_PROGRESS", "tight")
+        tight.quarter = 4
+        tight.away_score = 102
+        tight.home_score = 98
+        runaway = BasketballGame("STATUS_IN_PROGRESS", "run")
+        runaway.quarter = 4
+        runaway.away_score = 110
+        runaway.home_score = 80
+        stored = save_custom_mode(_settings(), {
+            "name": "Close NBA",
+            "sports": ["nba"],
+            "phases": ["live"],
+            "important": True,
+        })
+        self.assertTrue(stored["custom"][0]["important"])
+        settings = {"modes": stored, "favorite_teams": {}}
+        settings["modes"] = set_mode_enabled(
+            settings,
+            stored["custom"][0]["id"],
+            True,
+        )
+
+        with patch(
+            "modes.engine.get_local_timezone",
+            return_value=ZoneInfo("America/Chicago"),
+        ):
+            shown = mode_ticker(
+                [runaway, tight],
+                [],
+                [],
+                settings,
+                SUNDAY_LATE,
+            )
+
+        self.assertEqual(shown, [tight])
 
     def test_a_mode_needs_a_name_and_something_to_show(self):
         with self.assertRaises(ValueError):

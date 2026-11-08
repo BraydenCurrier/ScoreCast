@@ -936,6 +936,16 @@ def card_settings_signature(settings):
     )
 
 
+def cards_on_board(ordered_games, settings):
+    """Every card the ticker is about to show, in display order."""
+    bets_settings = settings.get("bets") or {}
+    leading = []
+    if bets_settings.get("ticker_enabled", True):
+        leading.extend(ticker_tickets())
+    leading.extend(ticker_player_cards())
+    return leading + get_visible_games(ordered_games, settings)
+
+
 def sync_mode_focus_games(settings, now=None):
     """Point the focus board at the latest published games.
 
@@ -956,9 +966,8 @@ def sync_mode_focus_games(settings, now=None):
         current_games = list(_games)
 
     ordered_games = apply_saved_order(current_games, settings)
-    visible_games = get_visible_games(ordered_games, settings)
     _mode_focus_games[:] = focus_games_for_board(
-        visible_games,
+        cards_on_board(ordered_games, settings),
         settings,
         now,
     )
@@ -1017,15 +1026,8 @@ def rebuild_visible_games_if_needed(settings):
         return _visible_games_cache
 
     ordered_games = apply_saved_order(current_games, settings)
-    bets_settings = settings.get("bets") or {}
-    leading_cards = []
-    if bets_settings.get("ticker_enabled", True):
-        leading_cards.extend(ticker_tickets())
-    leading_cards.extend(ticker_player_cards())
-    visible_games = get_visible_games(ordered_games, settings)
+    visible_games = cards_on_board(ordered_games, settings)
     _mode_focus_games[:] = focus_games_for_board(visible_games, settings)
-    if leading_cards:
-        visible_games = leading_cards + visible_games
 
     live_keys = {
         card_cache_key(game, settings, logo_signature)

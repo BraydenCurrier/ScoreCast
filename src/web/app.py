@@ -3861,6 +3861,7 @@ def save_mode():
             "hide_outside": request.form.get("hide_outside") == "on",
             "favorites_only": request.form.get("favorites_only") == "on",
             "cfb_top25": request.form.get("cfb_top25") == "on",
+            "important": request.form.get("important") == "on",
         })
         block = set_mode_enabled(
             {"modes": block},

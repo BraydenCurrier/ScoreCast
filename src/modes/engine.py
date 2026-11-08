@@ -88,6 +88,7 @@ def _mode(
     focus_after="",
     favorites_only=False,
     cfb_top25=False,
+    important=False,
 ):
     return {
         "id": mode_id,
@@ -107,6 +108,7 @@ def _mode(
         "focus_after": focus_after,
         "favorites_only": bool(favorites_only),
         "cfb_top25": bool(cfb_top25),
+        "important": bool(important),
     }
 
 
@@ -141,6 +143,22 @@ PRESETS = (
         sports=("nfl",),
         phases=("live",),
         focus_after="18:00",
+    ),
+    _mode(
+        "nfl-redzone",
+        "NFL Redzone",
+        "Sunday NFL, live games only. The board keeps the ones "
+        "worth cutting to: a favorite, a one-score game in the "
+        "fourth quarter, the red zone, overtime, or a fourth down "
+        "in opponent territory. Quiet blowouts stay off.",
+        days=(6,),
+        start="12:00",
+        end="23:30",
+        window_zone="America/New_York",
+        slate_zone="America/New_York",
+        sports=("nfl",),
+        phases=("live",),
+        important=True,
     ),
     _mode(
         "cfb-saturday",
@@ -409,16 +427,13 @@ def focus_games_for_board(visible_games, settings, now=None):
     if not open_modes:
         return []
 
-    games = [
-        game for game in visible_games or []
-        if sport_for_game(game) in TEAM_SPORTS
-    ]
-    if len(games) != 1 or sport_for_game(games[0]) not in FOCUS_SPORTS:
+    cards = list(visible_games or [])
+    if len(cards) != 1 or sport_for_game(cards[0]) not in FOCUS_SPORTS:
         return []
 
-    sport = sport_for_game(games[0])
+    sport = sport_for_game(cards[0])
     if any(sport in set(mode.get("sports") or []) for mode in open_modes):
-        return games
+        return cards
     return []
 
 
@@ -498,6 +513,7 @@ def mode_ticker(all_games, manual_games, leading, settings, now=None):
 
     for sport, owners in controlled.items():
         source = leading if sport in LEADING_SPORTS else all_games
+        admitted = []
         for game in source or []:
             if sport_for_game(game) != sport:
                 continue
@@ -507,10 +523,16 @@ def mode_ticker(all_games, manual_games, leading, settings, now=None):
             if identifier in seen:
                 continue
             seen.add(identifier)
-            if sport in LEADING_SPORTS:
-                front.append(game)
-            else:
-                back.append(game)
+            admitted.append(game)
+        if any(mode.get("important") for mode in owners):
+            admitted.sort(
+                key=lambda game: _importance(game, settings),
+                reverse=True,
+            )
+        if sport in LEADING_SPORTS:
+            front.extend(admitted)
+        else:
+            back.extend(admitted)
 
     return front + kept + back
 
@@ -545,6 +567,11 @@ def describe_mode(mode):
         )
     if mode.get("favorites_only"):
         parts.append("Only favorite teams.")
+    if mode.get("important"):
+        parts.append(
+            "Live games stay up when they are close, in scoring "
+            "range, or a favorite is playing."
+        )
     if mode.get("cfb_top25"):
         parts.append("College football is limited to Top 25 games.")
     if mode.get("kind") == "overlay":
@@ -673,6 +700,7 @@ def _mode_from_fields(fields, mode_id):
         "focus_after": _clean_clock(fields.get("focus_after")),
         "favorites_only": bool(fields.get("favorites_only")),
         "cfb_top25": bool(fields.get("cfb_top25")),
+        "important": bool(fields.get("important")),
     }
 
 
@@ -693,6 +721,7 @@ def _clean_custom(raw):
                 "hide_outside": raw.get("kind") == "overlay",
                 "favorites_only": raw.get("favorites_only"),
                 "cfb_top25": raw.get("cfb_top25"),
+                "important": raw.get("important"),
             },
             raw.get("id"),
         )
@@ -740,6 +769,13 @@ def _allows(mode, game, instant, settings):
         if not _is_favorite(game, settings, sport):
             return False
     if sport == "cfb" and mode.get("cfb_top25") and not _is_top25(game):
+        return False
+    if (
+        mode.get("important")
+        and sport in TEAM_SPORTS
+        and game_phase(game) == "live"
+        and _importance(game, settings) <= 0
+    ):
         return False
     if sport not in TEAM_SPORTS:
         return True
@@ -902,7 +938,7 @@ def _id_sport(identifier):
 
 
 def _single_game_focus(all_games, manual_games, leading, settings, instant):
-    """Pin the board when a mode has left one game scrolling."""
+    """Pin the board when the whole ticker is one focus card."""
     ticker = mode_ticker(
         all_games,
         manual_games,
@@ -910,18 +946,11 @@ def _single_game_focus(all_games, manual_games, leading, settings, instant):
         settings,
         instant,
     )
-    if not ticker:
+    if len(ticker or []) != 1:
         return []
-
-    games = [
-        game for game in ticker
-        if sport_for_game(game) in TEAM_SPORTS
-    ]
-    if len(games) != 1:
+    if sport_for_game(ticker[0]) not in FOCUS_SPORTS:
         return []
-    if sport_for_game(games[0]) not in FOCUS_SPORTS:
-        return []
-    return games
+    return list(ticker)
 
 
 def _focus_picks(mode, games, instant, settings):
@@ -990,6 +1019,190 @@ def _is_top25(game):
         if 1 <= number <= 25:
             return True
     return False
+
+
+def _importance(game, settings):
+    """How worth cutting to this live game is. Zero stays off."""
+    sport = sport_for_game(game)
+    if game_phase(game) != "live" or sport not in TEAM_SPORTS:
+        return 0
+
+    score = 0
+    if _is_favorite(game, settings, sport):
+        score += 40
+
+    margin = _score_margin(game)
+    if sport in {"nfl", "cfb"}:
+        score += _football_importance(game, margin)
+    elif sport in {"nba", "cbb"}:
+        score += _basketball_importance(game, margin)
+    elif sport == "nhl":
+        score += _hockey_importance(game, margin)
+    elif sport == "mlb":
+        score += _baseball_importance(game, margin)
+    elif sport == "soccer":
+        score += _soccer_importance(game, margin)
+    return score
+
+
+def _football_importance(game, margin):
+    score = 0
+    quarter = _int_attr(game, "quarter")
+    if quarter >= 5 or _status_has(game, "OVERTIME", "OT"):
+        score += 45
+    if _in_red_zone(game):
+        score += 50
+    if _fourth_down_in_opponent_territory(game):
+        score += 30
+    if getattr(game, "scoring_play", False):
+        score += 25
+    if margin is None:
+        return score
+    if quarter >= 4 and margin <= 8:
+        score += 35
+    elif quarter == 3 and margin <= 3:
+        score += 20
+    return score
+
+
+def _basketball_importance(game, margin):
+    quarter = _int_attr(game, "quarter")
+    score = 0
+    if quarter >= 5 or _status_has(game, "OVERTIME", "OT"):
+        score += 45
+    if margin is None or quarter < 1:
+        return score
+    if margin <= 2:
+        score += 30
+    elif quarter >= 4 and margin <= 10:
+        score += 35
+    elif quarter == 3 and margin <= 5:
+        score += 18
+    return score
+
+
+def _hockey_importance(game, margin):
+    score = 0
+    period = _int_attr(game, "period")
+    if (
+        period > 3
+        or getattr(game, "overtime", False)
+        or getattr(game, "shootout", False)
+        or _status_has(game, "OVERTIME", "SHOOTOUT", "OT", "SO")
+    ):
+        score += 45
+    if margin is None:
+        return score
+    if margin <= 1:
+        score += 28
+    elif period >= 3 and margin <= 2:
+        score += 16
+    if margin <= 1 and str(getattr(game, "power_play", "") or "").strip():
+        score += 12
+    return score
+
+
+def _baseball_importance(game, margin):
+    inning = _int_attr(game, "inning")
+    score = 0
+    if inning >= 10 or _status_has(game, "EXTRA"):
+        score += 45
+    runners = (
+        bool(getattr(game, "second", False))
+        or bool(getattr(game, "third", False))
+    )
+    if margin is None:
+        return score
+    if inning >= 7 and margin <= 1:
+        score += 35
+    elif inning >= 7 and margin <= 2:
+        score += 20
+    if inning >= 6 and runners and margin <= 3:
+        score += 18
+    if (
+        getattr(game, "first", False)
+        and getattr(game, "second", False)
+        and getattr(game, "third", False)
+    ):
+        score += 12
+    return score
+
+
+def _soccer_importance(game, margin):
+    score = 0
+    if getattr(game, "penalties", False) or getattr(game, "extra_time", False):
+        score += 45
+    minute = _leading_number(getattr(game, "clock", ""))
+    if margin is None:
+        return score
+    if margin == 0:
+        score += 28
+    elif minute >= 70 and margin <= 1:
+        score += 22
+    reds = _int_attr(game, "away_reds") + _int_attr(game, "home_reds")
+    if reds and margin <= 1:
+        score += 12
+    return score
+
+
+def _in_red_zone(game):
+    possessing = str(getattr(game, "possession", "") or "").strip().upper()
+    away = str(getattr(game, "away", "") or "").strip().upper()
+    home = str(getattr(game, "home", "") or "").strip().upper()
+    side = str(getattr(game, "yardline_side", "") or "").strip().upper()
+    yard = _int_attr(game, "yardline_number")
+    if possessing not in {away, home} or not side or yard < 1 or yard > 20:
+        return False
+    opponent = home if possessing == away else away
+    return side == opponent
+
+
+def _fourth_down_in_opponent_territory(game):
+    if _int_attr(game, "down") != 4:
+        return False
+    possessing = str(getattr(game, "possession", "") or "").strip().upper()
+    away = str(getattr(game, "away", "") or "").strip().upper()
+    home = str(getattr(game, "home", "") or "").strip().upper()
+    side = str(getattr(game, "yardline_side", "") or "").strip().upper()
+    if possessing not in {away, home} or not side:
+        return False
+    opponent = home if possessing == away else away
+    return side == opponent
+
+
+def _score_margin(game):
+    away = getattr(game, "away_score", None)
+    home = getattr(game, "home_score", None)
+    if away is None or home is None:
+        return None
+    try:
+        return abs(int(away) - int(home))
+    except (TypeError, ValueError):
+        return None
+
+
+def _int_attr(game, name):
+    try:
+        return int(getattr(game, name))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _leading_number(value):
+    digits = ""
+    for char in str(value or ""):
+        if char.isdigit():
+            digits += char
+        elif digits:
+            break
+    if not digits:
+        return 0
+    return int(digits)
+
+
+def _status_has(game, *words):
+    status = str(getattr(game, "status", "") or "").upper()
+    return any(word in status for word in words)
 
 
 def _is_favorite(game, settings, sport):
