@@ -66,14 +66,14 @@ def _payload(season_type=2, week=8):
 
 
 class HalftimeBreakTests(unittest.TestCase):
-    def test_regular_and_playoff_breaks_are_thirteen_minutes(self):
+    def test_regular_season_break_is_fifteen_minutes(self):
         started, length = halftime_break(_payload())
         playoff, playoff_length = halftime_break(
             _payload(season_type=3, week=1)
         )
 
         self.assertEqual(started, "2026-11-02T02:56:35Z")
-        self.assertEqual(length, 13 * 60)
+        self.assertEqual(length, 15 * 60)
         self.assertEqual(playoff, started)
         self.assertEqual(playoff_length, 13 * 60)
 

@@ -25,6 +25,17 @@ def _above_clock(image):
     return pixels[:top * width]
 
 
+def _above_center(image):
+    """The band over the digits, clear of the wordmark."""
+    _width, height = image.size
+    top = max(0, (height - 11) // 2)
+    pixels = []
+    for y in range(top):
+        for x in range(120, 270):
+            pixels.append(image.getpixel((x, y)))
+    return pixels
+
+
 def _Game(kind, away, home, status, away_score, home_score, **fields):
     game = type(kind, (), {})()
     game.away = away
@@ -63,6 +74,17 @@ class SplashTests(unittest.TestCase):
         )
         self._weather.start()
         self.addCleanup(self._weather.stop)
+        self._theme = patch.object(splash, "active_theme", return_value=None)
+        self._theme.start()
+        self.addCleanup(self._theme.stop)
+        self._countdown = patch.object(
+            splash,
+            "countdown_line",
+            return_value=None,
+        )
+        self._countdown.start()
+        self.addCleanup(self._countdown.stop)
+        splash._theme_cache.update({"theme": None, "at": 0.0})
 
     def test_updating_caption_stays_a_wordmark(self):
         image = splash.render_idle_splash(384, 32, "UPDATING")
@@ -288,6 +310,59 @@ class SplashTests(unittest.TestCase):
         self.assertNotIn(splash.WHITE, _above_clock(
             splash.render_idle_splash(384, 32)
         ))
+
+    def test_countdown_sits_above_the_clock(self):
+        splash._link_cache.update(
+            {"bars": 4, "kind": "wifi", "at": time.monotonic()}
+        )
+        weather = ("AUSTIN", "72", "CLEAR")
+        with (
+            patch.object(splash, "datetime", _Clock),
+            patch.object(
+                splash,
+                "_display_zone",
+                return_value=ZoneInfo("UTC"),
+            ),
+            patch.object(splash, "standby_weather", return_value=weather),
+            patch.object(
+                splash,
+                "countdown_line",
+                return_value=("BUF KC", "1:02:03"),
+            ),
+        ):
+            image = splash.render_idle_splash(384, 32)
+        self.assertIn(splash.WHITE, _above_center(image))
+        self.assertIn(splash.MUTED, _above_center(image))
+        self.assertNotIn(splash.CYAN, _above_center(image))
+        self.assertIn(splash.CYAN, _bottom_band(image))
+
+    def test_countdown_and_live_games_hide_the_weather(self):
+        games = [
+            _Game("BasketballGame", "BOS", "LAL", "LIVE", 108, 99),
+        ]
+        weather = ("AUSTIN", "72", "CLEAR")
+        splash._link_cache.update(
+            {"bars": 4, "kind": "wifi", "at": time.monotonic()}
+        )
+        with (
+            patch.object(splash, "datetime", _Clock),
+            patch.object(
+                splash,
+                "_display_zone",
+                return_value=ZoneInfo("UTC"),
+            ),
+            patch.object(splash, "standby_weather", return_value=weather),
+            patch.object(
+                splash,
+                "countdown_line",
+                return_value=("BUF KC", "1:02:03"),
+            ),
+        ):
+            image = splash.render_idle_splash(384, 32, games=games)
+        self.assertIn(splash.WHITE, _above_center(image))
+        self.assertNotIn(splash.CYAN, _above_center(image))
+        self.assertIn(splash.WHITE, _bottom_band(image))
+        self.assertNotIn(splash.MUTED, _bottom_band(image))
 
     def test_twenty_four_hour_clock_drops_am_pm(self):
         splash._link_cache.update(

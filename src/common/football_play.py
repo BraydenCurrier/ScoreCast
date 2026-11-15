@@ -436,9 +436,9 @@ def _parse_box_totals(payload, league="nfl"):
 def halftime_break(payload, league="nfl"):
     """When the half ended, and how long that intermission usually runs.
 
-    ESPN stamps the end-of-half play with a wallclock. NFL breaks are
-    13 minutes, except the Super Bowl, which is 30. College breaks are
-    20 minutes.
+    ESPN stamps the end-of-half play with a wallclock. A regular-season
+    NFL break is 15 minutes. Other playoff breaks are 13, and the
+    Super Bowl is 30. College breaks are 20 minutes.
     """
     started = ""
     for play in _summary_plays(payload):
@@ -473,19 +473,25 @@ def _halftime_length(payload, league="nfl"):
         return 20 * 60
     if _is_super_bowl(payload):
         return 30 * 60
-    return 13 * 60
+    if _season_kind(payload) == 3:
+        return 13 * 60
+    return 15 * 60
+
+
+def _season_kind(payload):
+    header = (payload or {}).get("header") or {}
+    season = header.get("season") or {}
+    try:
+        return int(season.get("type") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _is_super_bowl(payload):
     """ESPN numbers the Super Bowl as postseason week 5."""
-    header = (payload or {}).get("header") or {}
-    season = header.get("season") or {}
-    try:
-        kind = int(season.get("type") or 0)
-    except (TypeError, ValueError):
-        kind = 0
-    if kind != 3:
+    if _season_kind(payload) != 3:
         return False
+    header = (payload or {}).get("header") or {}
     week = header.get("week")
     if isinstance(week, dict):
         week = week.get("number")

@@ -477,6 +477,7 @@ def _parse_game(game, include_scoring_plays=False):
         strikes=int(linescore.get("strikes", 0) or 0),
         batter=_person_last_name(offense.get("batter")),
         pitcher=_person_last_name(defense.get("pitcher")),
+        start_at=str(game.get("gameDate") or ""),
     )
 
 

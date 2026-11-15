@@ -38,3 +38,4 @@ class SoccerGame:
     home_pk: int | None = None
     away_agg: int | None = None
     home_agg: int | None = None
+    start_at: str = ""

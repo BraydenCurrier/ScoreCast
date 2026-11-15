@@ -12,6 +12,13 @@ from html import escape
 
 from flask import Flask, abort, request, redirect, send_file, session, jsonify, url_for
 
+from common.countdown import (
+    can_countdown,
+    countdown_button,
+    countdown_settings_for,
+    empty_countdown,
+    saved_countdown,
+)
 from common.game_ids import game_id as shared_game_id
 from common.game_ids import selected_sports_ids
 from common.settings import get_developer_settings, get_settings, update_settings
@@ -461,6 +468,7 @@ def page_header(active_page="games"):
         "players",
         "logos",
         "favorites",
+        "themes",
         "settings",
         "profiles",
     )
@@ -486,6 +494,7 @@ def page_header(active_page="games"):
         "logos": ("Logos", "Pick a look or upload your own"),
         "settings": ("Settings", "Display, updates, and access"),
         "favorites": ("Favorites", "Keep your teams first"),
+        "themes": ("Clock themes", "A background for the standby clock"),
         "profiles": ("Settings", "Display, updates, and access"),
         "modes": ("Modes", "Schedules that change the board"),
         "stocks": ("Stocks", "Quotes that scroll on the board"),
@@ -613,6 +622,7 @@ def page_header(active_page="games"):
             <a class="more-link" href="/players">Players</a>
             <a class="more-link" href="/favorites">Favorites</a>
             <a class="more-link" href="/logos">Logos</a>
+            <a class="more-link" href="/clock-themes">Clock themes</a>
             <a class="more-link" href="/settings">Settings</a>
             <a class="more-link more-link-quiet" href="/logout">Sign out</a>
         </div>
@@ -1005,7 +1015,7 @@ def page_styles():
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="{font_href}" media="print" onload="this.media='all'">
     <noscript><link rel="stylesheet" href="{font_href}"></noscript>
-    <link rel="stylesheet" href="/static/app.css?v=35">
+    <link rel="stylesheet" href="/static/app.css?v=38">
     """ + """
     <script>
     (function () {
@@ -2496,12 +2506,44 @@ def _profiles_cards_html(saved_message="", error=""):
     """
 
 
+def _countdown_note(pick):
+    matchup = " at ".join(
+        part for part in (pick.get("away"), pick.get("home")) if part
+    )
+    label = escape(matchup or "the selected game")
+    return f"""
+    <div class="countdown-note">
+        <span>The clock counts down to {label}.</span>
+        <button type="submit" form="clock-countdown" name="game" value="" class="quiet-button">Remove</button>
+    </div>
+    """
+
+
+@app.route("/games/countdown", methods=["POST"])
+@login_required
+def save_game_countdown():
+    game_id = str(request.form.get("game") or "").strip()
+    if not game_id:
+        update_settings({"countdown": empty_countdown()})
+        return redirect("/games")
+    match = next(
+        (game for game in latest_games if get_game_id(game) == game_id),
+        None,
+    )
+    payload = countdown_settings_for(match) if match is not None else None
+    if payload:
+        update_settings({"countdown": payload})
+    return redirect("/games")
+
+
 @app.route("/games")
 @login_required
 def games():
     from modes.engine import mode_locked_ids
 
     settings = get_settings()
+    countdown_pick = saved_countdown(settings)
+    countdown_id = countdown_pick["game_id"]
     hidden = set(settings.get("hidden_games", []))
     selected_ids = selected_sports_ids(settings)
     locked_ids = set(mode_locked_ids(latest_games, settings))
@@ -2705,6 +2747,13 @@ def games():
             show_initially = league_key == selected_league_filter
         row_style = "" if show_initially else ' style="display:none"'
 
+        countdown_html = ""
+        if can_countdown(game):
+            countdown_html = countdown_button(
+                game_id,
+                game_id == countdown_id,
+            )
+
         game_row_parts.append(f"""
         <div class="game-row-container" draggable="true" data-search="{safe_search}" data-id="{safe_game_id}" data-league="{league_key}" data-top25="{"true" if is_top_25 else "false"}" data-live="{"true" if is_live else "false"}" data-favorite="{"true" if favorite_game else "false"}"{row_style}>
             <label class="game-row">
@@ -2714,6 +2763,7 @@ def games():
                     {scoreboard}
                 </div>
             </label>
+            {countdown_html}
         </div>
         """)
 
@@ -2738,6 +2788,7 @@ def games():
     <div class="page">
         {page_header("games")}
 
+        <form id="clock-countdown" method="POST" action="/games/countdown"></form>
         <form method="POST" action="/save_games" data-autosave="1">
             <div class="card score-card" id="games_card">
                 <div class="hint" style="margin-bottom:12px;">
@@ -2746,7 +2797,9 @@ def games():
                     Changes apply as soon as you tap a game.
                     A game checked by a mode stays on until you
                     turn that mode off.
+                    Countdown puts that game's kickoff above the clock.
                 </div>
+                {(_countdown_note(countdown_pick) if countdown_id else "")}
                 <input
                     class="search-input"
                     type="text"
@@ -7519,6 +7572,18 @@ def settings_page():
     hour_clock_setting = normalize_hour_clock(settings.get("hour_clock"))
     hour_12_selected = " selected" if hour_clock_setting == "12" else ""
     hour_24_selected = " selected" if hour_clock_setting == "24" else ""
+    from common.clock_themes import (
+        normalize_clock_theme,
+        theme_league,
+        theme_name,
+    )
+
+    clock_theme_setting = normalize_clock_theme(
+        settings.get("clock_theme"),
+        settings,
+    )
+    clock_theme_label = theme_name(clock_theme_setting)
+    clock_theme_league = theme_league(clock_theme_setting)
     weather_location = normalize_weather_location(
         (settings.get("weather") or {}).get("location")
     )
@@ -7903,6 +7968,18 @@ def settings_page():
 
                     <div class="hint">
                         The standby clock and game start times use this.
+                    </div>
+                </div>
+
+                <div class="control">
+                    <div class="control-top">
+                        <label>Clock background</label>
+                        <a class="quiet-button" href="/clock-themes?league={escape(clock_theme_league, quote=True)}">Choose</a>
+                    </div>
+
+                    <div class="hint">
+                        Now showing {escape(clock_theme_label)}. The picture
+                        sits behind the standby clock.
                     </div>
                 </div>
 
@@ -9342,6 +9419,14 @@ def save_settings():
             request.form.get("hour_clock")
         )
 
+    if "clock_theme" in request.form:
+        from common.clock_themes import normalize_clock_theme
+
+        payload["clock_theme"] = normalize_clock_theme(
+            request.form.get("clock_theme"),
+            get_settings(),
+        )
+
     location_changed = False
     if "weather_location" in request.form:
         location = normalize_weather_location(
@@ -9369,6 +9454,82 @@ def save_settings():
         request_weather_refresh()
 
     return autosave_response("/settings")
+
+
+@app.route("/clock-themes")
+@login_required
+def clock_themes_page():
+    from clock_themes.page import render_clock_themes_page
+    from common.clock_themes import normalize_clock_theme
+    from common.team_clock import LEAGUES
+
+    settings = get_settings()
+    league = str(request.args.get("league") or "").strip().lower()
+    active = normalize_clock_theme(settings.get("clock_theme"), settings)
+    known = {key for key, _label in LEAGUES}
+    if league not in known:
+        league = "featured"
+        if active.startswith("team_"):
+            parts = active.split("_", 2)
+            if len(parts) == 3 and parts[1] in known:
+                league = parts[1]
+    return render_clock_themes_page(
+        page_styles(),
+        page_header("themes"),
+        settings,
+        league,
+        active,
+    )
+
+
+@app.route("/clock-themes/preview.png")
+@login_required
+def clock_theme_preview():
+    from io import BytesIO
+
+    from common.clock_themes import (
+        normalize_clock_theme,
+        render_preview,
+        theme_by_id,
+        with_logo_choice,
+    )
+
+    settings = get_settings()
+    theme_id = normalize_clock_theme(
+        request.args.get("id") or settings.get("clock_theme"),
+        settings,
+    )
+    try:
+        phase = float(request.args.get("phase") or 0)
+    except (TypeError, ValueError):
+        phase = 0
+    image = render_preview(
+        with_logo_choice(theme_by_id(theme_id), settings),
+        phase,
+    )
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = send_file(buffer, mimetype="image/png")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/clock-themes/use", methods=["POST"])
+@login_required
+def use_clock_theme():
+    from common.clock_themes import normalize_clock_theme
+    from common.team_clock import LEAGUES
+
+    theme_id = normalize_clock_theme(
+        request.form.get("theme_id"),
+        get_settings(),
+    )
+    update_settings({"clock_theme": theme_id})
+    league = str(request.form.get("league") or "featured").strip().lower()
+    if league not in {key for key, _label in LEAGUES}:
+        league = "featured"
+    return redirect(url_for("clock_themes_page", league=league))
 
 
 @app.route("/settings/developer", methods=["POST"])

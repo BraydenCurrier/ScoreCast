@@ -8,6 +8,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+from common.clock_themes import active_theme, clock_palette, paint_theme, theme_signature
+from common.countdown import countdown_line
 from common.fonts import (
     gfx_5x7_width,
     get_4x5_width,
@@ -92,6 +94,7 @@ _link_cache: dict[str, object] = {
     "kind": "off",
     "at": 0.0,
 }
+_theme_cache: dict[str, object] = {"theme": None, "at": 0.0}
 
 
 def render_idle_splash(width, height, caption="", games=None):
@@ -260,12 +263,34 @@ def _join_situation(label, clock):
     return label or clock
 
 
+def _standby_layers(games, weather, countdown):
+    """What sits above the clock, and what sits under it.
+
+    A countdown owns the line above the time. Weather uses that line
+    only while a live score is under the clock and no countdown is
+    set. A countdown together with a live score leaves weather off.
+    """
+    bottom = _bottom_item(games)
+    live = bool(bottom and bottom[0] == "game")
+    if countdown:
+        above = ("countdown", countdown)
+        if not live and bottom is None and weather:
+            bottom = ("weather", weather)
+    elif live and weather:
+        above = ("weather", weather)
+    else:
+        above = None
+        if bottom is None and weather:
+            bottom = ("weather", weather)
+    return above, bottom
+
+
 def _bottom_item(games):
     """The line under the clock. Live games take turns there.
 
-    Weather does not join that rotation. A live score would hide it
-    for most of the minute. Weather sits above the clock instead,
-    and uses this line only when nothing is in progress.
+    Weather does not join that rotation. It sits above the clock
+    while a live score is showing, and under the clock when the
+    board is quiet. A game countdown takes the upper line instead.
     """
     slides = _live_slides(games)
     if not slides:
@@ -292,10 +317,12 @@ def _render_standby(width, height, games=None):
     time_text, period = clock_face(clock, seconds=True)
     bars, kind = _link_snapshot()
     weather = standby_weather()
-    bottom = _bottom_item(games)
-    if bottom is None and weather:
-        bottom = ("weather", weather)
-    above = weather if bottom and bottom[0] == "game" else None
+    countdown = countdown_line(games)
+    above, bottom = _standby_layers(games, weather, countdown)
+    theme = _standby_theme()
+    # Ten frames a second is enough for snow on this panel, and it
+    # keeps the Pi from repainting the clock on every refresh.
+    frame = int(now_mono * 10) if theme else 0
     key = (
         width,
         height,
@@ -305,6 +332,8 @@ def _render_standby(width, height, games=None):
         kind,
         bottom,
         above,
+        theme_signature(theme),
+        frame,
     )
     if key == _standby_cache["key"] and isinstance(cached_image, Image.Image):
         return cached_image
@@ -318,6 +347,8 @@ def _render_standby(width, height, games=None):
         above,
         time_text,
         period,
+        theme=theme,
+        phase=frame / 10 if theme else None,
     )
     _standby_cache["key"] = key
     _standby_cache["image"] = image
@@ -333,8 +364,13 @@ def _draw_standby(
     above=None,
     time_text="",
     period="",
+    theme=None,
+    phase=None,
 ):
     image = Image.new("RGB", (width, height), NAVY)
+    if theme:
+        when = time.monotonic() if phase is None else float(phase)
+        paint_theme(image, theme, when)
     draw = ImageDraw.Draw(image)
 
     date_text = clock.strftime("%a %b %-d").upper()
@@ -342,8 +378,17 @@ def _draw_standby(
     clock_y = max(0, (height - 11) // 2)
     center_y = clock_y + 5
 
+    colors = _theme_colors(theme)
+    ink = colors["ink"] if colors else None
+    mark = colors["mark"] if colors else None
     margin = 14 if width >= 320 else 6
-    mark_right = _draw_mark(draw, margin, center_y)
+    mark_right = _draw_mark(
+        draw,
+        margin,
+        center_y,
+        text=mark or BLUE,
+        rule=mark or CYAN,
+    )
 
     time_width = _clock_width(time_text)
     period_width = get_4x5_width(period) if period else 0
@@ -354,26 +399,45 @@ def _draw_standby(
     if group_x < min_group_x:
         group_x = min_group_x
 
-    _draw_clock(draw, time_text, group_x, clock_y, WHITE)
+    _draw_clock(
+        draw,
+        time_text,
+        group_x,
+        clock_y,
+        ink or WHITE,
+        colon=ink or CYAN,
+    )
     if period:
         print_4x5(
             draw,
             period,
             group_x + time_width + group_gap,
             clock_y,
-            MUTED,
+            ink or MUTED,
         )
     center_x = group_x + group_width // 2
     if above is not None:
-        _draw_weather_line(
-            draw,
-            above,
-            center_x,
-            clock_y,
-            height,
-            width,
-            y=max(0, clock_y - 8),
-        )
+        kind, payload = above
+        if kind == "countdown":
+            _draw_countdown_line(
+                draw,
+                payload,
+                center_x,
+                clock_y,
+                width,
+                colors=colors,
+            )
+        else:
+            _draw_weather_line(
+                draw,
+                payload,
+                center_x,
+                clock_y,
+                height,
+                width,
+                y=max(0, clock_y - 8),
+                colors=colors,
+            )
     if bottom is not None:
         kind, payload = bottom
         if kind == "weather":
@@ -384,6 +448,7 @@ def _draw_standby(
                 clock_y,
                 height,
                 width,
+                colors=colors,
             )
         else:
             _draw_live_line(
@@ -393,6 +458,7 @@ def _draw_standby(
                 clock_y,
                 height,
                 width,
+                colors=colors,
             )
 
     date_width = get_4x5_width(date_text)
@@ -400,20 +466,64 @@ def _draw_standby(
     date_x = signal_x - 10 - date_width
     date_y = clock_y + (11 - 5) // 2
     if date_x > group_x + group_width + 8:
-        print_4x5(draw, date_text, date_x, date_y, MUTED)
-        _draw_signal(draw, signal_x, clock_y, bars)
+        print_4x5(
+            draw,
+            date_text,
+            date_x,
+            date_y,
+            colors["soft"] if colors else MUTED,
+        )
+        _draw_signal(
+            draw,
+            signal_x,
+            clock_y,
+            bars,
+            on=mark or CYAN,
+            off=colors["dim"] if colors else BAR_OFF,
+        )
 
     return image
 
 
-def _draw_weather_line(draw, weather, center_x, clock_y, height, width, y=None):
+def _theme_colors(theme):
+    """Main color for the time, alternate color for the rest of the clock."""
+    return clock_palette(theme)
+
+
+def _draw_countdown_line(draw, countdown, center_x, clock_y, width, colors=None):
+    teams, remaining = countdown
+    team_color = colors["mark"] if colors else MUTED
+    time_color = colors["ink"] if colors else WHITE
+    parts = []
+    if teams:
+        parts.append((str(teams), team_color))
+    if remaining:
+        parts.append((str(remaining), time_color))
+    if not parts:
+        return
+    gap = 6
+    widths = [get_4x5_width(text) for text, _color in parts]
+    total = sum(widths) + gap * (len(parts) - 1)
+    x = max(2, center_x - total // 2)
+    if x + total > width - 2:
+        x = max(2, width - 2 - total)
+    y = max(0, clock_y - 8)
+    for text, color in parts:
+        print_4x5(draw, text, x, y, color)
+        x += get_4x5_width(text) + gap
+
+
+def _draw_weather_line(draw, weather, center_x, clock_y, height, width, y=None, colors=None):
     place, temperature, condition = weather
+    place_color = colors["soft"] if colors else MUTED
+    temp_color = colors["ink"] if colors else CYAN
+    condition_color = colors["mark"] if colors else WHITE
     parts = []
     if place:
-        parts.append((place, MUTED))
-    parts.append((f"{temperature}°", CYAN))
+        parts.append((place, place_color))
+    parts.append((f"{temperature}°", temp_color))
     if condition:
-        parts.append((condition, WHITE))
+        parts.append((condition, condition_color))
     gap = 6
     widths = [get_4x5_width(text) for text, _color in parts]
     total = sum(widths) + gap * (len(parts) - 1)
@@ -431,7 +541,7 @@ def _draw_weather_line(draw, weather, center_x, clock_y, height, width, y=None):
         x += get_4x5_width(text) + gap
 
 
-def _draw_live_line(draw, slide, center_x, clock_y, height, width):
+def _draw_live_line(draw, slide, center_x, clock_y, height, width, colors=None):
     league, away, home = slide[0], slide[1], slide[2]
     away_text, home_text = slide[5], slide[6]
     situation = slide[7] if len(slide) > 7 else ""
@@ -449,14 +559,17 @@ def _draw_live_line(draw, slide, center_x, clock_y, height, width):
     if x + total > width - 2:
         x = max(2, width - 2 - total)
     y = min(clock_y + 14, height - 5)
-    print_4x5(draw, league, x, y, CYAN)
+    league_color = colors["mark"] if colors else CYAN
+    score_color = colors["ink"] if colors else WHITE
+    situation_color = colors["soft"] if colors else MUTED
+    print_4x5(draw, league, x, y, league_color)
     score_x = x + league_width + gap
-    print_4x5(draw, score, score_x, y, WHITE)
+    print_4x5(draw, score, score_x, y, score_color)
     if situation:
-        print_4x5(draw, situation, score_x + score_width + gap, y, MUTED)
+        print_4x5(draw, situation, score_x + score_width + gap, y, situation_color)
 
 
-def _draw_mark(draw, x, center_y):
+def _draw_mark(draw, x, center_y, text=BLUE, rule=CYAN):
     word = "GAMELINE"
     word_width = gfx_5x7_width(word)
     text_y = center_y - 3
@@ -465,12 +578,12 @@ def _draw_mark(draw, x, center_y):
     line_right = x + line_pad + word_width + line_pad
     draw.line(
         [(line_left, text_y - 4), (line_right, text_y - 4)],
-        fill=CYAN,
+        fill=rule,
     )
-    print_gfx_5x7(draw, word, x + line_pad, text_y, BLUE)
+    print_gfx_5x7(draw, word, x + line_pad, text_y, text)
     draw.line(
         [(line_left, text_y + 10), (line_right, text_y + 10)],
-        fill=CYAN,
+        fill=rule,
     )
     return line_right
 
@@ -486,18 +599,18 @@ def _clock_width(text):
     return width
 
 
-def _draw_clock(draw, text, x, y, color):
+def _draw_clock(draw, text, x, y, color, colon=CYAN):
     cursor = x
     last = len(text) - 1
     for index, char in enumerate(text):
         if char == ":":
             draw.rectangle(
                 [cursor, y + 3, cursor + 1, y + 4],
-                fill=CYAN,
+                fill=colon,
             )
             draw.rectangle(
                 [cursor, y + 7, cursor + 1, y + 8],
-                fill=CYAN,
+                fill=colon,
             )
             cursor += 2 if index == last else 4
             continue
@@ -506,16 +619,26 @@ def _draw_clock(draw, text, x, y, color):
     return cursor
 
 
-def _draw_signal(draw, x, top, bars):
+def _draw_signal(draw, x, top, bars, on=CYAN, off=BAR_OFF):
     lit = max(0, min(len(_BAR_HEIGHTS), int(bars)))
     for index, height in enumerate(_BAR_HEIGHTS):
-        color = CYAN if index < lit else BAR_OFF
+        color = on if index < lit else off
         left = x + index * _BAR_PITCH
         bottom = top + 10
         draw.rectangle(
             [left, bottom - height + 1, left + 1, bottom],
             fill=color,
         )
+
+
+def _standby_theme():
+    now = time.monotonic()
+    if now - float(_theme_cache["at"]) < 0.4:
+        return _theme_cache["theme"]
+    theme = active_theme()
+    _theme_cache["theme"] = theme
+    _theme_cache["at"] = now
+    return theme
 
 
 def _display_zone():

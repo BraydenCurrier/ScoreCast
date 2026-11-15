@@ -957,6 +957,7 @@ def get_today_games():
                     home.get("shootoutScore"),
                 ),
                 event_id=str(event.get("id") or ""),
+                start_at=str(event.get("date") or ""),
             )
         )
         if game_status != "Scheduled":

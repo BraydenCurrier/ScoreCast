@@ -51,3 +51,4 @@ class BasketballGame:
     home_quarters: tuple = ()
     away_lineup: tuple = ()
     home_lineup: tuple = ()
+    start_at: str = ""

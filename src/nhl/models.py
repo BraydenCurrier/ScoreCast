@@ -49,3 +49,4 @@ class HockeyGame:
     last_play_label: str = ""
     last_play_goal: bool = False
     empty_net: bool = False
+    start_at: str = ""

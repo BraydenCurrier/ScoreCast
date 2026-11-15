@@ -420,6 +420,7 @@ def _parse_events(data, league_id):
                 home_pk=safe_int(home.get("shootoutScore")),
                 away_agg=away_agg,
                 home_agg=home_agg,
+                start_at=str(event.get("date") or ""),
             )
         )
 

@@ -72,3 +72,4 @@ class BaseballGame:
     batter_stat: str = ""
     date: str = ""
     broadcast: str = ""
+    start_at: str = ""

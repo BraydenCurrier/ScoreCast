@@ -19,6 +19,7 @@ SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 DEFAULT_SETTINGS = {
     "timezone": "auto",
     "hour_clock": "12",
+    "clock_theme": "off",
     "scroll_speed": 30.0,
     "brightness": 40,
     "refresh_interval": 30,
@@ -162,6 +163,13 @@ DEFAULT_SETTINGS = {
 
     "weather": {
         "location": "",
+    },
+
+    "countdown": {
+        "game_id": "",
+        "away": "",
+        "home": "",
+        "start_at": "",
     },
 
     "developer": {

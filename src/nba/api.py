@@ -714,6 +714,7 @@ def games_from_scoreboard(data, league="nba"):
                 home_quarters=_quarter_scores(home),
                 away_lineup=away_lineup,
                 home_lineup=home_lineup,
+                start_at=str(event.get("date") or ""),
             )
         )
 
