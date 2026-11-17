@@ -416,6 +416,7 @@ def _draw_standby(
             ink or MUTED,
         )
     center_x = group_x + group_width // 2
+    plate = _christmas_theme(theme)
     if above is not None:
         kind, payload = above
         if kind == "countdown":
@@ -425,7 +426,9 @@ def _draw_standby(
                 center_x,
                 clock_y,
                 width,
+                height,
                 colors=colors,
+                plate=plate,
             )
         else:
             _draw_weather_line(
@@ -437,6 +440,7 @@ def _draw_standby(
                 width,
                 y=max(0, clock_y - 8),
                 colors=colors,
+                plate=plate,
             )
     if bottom is not None:
         kind, payload = bottom
@@ -449,6 +453,7 @@ def _draw_standby(
                 height,
                 width,
                 colors=colors,
+                plate=plate,
             )
         else:
             _draw_live_line(
@@ -459,6 +464,7 @@ def _draw_standby(
                 height,
                 width,
                 colors=colors,
+                plate=plate,
             )
 
     date_width = get_4x5_width(date_text)
@@ -490,7 +496,26 @@ def _theme_colors(theme):
     return clock_palette(theme)
 
 
-def _draw_countdown_line(draw, countdown, center_x, clock_y, width, colors=None):
+def _christmas_theme(theme):
+    if not theme:
+        return False
+    return theme.get("scene") == "christmas" or theme.get("id") == "christmas"
+
+
+def _draw_text_plate(draw, x, y, text_width, panel_width, panel_height):
+    """Black behind one line, one pixel past the text on every side."""
+    if text_width <= 0:
+        return
+    left = max(0, x - 1)
+    right = min(panel_width - 1, x + text_width)
+    top = max(0, y - 1)
+    bottom = min(panel_height - 1, y + 5)
+    draw.rectangle((left, top, right, bottom), fill=(0, 0, 0))
+
+
+def _draw_countdown_line(
+    draw, countdown, center_x, clock_y, width, height, colors=None, plate=False,
+):
     teams, remaining = countdown
     team_color = colors["mark"] if colors else MUTED
     time_color = colors["ink"] if colors else WHITE
@@ -508,12 +533,16 @@ def _draw_countdown_line(draw, countdown, center_x, clock_y, width, colors=None)
     if x + total > width - 2:
         x = max(2, width - 2 - total)
     y = max(0, clock_y - 8)
+    if plate:
+        _draw_text_plate(draw, x, y, total, width, height)
     for text, color in parts:
         print_4x5(draw, text, x, y, color)
         x += get_4x5_width(text) + gap
 
 
-def _draw_weather_line(draw, weather, center_x, clock_y, height, width, y=None, colors=None):
+def _draw_weather_line(
+    draw, weather, center_x, clock_y, height, width, y=None, colors=None, plate=False,
+):
     place, temperature, condition = weather
     place_color = colors["soft"] if colors else MUTED
     temp_color = colors["ink"] if colors else CYAN
@@ -536,12 +565,16 @@ def _draw_weather_line(draw, weather, center_x, clock_y, height, width, y=None, 
         x = max(2, width - 2 - total)
     if y is None:
         y = min(clock_y + 14, height - 5)
+    if plate:
+        _draw_text_plate(draw, x, y, total, width, height)
     for text, color in parts:
         print_4x5(draw, text, x, y, color)
         x += get_4x5_width(text) + gap
 
 
-def _draw_live_line(draw, slide, center_x, clock_y, height, width, colors=None):
+def _draw_live_line(
+    draw, slide, center_x, clock_y, height, width, colors=None, plate=False,
+):
     league, away, home = slide[0], slide[1], slide[2]
     away_text, home_text = slide[5], slide[6]
     situation = slide[7] if len(slide) > 7 else ""
@@ -559,6 +592,8 @@ def _draw_live_line(draw, slide, center_x, clock_y, height, width, colors=None):
     if x + total > width - 2:
         x = max(2, width - 2 - total)
     y = min(clock_y + 14, height - 5)
+    if plate:
+        _draw_text_plate(draw, x, y, total, width, height)
     league_color = colors["mark"] if colors else CYAN
     score_color = colors["ink"] if colors else WHITE
     situation_color = colors["soft"] if colors else MUTED

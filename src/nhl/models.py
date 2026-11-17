@@ -25,6 +25,7 @@ class HockeyGame:
     clock: str = ""
 
     broadcast: str = ""
+    broadcast_logo: str = ""
 
     intermission: bool = False
     shootout: bool = False

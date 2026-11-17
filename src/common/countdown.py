@@ -56,6 +56,23 @@ def format_remaining(seconds):
     return clock
 
 
+def kickoff_countdown(game, now=None):
+    """H:MM:SS until start, once a game is under two hours away."""
+    kickoff = parse_kickoff(getattr(game, "start_at", "") or "")
+    if kickoff is None:
+        return ""
+    moment = now or datetime.now(timezone.utc)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    remaining = (kickoff - moment.astimezone(timezone.utc)).total_seconds()
+    if remaining >= 2 * 60 * 60:
+        return ""
+    if remaining <= 0:
+        return "STARTING SOON"
+    text = format_remaining(remaining)
+    return text or "STARTING SOON"
+
+
 # Statuses that still belong to a game that has not started.
 _WAITING = {
     "",

@@ -1,4 +1,4 @@
-from common.broadcast import draw_broadcast_logo
+from common.broadcast import draw_broadcast_logo, game_logo_url
 from common.fonts import (
     get_3x5_width,
     gfx_5x7_width,
@@ -201,7 +201,7 @@ def _draw_pregame(image, draw, game, offset_x, settings):
         GREY,
     )
     if game.broadcast:
-        draw_broadcast_logo(image, game.broadcast, 31 + offset_x, 24, settings)
+        draw_broadcast_logo(image, game.broadcast, 31 + offset_x, 24, settings, game_logo_url(game))
 
 
 def render_basketball_game_onto(image, draw, game, offset_x, settings):

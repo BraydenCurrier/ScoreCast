@@ -66,6 +66,44 @@ class ClockThemeTests(unittest.TestCase):
         self.assertNotIn(splash.BLUE, _pixels(image))
         self.assertNotEqual(image.getpixel((8, 0)), splash.NAVY)
 
+    def test_christmas_status_box_hugs_the_line(self):
+        when_bits = dict(
+            time_text="9:04:05",
+            period="PM",
+            theme=CHRISTMAS,
+            phase=4.2,
+        )
+        short = ("HOME", "28", "SNOW")
+        long = ("W" * 18, "-80", "OVERCAST")
+
+        def draw(above, bottom):
+            return splash._draw_standby(
+                384, 32, datetime(2026, 12, 24, 21, 4, 5), 4,
+                bottom=bottom, above=above, **when_bits,
+            )
+
+        quiet = draw(("weather", short), ("weather", short))
+        busy = draw(("weather", long), ("weather", long))
+        colors = {tuple(clock_palette(CHRISTMAS)[name]) for name in ("ink", "mark", "soft")}
+
+        def ink_span(image, y):
+            xs = [
+                x for x in range(384)
+                if image.getpixel((x, y)) in colors
+            ]
+            return min(xs), max(xs)
+
+        quiet_top = ink_span(quiet, 4)
+        busy_top = ink_span(busy, 4)
+        self.assertLess(quiet_top[1] - quiet_top[0], busy_top[1] - busy_top[0])
+        for image, y in ((quiet, 2), (busy, 2), (quiet, 24)):
+            left, right = ink_span(image, y + 2)
+            self.assertEqual(image.getpixel((left - 1, y + 2)), (0, 0, 0))
+            self.assertEqual(image.getpixel((right + 1, y + 2)), (0, 0, 0))
+            self.assertEqual(image.getpixel((left, y - 1)), (0, 0, 0))
+            self.assertEqual(image.getpixel((left, y + 5)), (0, 0, 0))
+            self.assertNotEqual(image.getpixel((left - 2, y + 2)), (0, 0, 0))
+
     def test_christmas_is_the_only_seasonal_theme(self):
         self.assertEqual(normalize_clock_theme("christmas"), "christmas")
         theme = theme_by_id("christmas")

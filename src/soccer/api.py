@@ -2,7 +2,10 @@ import json
 
 import requests
 
-from common.broadcast import format_broadcast as _get_broadcast
+from common.broadcast import (
+    broadcast_logo_url as _broadcast_logo,
+    format_broadcast as _get_broadcast,
+)
 from common.espn_scoreboard import (
     competitor_stat_int,
     safe_int,
@@ -395,6 +398,10 @@ def _parse_events(data, league_id):
                     event["date"]
                 ),
                 broadcast=_get_broadcast(
+                    event,
+                    competition,
+                ),
+                broadcast_logo=_broadcast_logo(
                     event,
                     competition,
                 ),

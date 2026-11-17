@@ -6,6 +6,8 @@ import time
 
 from PIL import Image, ImageDraw
 
+from common.broadcast import game_logo_url
+from common.countdown import kickoff_countdown
 from common.football_play import challenge_details
 from common.fonts import (
     get_4x5_width,
@@ -752,7 +754,9 @@ def _draw_scheduled(image, draw, game, settings, style):
     home = str(getattr(game, "home", "")).upper()
     week = getattr(game, "week", "")
     date = str(getattr(game, "date", "") or "").strip()
-    start_time = str(getattr(game, "start_time", "") or "").strip()
+    start_time = kickoff_countdown(game) or str(
+        getattr(game, "start_time", "") or ""
+    ).strip()
     broadcast = str(getattr(game, "broadcast", "") or "").strip()
 
     _draw_team_column(
@@ -797,6 +801,7 @@ def _draw_scheduled(image, draw, game, settings, style):
             cx,
             25,
             settings,
+            game_logo_url(game),
         )
         if not drawn:
             print_3x5(

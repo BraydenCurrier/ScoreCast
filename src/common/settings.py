@@ -172,6 +172,14 @@ DEFAULT_SETTINGS = {
         "start_at": "",
     },
 
+    "message": {
+        "enabled": False,
+        "scroll": True,
+        "speed": 30,
+        "background": "#000000",
+        "items": [],
+    },
+
     "developer": {
         "test_games": False,
         "score_slide": True,

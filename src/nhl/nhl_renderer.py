@@ -1,6 +1,6 @@
 from PIL import Image
 
-from common.broadcast import resolve_broadcast_identifier
+from common.broadcast import broadcast_logo_image, game_logo_url
 from common.fonts import (
     get_3x5_width,
     get_4x5_width,
@@ -13,7 +13,7 @@ from common.fonts import (
     print_clock,
     print_gfx_5x7,
 )
-from common.logo_store import draw_logo, get_selected_logo_variant, load_logo
+from common.logo_store import draw_logo, get_selected_logo_variant
 from nhl.colors import team_color
 
 WHITE = (255, 255, 255)
@@ -217,15 +217,9 @@ def _draw_situation_marks(draw, game, offset_x):
         _draw_puck(draw, CARD_WIDTH - 5 + offset_x, CLOCK_Y + 1)
 
 
-def _draw_broadcast(image, broadcast, offset_x, away_record, home_record, settings):
-    identifier = resolve_broadcast_identifier(broadcast)
-    if not identifier:
-        return
-
-    try:
-        variant = get_selected_logo_variant(settings or {}, "broadcast", identifier)
-        logo = load_logo(league="broadcast", identifier=identifier, variant=variant)
-    except (FileNotFoundError, ValueError, OSError, KeyError):
+def _draw_broadcast(image, broadcast, offset_x, away_record, home_record, settings, logo_url=""):
+    logo = broadcast_logo_image(broadcast, settings, logo_url)
+    if logo is None:
         return
 
     left_end = 2 + get_3x5_width(away_record)
@@ -267,7 +261,15 @@ def _draw_pregame(image, draw, game, offset_x, settings):
     away_record = _record_text(game.away_wins, game.away_losses, game.away_ot_losses)
     home_record = _record_text(game.home_wins, game.home_losses, game.home_ot_losses)
     if game.broadcast:
-        _draw_broadcast(image, game.broadcast, offset_x, away_record, home_record, settings)
+        _draw_broadcast(
+            image,
+            game.broadcast,
+            offset_x,
+            away_record,
+            home_record,
+            settings,
+            game_logo_url(game),
+        )
     print_3x5(draw, away_record, 2 + offset_x, RECORD_Y, GREY)
     print_3x5_right(draw, home_record, CARD_WIDTH - 2 + offset_x, RECORD_Y, GREY)
 

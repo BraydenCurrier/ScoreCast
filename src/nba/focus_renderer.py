@@ -2,7 +2,8 @@ import contextvars
 
 from PIL import Image, ImageDraw
 
-from common.broadcast import draw_broadcast_logo
+from common.broadcast import draw_broadcast_logo, game_logo_url
+from common.countdown import kickoff_countdown
 from common.football_focus import (
     SCORE_SLIDE,
     _draw_score_glyphs,
@@ -553,11 +554,15 @@ def _draw_scheduled(image, draw, game, settings):
     date = str(getattr(game, "date", "") or "").strip()
     if date:
         print_4x5_centered(draw, date, cx, 2, DIM_WHITE)
-    start = str(getattr(game, "start_time", "") or "").strip()
+    start = kickoff_countdown(game) or str(
+        getattr(game, "start_time", "") or ""
+    ).strip()
     if start:
         print_gfx_5x7_centered(draw, start, cx, 11, WHITE)
     broadcast = str(getattr(game, "broadcast", "") or "").strip()
-    if broadcast and not draw_broadcast_logo(image, broadcast, cx, 25, settings):
+    if broadcast and not draw_broadcast_logo(
+        image, broadcast, cx, 25, settings, game_logo_url(game),
+    ):
         print_4x5_centered(draw, broadcast, cx, 24, DIM_WHITE)
 
 

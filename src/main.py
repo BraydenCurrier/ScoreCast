@@ -15,12 +15,26 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image, ImageDraw
 
 from common.matrix import PANEL_REFRESH_HZ, create_matrix
+from common.message import render_message_frame
+from common.refresh import (
+    QUIET_REFRESH_SECONDS,
+    due_sports as sports_that_are_due,
+    live_refresh_seconds,
+    next_kickoff,
+    schedule_is_current,
+    sport_refresh_seconds,
+)
 from common.game_ids import game_id as shared_game_id
 from common.game_ids import game_is_shown
 from common.settings import get_developer_settings, get_settings, update_settings
 from common.timezone import ensure_network_timezone, start_timezone_refresh, timezone_status
 from common.weather import start_weather_refresh
 from common.splash import render_idle_splash
+from common.ticker_lights import (
+    Twinkle,
+    christmas_lights_enabled,
+    drape_christmas_lights,
+)
 from common.ticker_scroll import (
     build_strip,
     column_refreshes,
@@ -173,13 +187,6 @@ _built_games_revision = None
 _built_settings_signature = None
 _ticker_revision = 0
 
-# How often a league is fetched depends on the fastest game it has.
-# Visible live games use the settings interval. A live game that is
-# hidden still updates every minute. Pregame waits 10 minutes, and a
-# league that is only finals (or has nothing today) waits 30.
-PREGAME_REFRESH_SECONDS = 10 * 60
-HIDDEN_LIVE_REFRESH_SECONDS = 60
-QUIET_REFRESH_SECONDS = 30 * 60
 # A failed feed is tried again shortly. A quiet league is not.
 RETRY_AFTER_FAILURE_SECONDS = 5
 STARTUP_FETCH_DEADLINE = 90
@@ -189,6 +196,7 @@ _sport_fetched_at = {}
 _sport_intervals = {}
 _schedule_revision = None
 _schedule_mark = None
+_schedule_until = None
 _bets_fetched_at = 0.0
 _mode_synced_at = 0.0
 
@@ -243,57 +251,10 @@ def fetch_all_sports(sports=None):
     return results, errors
 
 
-def _live_refresh_seconds(settings):
-    try:
-        return max(5, int(settings.get("refresh_interval", 30)))
-    except (TypeError, ValueError):
-        return 30
-
-
 def _format_refresh_interval(seconds):
     if seconds >= 60 and seconds % 60 == 0:
         return f"{seconds // 60}m"
     return f"{seconds}s"
-
-
-def _game_phase(game):
-    """live, pregame, or final. Stocks use the market session."""
-    if is_stock_quote(game):
-        state = str(getattr(game, "market_state", "") or "").upper()
-        return "live" if state == "LIVE" else "final"
-
-    status = (
-        str(getattr(game, "status", "") or "")
-        .upper()
-        .replace("_", " ")
-        .replace("-", " ")
-    )
-
-    if any(
-        word in status
-        for word in (
-            "FINAL",
-            "COMPLETE",
-            "POSTPONED",
-            "CANCELED",
-            "CANCELLED",
-            "FORFEIT",
-        )
-    ):
-        return "final"
-
-    if (
-        "SCHEDULE" in status
-        or "PREVIEW" in status
-        or status.strip() in {"PRE", "PREGAME"}
-    ):
-        return "pregame"
-
-    return "live"
-
-
-def _game_is_shown(game, settings, hidden=None):
-    return game_is_shown(game, settings)
 
 
 def _hidden_game_ids(settings):
@@ -301,60 +262,6 @@ def _hidden_game_ids(settings):
     if isinstance(hidden, str):
         hidden = [hidden]
     return {str(item) for item in hidden}
-
-
-def sport_refresh_seconds(sport, games, settings):
-    """Shortest interval this league needs right now."""
-    live_interval = _live_refresh_seconds(settings)
-    sport_games = [game for game in games if get_sport(game) == sport]
-
-    if sport == "fantasy":
-        fantasy = settings.get("fantasy") or {}
-        if not fantasy.get("enabled"):
-            return QUIET_REFRESH_SECONDS
-        try:
-            configured = int(fantasy.get("refresh_interval") or 120)
-        except (TypeError, ValueError):
-            configured = 120
-        return max(60, configured)
-
-    hidden = _hidden_game_ids(settings)
-
-    if sport == "stocks":
-        shown = [
-            game for game in sport_games
-            if _game_is_shown(game, settings, hidden)
-        ]
-        if not shown:
-            return QUIET_REFRESH_SECONDS
-        if any(_game_phase(game) == "live" for game in shown):
-            return live_interval
-        return PREGAME_REFRESH_SECONDS
-
-    if not sport_games:
-        return QUIET_REFRESH_SECONDS
-
-    shown_live = False
-    hidden_live = False
-    any_pregame = False
-
-    for game in sport_games:
-        phase = _game_phase(game)
-        if phase == "live":
-            if _game_is_shown(game, settings, hidden):
-                shown_live = True
-            else:
-                hidden_live = True
-        elif phase == "pregame":
-            any_pregame = True
-
-    if shown_live:
-        return live_interval
-    if hidden_live:
-        return HIDDEN_LIVE_REFRESH_SECONDS
-    if any_pregame:
-        return PREGAME_REFRESH_SECONDS
-    return QUIET_REFRESH_SECONDS
 
 
 def _schedule_mark_value(settings):
@@ -366,7 +273,7 @@ def _schedule_mark_value(settings):
         fantasy_interval = 120
 
     return (
-        _live_refresh_seconds(settings),
+        live_refresh_seconds(settings),
         tuple(sorted(_hidden_game_ids(settings))),
         tuple(sorted(str(item) for item in (settings.get("selected_games") or []))),
         bool(fantasy.get("enabled")),
@@ -376,11 +283,18 @@ def _schedule_mark_value(settings):
     )
 
 
-def _refresh_schedule(settings):
-    global _schedule_revision, _schedule_mark, _sport_intervals
+def _refresh_schedule(settings, moment=None):
+    global _schedule_revision, _schedule_mark, _sport_intervals, _schedule_until
 
     mark = _schedule_mark_value(settings)
-    if _schedule_revision == _games_revision and mark == _schedule_mark:
+    if schedule_is_current(
+        _schedule_revision,
+        _schedule_mark,
+        _schedule_until,
+        _games_revision,
+        mark,
+        moment,
+    ):
         return
 
     with _games_lock:
@@ -388,7 +302,13 @@ def _refresh_schedule(settings):
         games = list(_games)
 
     intervals = {
-        sport: sport_refresh_seconds(sport, games, settings)
+        sport: sport_refresh_seconds(
+            sport,
+            games,
+            settings,
+            moment,
+            sport_of=get_sport,
+        )
         for sport in SPORT_FETCHERS
     }
 
@@ -403,16 +323,12 @@ def _refresh_schedule(settings):
     _sport_intervals = intervals
     _schedule_revision = revision
     _schedule_mark = mark
+    _schedule_until = next_kickoff(games, moment)
 
 
-def sports_due(now, settings):
-    _refresh_schedule(settings)
-    due = []
-    for sport, interval in _sport_intervals.items():
-        fetched_at = _sport_fetched_at.get(sport)
-        if fetched_at is None or now - fetched_at >= interval:
-            due.append(sport)
-    return due
+def sports_due(now, settings, moment=None):
+    _refresh_schedule(settings, moment)
+    return sports_that_are_due(_sport_fetched_at, _sport_intervals, now)
 
 
 def bets_refresh_due(now, settings):
@@ -422,7 +338,7 @@ def bets_refresh_due(now, settings):
         False,
     ):
         return False
-    return now - _bets_fetched_at >= _live_refresh_seconds(settings)
+    return now - _bets_fetched_at >= live_refresh_seconds(settings)
 
 
 def mark_sports_fetched(sports, now):
@@ -1392,6 +1308,11 @@ if __name__ == "__main__":
         token = strip["token"]
         key = canvas_key(frame_canvas) if canvas_key is not None else None
         shown = ticker_canvas_state.get(key) if key is not None else None
+        show = strip.get("show")
+        # Bulbs change on the strip before the shift, so a column that
+        # scrolls on is already the brightness it should be now.
+        if show is not None:
+            show.advance(time.monotonic())
         # The hidden frame is the previous picture. Advancing one column
         # means that frame is two columns behind the one we are about to show.
         shifted = False
@@ -1418,6 +1339,14 @@ if __name__ == "__main__":
         if not shifted:
             paint_viewport(frame_image, strip["image"], origin, period)
             frame_canvas.SetImage(frame_image)
+            if show is not None and key is not None:
+                show.sync(key)
+        elif show is not None and key is not None:
+            try:
+                for x, y, red, green, blue in show.pokes(key, origin, DISPLAY_WIDTH):
+                    frame_canvas.SetPixel(x, y, red, green, blue)
+            except Exception:
+                traceback.print_exc()
 
         if key is not None:
             ticker_canvas_state[key] = (token, origin % period)
@@ -1501,6 +1430,8 @@ if __name__ == "__main__":
     presented_frame_signature = None
     presented_ticker_revision = None
     presented_leaderboard_page = None
+    presented_lights = None
+    presented_twinkle = None
 
 
     def note_external_frame():
@@ -1510,6 +1441,8 @@ if __name__ == "__main__":
         global presented_frame_signature
         global presented_ticker_revision
         global presented_leaderboard_page
+        global presented_lights
+        global presented_twinkle
         global next_column_due
 
         presented_scroll_column = None
@@ -1517,6 +1450,8 @@ if __name__ == "__main__":
         presented_frame_signature = None
         presented_ticker_revision = None
         presented_leaderboard_page = None
+        presented_lights = None
+        presented_twinkle = None
         next_column_due = None
 
     focus_game_index = 0
@@ -1567,24 +1502,40 @@ if __name__ == "__main__":
     }
 
     def ensure_ticker_strip(visible_games, settings):
+        lights = christmas_lights_enabled(settings)
         token = (
             _cache_signature,
             _ticker_revision,
             leaderboard_page_token(visible_games),
+            lights,
         )
         if token == ticker_strip["token"] and ticker_strip["rgb"] is not None:
             return ticker_strip
 
-        cards = [
-            (render_card(game, settings), get_game_step(game))
-            for game in visible_games
-        ]
+        cards = []
+        spans = []
+        cursor = 0
+        for game in visible_games:
+            card = render_card(game, settings)
+            step = get_game_step(game)
+            cards.append((card, step))
+            spans.append((cursor, card.width, step))
+            cursor += step
         image, period = build_strip(cards)
+        show = None
+        if lights and image is not None:
+            drape_christmas_lights(image, spans)
+            show = Twinkle(image, spans)
         ticker_strip["token"] = token
         ticker_strip["image"] = image
         ticker_strip["period"] = period
         ticker_strip["height"] = image.height if image is not None else MATRIX_HEIGHT
-        ticker_strip["rgb"] = image.tobytes() if image is not None else None
+        ticker_strip["show"] = show
+        ticker_strip["rgb"] = (
+            show.rgb if show is not None
+            else image.tobytes() if image is not None
+            else None
+        )
         return ticker_strip
 
     if scroll_columns is not None and capture_buffer is not None:
@@ -1778,6 +1729,20 @@ if __name__ == "__main__":
                     sleep_time
                 )
 
+            continue
+
+        try:
+            message_frame = render_message_frame(settings, now)
+        except Exception:
+            traceback.print_exc()
+            message_frame = None
+        if message_frame is not None:
+            note_external_frame()
+            present_frame(message_frame)
+            frame_elapsed = time.monotonic() - frame_started_at
+            sleep_time = frame_delay - frame_elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
             continue
 
         focus_settings = get_focus_settings(settings)
@@ -2010,12 +1975,16 @@ if __name__ == "__main__":
         # The panel only moves when the integer column changes.
         # Identical columns already on the matrix stay there.
         leaderboard_page = leaderboard_page_token(visible_games)
+        lights = christmas_lights_enabled(settings)
+        twinkle_phase = int(time.monotonic() * 8) if lights else 0
         if (
             scroll_column == presented_scroll_column
             and current_game == presented_game_index
             and _cache_signature == presented_frame_signature
             and _ticker_revision == presented_ticker_revision
             and leaderboard_page == presented_leaderboard_page
+            and lights == presented_lights
+            and twinkle_phase == presented_twinkle
             and presented_frame_signature is not None
         ):
             sleep_ticker_frame()
@@ -2028,17 +1997,21 @@ if __name__ == "__main__":
 
         x = scroll_column
         game_index = current_game
+        spans = []
 
         while x < DISPLAY_WIDTH:
             game = visible_games[game_index]
-            frame_image.paste(
-                render_card(game, settings),
-                (x, 0),
-            )
-            x += get_game_step(game)
+            card = render_card(game, settings)
+            frame_image.paste(card, (x, 0))
+            step = get_game_step(game)
+            spans.append((x, card.width, step))
+            x += step
             game_index += 1
             if game_index >= len(visible_games):
                 game_index = 0
+
+        if lights:
+            drape_christmas_lights(frame_image, spans, time.monotonic())
 
         present_frame(frame_image)
 
@@ -2047,5 +2020,7 @@ if __name__ == "__main__":
         presented_frame_signature = _cache_signature
         presented_ticker_revision = _ticker_revision
         presented_leaderboard_page = leaderboard_page
+        presented_lights = lights
+        presented_twinkle = twinkle_phase
 
         sleep_ticker_frame()

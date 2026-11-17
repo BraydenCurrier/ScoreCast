@@ -19,6 +19,7 @@ class BasketballGame:
     home_losses: int = 0
 
     broadcast: str = ""
+    broadcast_logo: str = ""
 
     quarter: int = 0
     clock: str = ""

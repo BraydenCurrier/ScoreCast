@@ -2317,6 +2317,131 @@ body.logo-sheet-open {
     margin-bottom: 14px;
 }
 
+.message-stage {
+    width: 100%;
+    height: 48px;
+    overflow: hidden;
+    background: #000;
+    border-radius: 8px;
+}
+
+.message-stage img {
+    display: block;
+    height: 48px;
+    width: 100%;
+    max-width: none;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+}
+
+@keyframes message-marquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+}
+
+.message-design {
+    overflow-x: auto;
+    background: #000;
+    border-radius: 8px;
+    line-height: 0;
+}
+
+.message-design img {
+    height: 96px;
+    width: auto;
+    max-width: none;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+}
+
+.message-position,
+.message-style,
+.message-nudge {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.message-position label,
+.message-style label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 650;
+}
+
+.message-style .select-input,
+.message-position .number-input {
+    width: 96px;
+    margin: 0;
+}
+
+.message-nudge button,
+.message-library-item button,
+.message-library-item .quiet-button {
+    min-height: 36px;
+}
+
+.message-thumb {
+    display: block;
+    height: 32px;
+    width: auto;
+    image-rendering: pixelated;
+    background: #000;
+    border-radius: 4px;
+}
+
+.message-upload {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.message-upload input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+}
+
+.message-library {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.message-library-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.message-library-item img {
+    height: 32px;
+    width: auto;
+    image-rendering: pixelated;
+    background: #000;
+    border-radius: 4px;
+}
+
+.message-library-item form {
+    margin: 0;
+}
+
+.message-error {
+    margin: 0 0 12px;
+    color: var(--danger);
+    font-size: 14px;
+    font-weight: 650;
+}
+
 .theme-preview {
     display: block;
     width: 100%;

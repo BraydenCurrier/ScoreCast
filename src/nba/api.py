@@ -3,7 +3,10 @@ import re
 
 import requests
 
-from common.broadcast import format_broadcast as _get_broadcast
+from common.broadcast import (
+    broadcast_logo_url as _broadcast_logo,
+    format_broadcast as _get_broadcast,
+)
 from common.espn_scoreboard import (
     bonus_side,
     possession_abbr,
@@ -666,6 +669,10 @@ def games_from_scoreboard(data, league="nba"):
                 ),
 
                 broadcast=_get_broadcast(
+                    event,
+                    competition,
+                ),
+                broadcast_logo=_broadcast_logo(
                     event,
                     competition,
                 ),

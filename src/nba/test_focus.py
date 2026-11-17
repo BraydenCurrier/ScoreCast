@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -368,6 +369,14 @@ class NbaFocusRenderTests(unittest.TestCase):
             self.assertEqual(image.size, (384, 32))
         self.assertNotEqual(live.tobytes(), final.tobytes())
         self.assertNotEqual(live.tobytes(), scheduled.tobytes())
+
+    def test_a_near_start_replaces_the_scheduled_time(self):
+        game = _live(status="Scheduled", start_time="7:30", date="Nov 14")
+        with patch("nba.focus_renderer.kickoff_countdown", return_value="1:30:00"):
+            soon = render_nba_focus(game, {})
+        with patch("nba.focus_renderer.kickoff_countdown", return_value=""):
+            later = render_nba_focus(game, {})
+        self.assertNotEqual(soon.tobytes(), later.tobytes())
 
 
 if __name__ == "__main__":

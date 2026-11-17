@@ -24,6 +24,7 @@ class SoccerGame:
     period: int = 0
     clock: str = ""
     broadcast: str = ""
+    broadcast_logo: str = ""
 
     league_id: str = ""
     league_name: str = ""

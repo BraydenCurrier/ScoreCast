@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from common.countdown import (
     can_countdown,
@@ -7,6 +7,7 @@ from common.countdown import (
     countdown_line,
     countdown_settings_for,
     format_remaining,
+    kickoff_countdown,
 )
 
 
@@ -68,6 +69,35 @@ class CountdownTests(unittest.TestCase):
         self.assertFalse(can_countdown(_game(start_at=""), now=now))
         self.assertIn("On the clock", countdown_button("nfl:99", True))
         self.assertIn('value="nfl:99"', countdown_button("nfl:99", False))
+
+    def test_focus_counts_down_inside_two_hours(self):
+        kickoff = datetime(2026, 11, 15, 1, 0, tzinfo=timezone.utc)
+        game = _game(start_at=kickoff.isoformat())
+        self.assertEqual(kickoff_countdown(game, now=kickoff), "STARTING SOON")
+        self.assertEqual(
+            kickoff_countdown(game, now=kickoff + timedelta(minutes=5)),
+            "STARTING SOON",
+        )
+        self.assertEqual(
+            kickoff_countdown(game, now=kickoff - timedelta(hours=2)),
+            "",
+        )
+        self.assertEqual(
+            kickoff_countdown(game, now=kickoff - timedelta(hours=3)),
+            "",
+        )
+        self.assertEqual(
+            kickoff_countdown(game, now=kickoff - timedelta(hours=1)),
+            "1:00:00",
+        )
+        self.assertEqual(
+            kickoff_countdown(game, now=kickoff - timedelta(minutes=30)),
+            "0:30:00",
+        )
+        self.assertEqual(
+            kickoff_countdown(_game(start_at=""), now=kickoff - timedelta(hours=1)),
+            "",
+        )
 
 
 if __name__ == "__main__":

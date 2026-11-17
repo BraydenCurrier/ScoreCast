@@ -469,6 +469,7 @@ def page_header(active_page="games"):
         "logos",
         "favorites",
         "themes",
+        "messages",
         "settings",
         "profiles",
     )
@@ -498,6 +499,7 @@ def page_header(active_page="games"):
         "profiles": ("Settings", "Display, updates, and access"),
         "modes": ("Modes", "Schedules that change the board"),
         "stocks": ("Stocks", "Quotes that scroll on the board"),
+        "messages": ("Messages", "Text and pictures on the board"),
     }
     page_title, page_lede = page_titles.get(
         active_page,
@@ -618,6 +620,7 @@ def page_header(active_page="games"):
             </div>
             <a class="more-link" href="/modes">Modes</a>
             <a class="more-link" href="/stocks">Stocks</a>
+            <a class="more-link" href="/messages">Messages</a>
             <a class="more-link" href="/fantasy">Fantasy</a>
             <a class="more-link" href="/players">Players</a>
             <a class="more-link" href="/favorites">Favorites</a>
@@ -9454,6 +9457,120 @@ def save_settings():
         request_weather_refresh()
 
     return autosave_response("/settings")
+
+
+def _message_page(error=""):
+    from common.message import list_images, message_from_settings
+    from messages.page import render_message_page
+
+    settings = get_settings()
+    return render_message_page(
+        page_styles(),
+        page_header("messages"),
+        message_from_settings(settings),
+        list_images(),
+        error=error,
+    )
+
+
+@app.route("/messages")
+@login_required
+def messages_page():
+    return _message_page(request.args.get("error") or "")
+
+
+@app.route("/messages", methods=["POST"])
+@login_required
+def save_message():
+    from common.message import message_from_form
+    from common.settings import update_settings
+
+    update_settings({"message": message_from_form(request.form)})
+    return autosave_response("/messages")
+
+
+@app.route("/messages/preview.png")
+@login_required
+def message_preview():
+    from io import BytesIO
+
+    from common.message import message_from_settings, render_play_strip, render_strip
+
+    message = message_from_settings(get_settings())
+    playing = request.args.get("play") == "1"
+    strip = render_play_strip(message) if playing else render_strip(message)
+    buffer = BytesIO()
+    strip.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = send_file(buffer, mimetype="image/png")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/messages/upload", methods=["POST"])
+@login_required
+def upload_message_image():
+    from common.message import (
+        MessageError,
+        content_right,
+        message_from_settings,
+        new_item_id,
+        save_message_image,
+    )
+    from common.settings import update_settings
+
+    upload = request.files.get("image")
+    payload = upload.read() if upload is not None else b""
+    try:
+        image_id = save_message_image(payload)
+    except MessageError as error:
+        return redirect(url_for("messages_page", error=str(error)))
+
+    message = message_from_settings(get_settings())
+    message["items"].append({
+        "id": new_item_id(),
+        "kind": "image",
+        "image": image_id,
+        "x": min(1600, content_right(message) + (8 if message["items"] else 0)),
+        "y": 0,
+    })
+    update_settings({"message": message})
+    return redirect(url_for("messages_page"))
+
+
+@app.route("/messages/image/delete", methods=["POST"])
+@login_required
+def delete_message_image_route():
+    from common.message import (
+        MessageError,
+        delete_message_image,
+        drop_image_items,
+        message_from_settings,
+    )
+    from common.settings import update_settings
+
+    image_id = request.form.get("image") or ""
+    try:
+        delete_message_image(image_id)
+    except MessageError as error:
+        return redirect(url_for("messages_page", error=str(error)))
+    update_settings({
+        "message": drop_image_items(message_from_settings(get_settings()), image_id),
+    })
+    return redirect(url_for("messages_page"))
+
+
+@app.route("/messages/image/<image_id>.png")
+@login_required
+def message_image_file(image_id):
+    from common.message import image_path
+
+    path = image_path(image_id)
+    if path is None or not path.is_file():
+        abort(404)
+    response = send_file(path, mimetype="image/png")
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/clock-themes")

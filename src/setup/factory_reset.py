@@ -22,6 +22,7 @@ STATE_FILES = (
 
 STATE_DIRS = (
     "logos",
+    "messages",
 )
 
 TEMP_DIRS = (

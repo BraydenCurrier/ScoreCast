@@ -5,7 +5,10 @@ import json
 import requests
 
 from cfb.models import CollegeFootballGame
-from common.broadcast import format_broadcast as _get_broadcast
+from common.broadcast import (
+    broadcast_logo_url as _broadcast_logo,
+    format_broadcast as _get_broadcast,
+)
 from common.football_week import MONDAY, date_span, week_date_range
 from common.football_play import (
     box_totals_for,
@@ -629,6 +632,10 @@ def get_today_games(conference_groups=None):
                 ),
 
                 broadcast=_get_broadcast(
+                    event,
+                    competition,
+                ),
+                broadcast_logo=_broadcast_logo(
                     event,
                     competition,
                 ),

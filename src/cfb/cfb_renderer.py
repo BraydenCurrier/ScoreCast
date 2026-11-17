@@ -1,7 +1,7 @@
 from common.fonts import print_3x5, print_3x5_right, print_4x5, print_4x5_centered, print_4x5_right, print_clock, print_gfx_5x7, draw_text_right
 from cfb.colors import GREY, WHITE, YELLOW, BALL_BROWN, team_color
 from common.logo_store import draw_logo, get_selected_logo_variant
-from common.broadcast import draw_broadcast_logo
+from common.broadcast import draw_broadcast_logo, game_logo_url
 
 LOGO_SIZE = 30
 CARD_WIDTH = 102
@@ -211,7 +211,7 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
         print_4x5(draw, weekNumber, 19 + offset_x, 11, WHITE)
         #date
         print_4x5(draw, game.date, 54 + offset_x, 11, WHITE)
-        draw_broadcast_logo(image, game.broadcast, 50 + offset_x, 24, settings)
+        draw_broadcast_logo(image, game.broadcast, 50 + offset_x, 24, settings, game_logo_url(game))
 
         # records
         print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 18 + offset_x, 22, GREY)

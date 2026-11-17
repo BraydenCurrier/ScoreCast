@@ -1,6 +1,7 @@
 from PIL import Image, ImageDraw
 
-from common.broadcast import draw_broadcast_logo
+from common.broadcast import draw_broadcast_logo, game_logo_url
+from common.countdown import kickoff_countdown
 from common.fonts import (
     get_3x5_width,
     get_4x5_width,
@@ -442,7 +443,9 @@ def _draw_scheduled(image, draw, game, settings):
 
     cx = FOCUS_WIDTH // 2
     date = str(getattr(game, "date", "") or "").strip()
-    start_time = str(getattr(game, "start_time", "") or "").strip()
+    start_time = kickoff_countdown(game) or str(
+        getattr(game, "start_time", "") or ""
+    ).strip()
     broadcast = str(getattr(game, "broadcast", "") or "").strip()
 
     if date:
@@ -450,7 +453,9 @@ def _draw_scheduled(image, draw, game, settings):
     if start_time:
         print_gfx_5x7_centered(draw, start_time, cx, 11, YELLOW)
     if broadcast:
-        drawn = draw_broadcast_logo(image, broadcast, cx, 25, settings)
+        drawn = draw_broadcast_logo(
+            image, broadcast, cx, 25, settings, game_logo_url(game),
+        )
         if not drawn:
             print_3x5(
                 draw,

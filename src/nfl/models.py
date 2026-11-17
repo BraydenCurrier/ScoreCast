@@ -27,6 +27,7 @@ class FootballGame:
     yardline_number: int
 
     broadcast: str = ""
+    broadcast_logo: str = ""
 
     date: str = "5-6-26"
     week: int = 0

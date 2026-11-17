@@ -1,5 +1,5 @@
 from mlb.colors import YELLOW, WHITE, GREY, RED, team_color
-from common.broadcast import draw_broadcast_logo
+from common.broadcast import draw_broadcast_logo, game_logo_url
 from common.logo_store import draw_logo, get_selected_logo_variant
 from common.fonts import (
     print_3x5,
@@ -146,7 +146,7 @@ def _draw_pregame(image, draw, game, offset_x, settings):
         GREY,
     )
     if game.broadcast:
-        draw_broadcast_logo(image, game.broadcast, 31 + offset_x, 24, settings)
+        draw_broadcast_logo(image, game.broadcast, 31 + offset_x, 24, settings, game_logo_url(game))
 
 
 def _draw_scores(draw, game, offset_x, y):

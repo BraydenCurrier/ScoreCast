@@ -5,7 +5,10 @@ from urllib.parse import urlencode
 
 import requests
 
-from common.broadcast import format_broadcast as _get_broadcast
+from common.broadcast import (
+    broadcast_logo_url as _broadcast_logo,
+    format_broadcast as _get_broadcast,
+)
 from common.football_week import TUESDAY, week_date_range
 from common.http import failure_text, get_body
 from common.timezone import format_local_time, get_local_timezone
@@ -480,6 +483,10 @@ def get_today_games():
             ),
 
             broadcast=_get_broadcast(
+                event,
+                competition,
+            ),
+            broadcast_logo=_broadcast_logo(
                 event,
                 competition,
             ),
