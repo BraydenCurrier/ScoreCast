@@ -5,17 +5,24 @@ from datetime import datetime, timedelta
 from common.timezone import get_local_timezone
 
 # Python weekday: Monday=0 ... Sunday=6
+WEDNESDAY = 2
 THURSDAY = 3
 MONDAY = 0
 TUESDAY = 1
 
 
-def week_date_range(*, hold_until_weekday: int, now=None):
+def week_date_range(
+    *,
+    hold_until_weekday: int,
+    now=None,
+    start_weekday: int = THURSDAY,
+):
     """
-    Local Thursday-start football week, held through the given weekday night.
+    Local football week, held through the given weekday night.
 
-    CFB uses Monday (keep Saturday's games through Monday night).
-    NFL uses Tuesday (keep Sunday/Monday games through Tuesday night).
+    CFB starts Thursday and holds through Monday night.
+    NFL starts Wednesday so a Wednesday kickoff stays on the slate,
+    and holds finished games through Tuesday night.
     """
     if now is None:
         local = datetime.now(get_local_timezone())
@@ -24,14 +31,14 @@ def week_date_range(*, hold_until_weekday: int, now=None):
     else:
         local = now.astimezone(get_local_timezone())
 
-    days_since_thursday = (local.weekday() - THURSDAY) % 7
-    week_start = (local - timedelta(days=days_since_thursday)).replace(
+    days_since_start = (local.weekday() - start_weekday) % 7
+    week_start = (local - timedelta(days=days_since_start)).replace(
         hour=0,
         minute=0,
         second=0,
         microsecond=0,
     )
-    days_held = (hold_until_weekday - THURSDAY) % 7
+    days_held = (hold_until_weekday - start_weekday) % 7
     hold_end = week_start + timedelta(days=days_held + 1)
 
     if local >= hold_end:

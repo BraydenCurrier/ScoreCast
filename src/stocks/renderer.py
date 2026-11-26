@@ -8,12 +8,11 @@ from common.fonts import (
 from common.logo_store import load_logo
 
 WHITE = (255, 255, 255)
-YELLOW = (255, 235, 0)
-GREY = (70, 70, 70)
-GREEN = (0, 220, 80)
-RED = (220, 50, 50)
-DIM_GREEN = (0, 70, 28)
-DIM_RED = (70, 16, 16)
+PRICE_GOLD = (255, 208, 74)
+GREEN = (0, 230, 128)
+RED = (255, 72, 88)
+FLAT = (186, 194, 204)
+REFERENCE = (118, 124, 136)
 
 CARD_WIDTH = 120
 GRAPH_X = 2
@@ -29,7 +28,14 @@ def change_color(game):
         return GREEN
     if game.change < 0:
         return RED
-    return GREY
+    return FLAT
+
+
+def _shade(color, strength):
+    return tuple(
+        int(round(channel * strength))
+        for channel in color
+    )
 
 
 def format_price(price):
@@ -131,17 +137,20 @@ def draw_day_graph(draw, game, offset_x, left=GRAPH_X):
     if high - low < 1e-9:
         high = low + 1e-9
 
-    color = change_color(game)
-    fill = DIM_GREEN if game.change >= 0 else DIM_RED
+    line = change_color(game)
     baseline = GRAPH_Y + GRAPH_HEIGHT - 1
+    origin_x = offset_x + left
+    previous_y = None
     last_y = None
+    last_x = None
+    stroke = set()
 
     for index, price in enumerate(columns):
         if price is None:
-            last_y = None
+            previous_y = None
             continue
 
-        x = offset_x + left + index
+        x = origin_x + index
         y = _price_to_y(
             price,
             low,
@@ -150,17 +159,26 @@ def draw_day_graph(draw, game, offset_x, left=GRAPH_X):
             GRAPH_HEIGHT,
         )
 
+        span = max(1, baseline - y)
         for fill_y in range(y + 1, baseline + 1):
-            draw.point((x, fill_y), fill=fill)
+            fade = (fill_y - y) / span
+            strength = 0.62 * (1 - fade) ** 2.6
+            if strength < 0.04:
+                continue
+            draw.point((x, fill_y), fill=_shade(line, strength))
 
-        if last_y is not None:
-            step = 1 if y >= last_y else -1
-            for line_y in range(last_y, y + step, step):
-                draw.point((x, line_y), fill=color)
+        if previous_y is None:
+            draw.point((x, y), fill=line)
+            stroke.add((x, y))
         else:
-            draw.point((x, y), fill=color)
+            step = 1 if y >= previous_y else -1
+            for line_y in range(previous_y, y + step, step):
+                draw.point((x, line_y), fill=line)
+                stroke.add((x, line_y))
 
+        previous_y = y
         last_y = y
+        last_x = x
 
     if previous:
         previous_y = _price_to_y(
@@ -171,16 +189,16 @@ def draw_day_graph(draw, game, offset_x, left=GRAPH_X):
             GRAPH_HEIGHT,
         )
 
-        if GRAPH_Y <= previous_y <= GRAPH_Y + GRAPH_HEIGHT - 1:
+        if GRAPH_Y <= previous_y <= baseline:
             for x in range(width):
-                if x % 2 == 0:
-                    draw.point(
-                        (
-                            offset_x + left + x,
-                            previous_y,
-                        ),
-                        fill=GREY,
-                    )
+                if (x % 4) < 2:
+                    px = origin_x + x
+                    if (px, previous_y) in stroke:
+                        continue
+                    draw.point((px, previous_y), fill=REFERENCE)
+
+    if last_x is not None:
+        draw.point((last_x, last_y), fill=WHITE)
 
 
 def invert_if_black_logo(logo):
@@ -247,7 +265,7 @@ def render_game_strip_onto(image, draw, game, offset_x, settings):
         price,
         offset_x + CARD_WIDTH - 2 - price_width,
         2,
-        YELLOW,
+        PRICE_GOLD,
     )
 
     draw_day_graph(draw, game, offset_x, left=content_left)

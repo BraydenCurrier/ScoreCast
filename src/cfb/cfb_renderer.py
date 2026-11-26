@@ -15,6 +15,10 @@ def is_live(game):
     }
 
 
+def is_halftime(game):
+    return "HALF" in _normalized_status(game)
+
+
 def _normalized_status(game):
     status = str(game.status or "").strip().upper()
 
@@ -235,9 +239,12 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
             print_3x5(draw, f"{game.away_wins}-{game.away_losses}", 18 + offset_x, 22, GREY)
             print_3x5_right(draw, f"{game.home_wins}-{game.home_losses}", 83 + offset_x, 22, GREY)
         else:
+            halftime = is_halftime(game)
+            if halftime:
+                print_4x5_centered(draw, "HT", 51 + offset_x, 8, YELLOW)
             # College overtime is untimed. Show the period and which
             # possession of that overtime is in progress.
-            if int(game.quarter or 0) > 4:
+            elif int(game.quarter or 0) > 4:
                 extra = int(game.quarter) - 4
                 period = "OT" if extra == 1 else f"{extra}OT"
                 print_4x5_centered(draw, period, 51 + offset_x, 2, WHITE)
@@ -249,38 +256,67 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
             else:
                 print_4x5(draw, "Q" + str(game.quarter), 46 + offset_x, 2, WHITE)
                 print_clock(draw, game.clock, 52 + offset_x, 8, YELLOW)
-            
-            if has_down_and_distance(game):
-                down_and_distance = (
-                    ordinal_down(game.down)
-                    + "&"
-                    + str(game.distance)
-                )
 
-                print_4x5_centered(
-                    draw,
-                    down_and_distance,
-                    51 + offset_x,
-                    14,
-                    WHITE,
-                )
+            if not halftime:
+                if has_down_and_distance(game):
+                    down_and_distance = (
+                        ordinal_down(game.down)
+                        + "&"
+                        + str(game.distance)
+                    )
 
-            yard_text = _format_yardline(game)
+                    print_4x5_centered(
+                        draw,
+                        down_and_distance,
+                        51 + offset_x,
+                        14,
+                        WHITE,
+                    )
 
-            if yard_text:
-                print_4x5_centered(
-                    draw,
-                    yard_text,
-                    51 + offset_x,
-                    20,
-                    WHITE,
-                )
+                yard_text = _format_yardline(game)
 
-            # print possession football
-            if game.possession == game.away:
-                draw_possession_football(draw, 40 + offset_x, 3)
-            elif game.possession == game.home:
-                draw_possession_football(draw, 57 + offset_x, 3)
+                if yard_text:
+                    print_4x5_centered(
+                        draw,
+                        yard_text,
+                        51 + offset_x,
+                        20,
+                        WHITE,
+                    )
+
+                # print possession football
+                if game.possession == game.away:
+                    draw_possession_football(draw, 40 + offset_x, 3)
+                elif game.possession == game.home:
+                    draw_possession_football(draw, 57 + offset_x, 3)
+
+                if (
+                    game.possession in {
+                        game.away,
+                        game.home,
+                    }
+                    and has_field_position(game)
+                    and game.yardline_side in {
+                        game.away,
+                        game.home,
+                    }
+                ):
+                    possession_direction = (
+                        "OWN"
+                        if game.possession == game.yardline_side
+                        else "OPP"
+                    )
+
+                    draw_field_tracker(
+                        draw,
+                        23 + offset_x,
+                        29,
+                        game.yardline_number,
+                        possession_direction,
+                        game.possession,
+                        game.home,
+                        home_color,
+                    )
 
             # print scores centered
             if game.away_score < 10:
@@ -292,34 +328,6 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
                 draw_text_right(draw, game.home_score, 80 + offset_x, 14, YELLOW)
             else:
                 draw_text_right(draw, game.home_score, 84 + offset_x, 14, YELLOW)
-
-            if (
-                game.possession in {
-                    game.away,
-                    game.home,
-                }
-                and has_field_position(game)
-                and game.yardline_side in {
-                    game.away,
-                    game.home,
-                }
-            ):
-                possession_direction = (
-                    "OWN"
-                    if game.possession == game.yardline_side
-                    else "OPP"
-                )
-
-                draw_field_tracker(
-                    draw,
-                    23 + offset_x,
-                    29,
-                    game.yardline_number,
-                    possession_direction,
-                    game.possession,
-                    game.home,
-                    home_color,
-                )
 
 def render_game_strip_onto(image, draw, game, offset_x, settings):
     # away logo

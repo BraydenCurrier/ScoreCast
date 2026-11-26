@@ -18,6 +18,10 @@ def is_final(game):
     return _normalized_status(game).startswith("FINAL")
 
 
+def is_halftime(game):
+    return "HALF" in _normalized_status(game)
+
+
 def final_label(game):
     status = _normalized_status(game)
     try:
@@ -201,25 +205,34 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
         print_3x5_right(draw, f"{game.home_wins}-{game.home_losses}", 66 + offset_x, 22, GREY)
 
     else:
-        # quarter
-        print_4x5(draw, "Q" + str(game.quarter), 30 + offset_x, 2, WHITE)
-
-        # time
-        print_clock(draw, game.clock, 36 + offset_x, 8, YELLOW)
-        if game.yardline_number != 0:
-            # down and distance
-            downAndDistance = ordinal_down(game.down) + "&" + str(game.distance) 
-            print_4x5_centered(draw, downAndDistance, 35 + offset_x, 14, WHITE)
-
-            # yardline
-            yard = game.yardline_side + " " + str(game.yardline_number)
-            print_4x5_centered(draw, yard, 35 + offset_x, 20, WHITE)
-
-        # possession
-        if game.possession == game.away:
-            draw_possession_football(draw, 8 + offset_x, 10)
+        if is_halftime(game):
+            print_4x5_centered(draw, "HT", 35 + offset_x, 8, YELLOW)
         else:
-            draw_possession_football(draw, 56 + offset_x, 10)
+            # quarter
+            print_4x5(draw, "Q" + str(game.quarter), 30 + offset_x, 2, WHITE)
+
+            # time
+            print_clock(draw, game.clock, 36 + offset_x, 8, YELLOW)
+            if game.yardline_number != 0:
+                # down and distance
+                downAndDistance = ordinal_down(game.down) + "&" + str(game.distance)
+                print_4x5_centered(draw, downAndDistance, 35 + offset_x, 14, WHITE)
+
+                # yardline
+                yard = game.yardline_side + " " + str(game.yardline_number)
+                print_4x5_centered(draw, yard, 35 + offset_x, 20, WHITE)
+
+            # possession
+            if game.possession == game.away:
+                draw_possession_football(draw, 8 + offset_x, 10)
+            else:
+                draw_possession_football(draw, 56 + offset_x, 10)
+
+            # football field
+            if game.possession == game.yardline_side:
+                draw_field_tracker(draw, 7 + offset_x, 29, game.yardline_number, "OWN", game.possession, game.home, home_color)
+            else:
+                draw_field_tracker(draw, 7 + offset_x, 29, game.yardline_number, "OPP", game.possession, game.home, home_color)
 
         # print scores centered
         if game.away_score < 10:
@@ -231,12 +244,6 @@ def render_football_game_onto(image, draw, game, offset_x, settings):
             draw_text_right(draw, game.home_score, 61 + offset_x, 14, YELLOW)
         else:
             draw_text_right(draw, game.home_score, 64 + offset_x, 14, YELLOW)
-
-        # football field
-        if game.possession == game.yardline_side:
-            draw_field_tracker(draw, 7 + offset_x, 29, game.yardline_number, "OWN", game.possession, game.home, home_color);
-        else:
-            draw_field_tracker(draw, 7 + offset_x, 29, game.yardline_number, "OPP", game.possession, game.home, home_color);
 
 def render_game_strip_onto(image, draw, game, offset_x, settings):
     # away logo

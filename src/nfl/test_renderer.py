@@ -2,12 +2,15 @@ import unittest
 
 from PIL import Image, ImageDraw
 
+from common.fonts import print_4x5_centered
+from nfl.colors import YELLOW
 from nfl.models import FootballGame
 from nfl.nfl_renderer import (
     CARD_WIDTH,
     LOGO_SIZE,
     final_label,
     is_final,
+    is_halftime,
     render_game_strip_onto,
 )
 
@@ -98,6 +101,45 @@ class NflFinalCardTests(unittest.TestCase):
             _render(_game("STATUS_FINAL")).convert("RGB").tobytes(),
             overtime.convert("RGB").tobytes(),
         )
+
+
+class NflHalftimeCardTests(unittest.TestCase):
+    def test_halftime_statuses(self):
+        self.assertTrue(is_halftime(_game("STATUS_HALFTIME", quarter=2)))
+        self.assertTrue(is_halftime(_game("HALFTIME", quarter=2)))
+        self.assertTrue(is_halftime(_game("Half-Time", quarter=2)))
+        self.assertFalse(is_halftime(_game("STATUS_IN_PROGRESS", quarter=2)))
+        self.assertFalse(is_halftime(_game("STATUS_END_PERIOD", quarter=1)))
+
+    def test_halftime_card_says_ht_instead_of_q2_clock(self):
+        halftime = _render(_game("STATUS_HALFTIME", quarter=2))
+        live = _render(_game("STATUS_IN_PROGRESS", quarter=2))
+        mark = Image.new("RGB", halftime.size, (0, 0, 0))
+        print_4x5_centered(
+            ImageDraw.Draw(mark),
+            "HT",
+            LOGO_SIZE + 35,
+            8,
+            YELLOW,
+        )
+
+        self.assertTrue(_pixels(mark) <= _pixels(halftime))
+        self.assertFalse(_pixels(mark) <= _pixels(live))
+        self.assertNotIn(GRASS, _colors(halftime))
+        self.assertIn(GRASS, _colors(live))
+
+
+def _pixels(image):
+    raw = image.convert("RGB").tobytes()
+    width = image.width
+    points = set()
+    for index in range(0, len(raw), 3):
+        color = tuple(raw[index:index + 3])
+        if color == (0, 0, 0):
+            continue
+        pixel = index // 3
+        points.add((pixel % width, pixel // width, color))
+    return points
 
 
 if __name__ == "__main__":

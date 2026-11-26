@@ -9,7 +9,7 @@ from common.broadcast import (
     broadcast_logo_url as _broadcast_logo,
     format_broadcast as _get_broadcast,
 )
-from common.football_week import TUESDAY, week_date_range
+from common.football_week import TUESDAY, WEDNESDAY, week_date_range
 from common.http import failure_text, get_body
 from common.timezone import format_local_time, get_local_timezone
 
@@ -318,16 +318,18 @@ def _fetch_events_between(start_date, end_date):
     }
 
 
-def _get_slate_dates():
+def _get_slate_dates(now=None):
     """
     Return this football week's date range through Tuesday night.
 
-    Finished games stay on the ticker until Wednesday. The held Thursday
-    through Tuesday window is used directly so a Sunday or Monday refresh
-    does not start searching from "today" and drop Thursday/Friday games.
+    The week opens on Wednesday so a Wednesday night kickoff is on the
+    slate, then stays up with the rest of the week through Tuesday.
+    Finished games from the previous week come off Wednesday morning.
     """
     week_start, week_end = week_date_range(
         hold_until_weekday=TUESDAY,
+        start_weekday=WEDNESDAY,
+        now=now,
     )
     return week_start, week_end, frozenset()
 
