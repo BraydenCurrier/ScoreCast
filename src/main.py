@@ -24,6 +24,7 @@ from common.refresh import (
     schedule_is_current,
     sport_refresh_seconds,
 )
+from common.error_log import install_excepthook, record_error
 from common.game_ids import game_id as shared_game_id
 from common.game_ids import game_is_shown
 from common.settings import get_developer_settings, get_settings, update_settings
@@ -247,6 +248,7 @@ def fetch_all_sports(sports=None):
                 errors[sport] = exc
                 results[sport] = []
                 print(f"{sport.upper()} refresh failed: {exc}")
+                record_error(f"SPORT-{sport.upper()}", exc, source=sport)
 
     return results, errors
 
@@ -817,6 +819,11 @@ def render_card(game, settings):
             error,
         )
         traceback.print_exc()
+        record_error(
+            "CARD-DRAW",
+            f"{get_sport(game)}: {error}",
+            source="card",
+        )
 
         image = render_error_card(game, error)
         _card_cache[key] = image
@@ -1132,6 +1139,7 @@ def _sync_mode_selection(games):
             update_settings(patch)
     except Exception as error:
         print("Mode selection failed:", error)
+        record_error("MODE-SELECT", error, source="modes")
 
     _mode_synced_at = time.monotonic()
 
@@ -1150,6 +1158,7 @@ def refresh_games_background(due_sports, refresh_bets):
                 refresh_open_bets()
             except Exception as error:
                 print("Bet refresh failed:", error)
+                record_error("BETS-REFRESH", error, source="bets")
             _bets_fetched_at = time.monotonic()
             print("Using developer sample games")
             return
@@ -1196,12 +1205,14 @@ def refresh_games_background(due_sports, refresh_bets):
                 refresh_open_bets()
             except Exception as error:
                 print("Bet refresh failed:", error)
+                record_error("BETS-REFRESH", error, source="bets")
             _bets_fetched_at = time.monotonic()
 
         try:
             refresh_player_cards()
         except Exception as error:
             print("Player card refresh failed:", error)
+            record_error("PLAYERS-REFRESH", error, source="players")
 
     except Exception as e:
         if due_sports:
@@ -1210,6 +1221,7 @@ def refresh_games_background(due_sports, refresh_bets):
             "Games refresh failed; keeping previous data:",
             e,
         )
+        record_error("GAMES-REFRESH", e, source="refresh")
 
     finally:
         _refresh_in_progress = False
@@ -1233,6 +1245,7 @@ def run_web_server():
             server.serve_forever()
         except OSError as error:
             print(f"Web app could not bind port {port}: {error}")
+            record_error("WEB-BIND", f"port {port}: {error}", source="web")
 
     threading.Thread(
         target=serve,
@@ -1285,6 +1298,7 @@ def load_initial_games():
     return games, set(errors)
 
 if __name__ == "__main__":
+    install_excepthook()
     canvas_key, scroll_columns, capture_buffer = load_panel_shift()
     matrix = create_matrix()
     frame_canvas = matrix.CreateFrameCanvas()
@@ -1332,8 +1346,9 @@ if __name__ == "__main__":
                     origin,
                     DISPLAY_WIDTH,
                 ))
-            except Exception:
+            except Exception as error:
                 traceback.print_exc()
+                record_error("DISPLAY-DRAW", error, source="display")
                 shifted = False
 
         if not shifted:
@@ -1345,8 +1360,9 @@ if __name__ == "__main__":
             try:
                 for x, y, red, green, blue in show.pokes(key, origin, DISPLAY_WIDTH):
                     frame_canvas.SetPixel(x, y, red, green, blue)
-            except Exception:
+            except Exception as error:
                 traceback.print_exc()
+                record_error("DISPLAY-DRAW", error, source="display")
 
         if key is not None:
             ticker_canvas_state[key] = (token, origin % period)
@@ -1403,10 +1419,12 @@ if __name__ == "__main__":
             refresh_open_bets()
         except Exception as error:
             print("Bet tracker init deferred:", error)
+            record_error("BET-STORE", error, source="bets")
         try:
             refresh_player_cards()
         except Exception as error:
             print("Player card refresh deferred:", error)
+            record_error("PLAYERS-REFRESH", error, source="players")
 
         initial_games, failed_sports = load_initial_games()
         publish_games(initial_games)
@@ -1414,6 +1432,7 @@ if __name__ == "__main__":
             refresh_open_bets()
         except Exception as error:
             print("Bet refresh deferred:", error)
+            record_error("BETS-REFRESH", error, source="bets")
 
     current_game = 0
     scroll_x = 0.0
@@ -1733,8 +1752,9 @@ if __name__ == "__main__":
 
         try:
             message_frame = render_message_frame(settings, now)
-        except Exception:
+        except Exception as error:
             traceback.print_exc()
+            record_error("MESSAGE-DRAW", error, source="message")
             message_frame = None
         if message_frame is not None:
             note_external_frame()
@@ -1893,6 +1913,7 @@ if __name__ == "__main__":
         except Exception as error:
             print("Ticker rebuild failed:", error)
             traceback.print_exc()
+            record_error("TICKER-REBUILD", error, source="ticker")
             visible_games = _visible_games_cache or []
 
         if not visible_games:

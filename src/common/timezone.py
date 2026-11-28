@@ -343,6 +343,11 @@ def _refresh_loop() -> None:
             ensure_network_timezone(block=True, timeout=8)
         except Exception as error:
             print(f"Timezone refresh failed: {error}")
+            try:
+                from common.error_log import record_error
+                record_error("TIMEZONE", error, source="timezone")
+            except Exception:
+                pass
 
 
 def _next_delay() -> float:

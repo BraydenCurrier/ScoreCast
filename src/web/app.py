@@ -470,6 +470,7 @@ def page_header(active_page="games"):
         "favorites",
         "themes",
         "messages",
+        "logs",
         "settings",
         "profiles",
     )
@@ -500,6 +501,7 @@ def page_header(active_page="games"):
         "modes": ("Modes", "Schedules that change the board"),
         "stocks": ("Stocks", "Quotes that scroll on the board"),
         "messages": ("Messages", "Text and pictures on the board"),
+        "logs": ("Logs", "Error codes and what they mean"),
     }
     page_title, page_lede = page_titles.get(
         active_page,
@@ -626,6 +628,7 @@ def page_header(active_page="games"):
             <a class="more-link" href="/favorites">Favorites</a>
             <a class="more-link" href="/logos">Logos</a>
             <a class="more-link" href="/clock-themes">Clock themes</a>
+            <a class="more-link" href="/logs">Logs</a>
             <a class="more-link" href="/settings">Settings</a>
             <a class="more-link more-link-quiet" href="/logout">Sign out</a>
         </div>
@@ -1018,7 +1021,7 @@ def page_styles():
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="{font_href}" media="print" onload="this.media='all'">
     <noscript><link rel="stylesheet" href="{font_href}"></noscript>
-    <link rel="stylesheet" href="/static/app.css?v=38">
+    <link rel="stylesheet" href="/static/app.css?v=39">
     """ + """
     <script>
     (function () {
@@ -7558,6 +7561,42 @@ def delete_uploaded_logo():
     )
 
 
+@app.route("/logs")
+@login_required
+def logs_page():
+    from common.error_log import recent_errors, report_text
+    from logs.page import render_logs_page
+
+    entries = recent_errors()
+    return render_logs_page(
+        page_styles(),
+        page_header("logs"),
+        entries,
+        report_text(entries),
+    )
+
+
+@app.route("/logs/clear", methods=["POST"])
+@login_required
+def clear_logs_page():
+    from common.error_log import clear_errors
+
+    clear_errors()
+    return redirect("/logs")
+
+
+@app.errorhandler(Exception)
+def log_unhandled_error(error):
+    from werkzeug.exceptions import HTTPException
+
+    from common.error_log import record_error
+
+    if isinstance(error, HTTPException):
+        return error
+    record_error("WEB-ERROR", error, source="web")
+    return ("Something went wrong. The error was saved in Logs.", 500)
+
+
 @app.route("/settings")
 @login_required
 def settings_page():
@@ -7842,6 +7881,19 @@ def settings_page():
 <body>
     <div class="page">
         {page_header("settings")}
+
+        <div class="card">
+            <div class="settings-row">
+                <div class="settings-row-copy">
+                    <div class="settings-row-title">Error logs</div>
+                    <div class="hint">
+                        Codes and a short explanation when something fails.
+                        Copy the log and send it when a board needs help.
+                    </div>
+                </div>
+                <a class="quiet-button" href="/logs">View</a>
+            </div>
+        </div>
 
         <form method="POST" action="/save_settings" data-autosave="1">
             <div class="card">
@@ -9938,6 +9990,14 @@ try:
     init_bet_store()
 except Exception as error:
     print("Bet store init deferred:", error)
+    try:
+        from common.error_log import record_error
+        record_error("BET-STORE", error, source="bets")
+    except Exception:
+        pass
+
+from common.error_log import install_excepthook
+install_excepthook()
 
 register_bet_routes(
     app,

@@ -2569,3 +2569,74 @@ body.logo-sheet-open {
     font-weight: 600;
 }
 
+.log-intro {
+    margin: 0 0 14px;
+}
+
+.log-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.log-entry-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: baseline;
+}
+
+.log-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    font-weight: 750;
+    letter-spacing: 0.04em;
+    color: #f8fafc;
+}
+
+.log-when {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 650;
+    white-space: nowrap;
+}
+
+.log-summary {
+    margin: 8px 0 0;
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.log-details {
+    margin-top: 10px;
+}
+
+.log-details summary {
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.log-detail {
+    margin: 8px 0 0;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: var(--bg-inset);
+    color: var(--text);
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.log-report {
+    position: absolute;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+}
+

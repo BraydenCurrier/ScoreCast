@@ -329,6 +329,11 @@ def _load_saved_settings() -> dict[str, Any]:
         print(
             f"Unable to load settings from {SETTINGS_FILE}: {error}"
         )
+        try:
+            from common.error_log import record_error
+            record_error("SETTINGS-LOAD", error, source="settings")
+        except Exception:
+            pass
 
         corrupt_path = SETTINGS_FILE.with_suffix(
             SETTINGS_FILE.suffix + ".corrupt"
